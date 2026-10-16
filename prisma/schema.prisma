@@ -179,3 +179,20 @@ model LoginSession {
   expiresAt  BigInt   @default(0) // unix 毫秒
   createdAt  DateTime @default(now())
 }
+
+// 任务中心执行队列（移植 internal/panel/taskcenter.go 的进程内队列）。
+// 落库而非内存：单容器语义下重启不丢队列状态；queued→running→done/error。
+model TaskQueueItem {
+  id        String   @id @default(cuid())
+  uid       String
+  taskCode  String   @default("")
+  title     String   @default("")
+  mp        Boolean  @default(false) // 小程序口径任务（accept/claim 需 miniprogram 头）
+  status    String   @default("queued") // queued | running | done | error | skipped
+  result    String   @default("") // 执行结果摘要或错误信息
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([uid])
+}
