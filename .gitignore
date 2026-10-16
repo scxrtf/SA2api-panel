@@ -42,3 +42,4 @@ next-env.d.ts
 
 # 本地一次性写文件脚本
 scripts-*.js
+scripts-*.cjs
