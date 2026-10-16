@@ -2,6 +2,7 @@
 // 端点走 chatBase（不带 /v2 前缀）+ billingHeaders；信封 {code,msg,data}，code!=0 为业务错误。
 // 签名对齐 client.ts：(cfg, a) 参数序，snake_case 配置。
 import type { AppConfig } from "../config";
+import { randomUUID as cryptoRandomUUID } from "crypto";
 import {
   chatBase, billingHeaders, originReferer, isGlobal,
   type AuthShape,
@@ -191,6 +192,72 @@ export async function buddyAgreement(cfg: AppConfig, a: AuthShape): Promise<unkn
 }
 export async function streakReport(cfg: AppConfig, a: AuthShape): Promise<unknown> {
   return growthJSON(cfg, a, "POST", "/activity/growth/streak", {});
+}
+
+// ─── 连登管家（streak.go）+ 夜猫子（blackcat.go）+ 礼包/补偿 ────────────────
+
+function clientToken(): string {
+  return cryptoRandomUUID();
+}
+
+// StreakFull 连登完整状态（GET /activity/growth/streak）。
+export interface StreakFull {
+  streak?: { days?: number; month_total_days?: number; next_tier?: string; next_tier_remaining?: number };
+  makeup_cards?: { balance?: number; max?: number };
+  redemption_status?: {
+    tier_7d_status?: string; tier_14d_status?: string; tier_28d_status?: string;
+    remaining_days?: number;
+    tiers?: { tier: string; days?: number; credit?: number; energy?: number; cards?: number; chances?: number }[];
+  };
+}
+
+export async function growthStreakFull(cfg: AppConfig, a: AuthShape): Promise<StreakFull> {
+  return (await growthJSON(cfg, a, "GET", "/activity/growth/streak", null)) as StreakFull;
+}
+
+// growthRedeemTier 兑换连登档位（tier: "7d"|"14d"|"28d"；未解锁 403 跳过）。
+export async function growthRedeemTier(cfg: AppConfig, a: AuthShape, tier: string): Promise<unknown> {
+  return growthJSON(cfg, a, "POST", "/activity/growth/redeem", { tier, client_token: clientToken() });
+}
+
+export async function lotteryChances(cfg: AppConfig, a: AuthShape): Promise<number> {
+  const d = (await growthJSON(cfg, a, "GET", "/activity/growth/lottery/summary", null)) as
+    { chances?: number } | null;
+  return d?.chances ?? 0;
+}
+
+export async function lotteryDraw(cfg: AppConfig, a: AuthShape): Promise<unknown> {
+  return growthJSON(cfg, a, "POST", "/activity/growth/lottery/draw", { client_token: clientToken() });
+}
+
+// heatmapYesterdayMissed 检查昨日是否漏签（heatmap cell score==0）。
+export async function heatmapYesterdayMissed(cfg: AppConfig, a: AuthShape): Promise<boolean> {
+  const d = (await growthJSON(cfg, a, "GET", "/activity/growth/heatmap", null)) as
+    { cells?: { date?: string; score?: number }[] } | null;
+  const yesterday = new Date(Date.now() - 24 * 3600_000)
+    .toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
+  for (const cell of d?.cells ?? []) {
+    if ((cell.date ?? "").slice(0, 10) === yesterday) return (cell.score ?? 0) === 0;
+  }
+  return false;
+}
+
+export async function useMakeupCard(cfg: AppConfig, a: AuthShape, date: string): Promise<unknown> {
+  return growthJSON(cfg, a, "POST", "/activity/growth/makeup-cards/use", { target_date: date });
+}
+
+// claimGift / claimCompensation billing 域（每号一次/有则领，业务错误静默）。
+async function billingClaim(cfg: AppConfig, a: AuthShape, path: string): Promise<number> {
+  const { billingBase } = await import("./client");
+  const d = (await doGrowthJSON(billingBase(a) + path, billingHeaders(cfg, a), "POST", {})) as
+    { credit?: number } | null;
+  return d?.credit ?? 0;
+}
+export function claimGift(cfg: AppConfig, a: AuthShape): Promise<number> {
+  return billingClaim(cfg, a, "/billing/meter/claim-gift");
+}
+export function claimCompensation(cfg: AppConfig, a: AuthShape): Promise<number> {
+  return billingClaim(cfg, a, "/billing/meter/claim-compensation");
 }
 
 // ─── 开学季券码（school.go；活动期只读查询）───────────────────────────────────

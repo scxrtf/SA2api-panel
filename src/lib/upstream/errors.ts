@@ -73,6 +73,9 @@ const badParamsMarkerCode = '"code":11101';
 
 export const alreadyCheckinMarkers = ["已签到", "already"];
 
+// buddyTaskIncompleteMarker 领养门槛未达标的业务错误关键词（HTTP 400 时出现）。
+export const buddyTaskIncompleteMarker = "first_buddy task not completed yet";
+
 // 6004 模型级限流业务码：`"code":6004`（JSON 空格容差）。
 const reModelRateLimit = /"code"\s*:\s*"?6004"?/;
 

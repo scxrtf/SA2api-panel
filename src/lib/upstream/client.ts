@@ -10,6 +10,11 @@ export const BILLING_BASE_CN = "https://www.codebuddy.cn";
 export const GLOBAL_BASE = "https://www.workbuddy.ai";
 export const WEB_BASE_CN = "https://www.workbuddy.cn";
 
+// webBase Web 域基址（global 回落国际版，其余 CN）。
+export function webBaseOf(a: AuthShape): string {
+  return isGlobal(a) ? GLOBAL_BASE : WEB_BASE_CN;
+}
+
 const CHAT_PATH = "/v2/chat/completions";
 const REFRESH_PATH = "/v2/plugin/auth/token/refresh";
 // billing/meter 域：global 首选无 /v2，404 时 fallback 有 /v2；cn 恒有 /v2。

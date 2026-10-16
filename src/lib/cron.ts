@@ -15,6 +15,8 @@ import { isAlreadyCheckin } from "./upstream/errors";
 import { reportChatActivity } from "./upstream/report";
 import {
   buddyInfo, buddyAgreement, buddyFirst, travelStatus, travelDepart, travelClaim,
+  growthStreakFull, growthRedeemTier, lotteryChances, lotteryDraw,
+  heatmapYesterdayMissed, useMakeupCard, claimGift, claimCompensation,
 } from "./upstream/tasks";
 import { listActiveAccounts, reportGapMs } from "./taskcenter";
 
@@ -203,4 +205,90 @@ export async function runActivityNow(): Promise<{ reported: number; failed: numb
     }
   }
   return { reported, failed, skipped };
+}
+
+// ─── 连登管家（移植 internal/scheduler/streak.go RunStreakBonusNow）────────
+// 补签保连登 → 礼包/补偿 → 兑换所有已解锁档位（7d/14d/28d）→ 抽完所有 chances。
+// 幂等：locked/无次数自动跳过；由签到排程末尾调用，也可面板手动触发。
+export async function runStreakBonusNow(): Promise<{ redeemed: number; drawn: number; skipped: number }> {
+  const cfg = await getConfig();
+  const rows = await listActiveAccounts();
+  let redeemed = 0, drawn = 0, skipped = 0;
+  for (const row of rows) {
+    if (!row.auth.accessToken) { skipped++; continue; }
+    if (row.realm === "global") continue; // D4 门控：global 无 CN 任务体系
+    if (row.enterpriseId !== "") continue; // 企业版无成长体系（growth 403）
+    try {
+      const r = await streakBonusAccount(cfg, row.auth);
+      redeemed += r.redeemed;
+      drawn += r.drawn;
+    } catch {
+      skipped++;
+    }
+  }
+  return { redeemed, drawn, skipped };
+}
+
+async function streakBonusAccount(cfg: AppConfig, a: AuthShape): Promise<{ redeemed: number; drawn: number }> {
+  let redeemed = 0, drawn = 0;
+  // 0. 补签保连登：昨日漏签且有补签卡则补上（连续天数一断就要重攒 7 天）。
+  await makeupYesterday(cfg, a).catch(() => {});
+  // 0.5 礼包/补偿（每号一次，无则业务错误静默跳过）。
+  await claimGift(cfg, a).then((c) => {
+    if (c > 0) console.log("[streak-bonus] " + a.uid + ": 新手礼包 +" + c + "c");
+  }).catch(() => {});
+  await claimCompensation(cfg, a).then((c) => {
+    if (c > 0) console.log("[streak-bonus] " + a.uid + ": 补偿领取 +" + c + "c");
+  }).catch(() => {});
+  // 1. 兑换所有已解锁档位。
+  const full = await growthStreakFull(cfg, a);
+  const statuses: Record<string, string | undefined> = {
+    "7d": full.redemption_status?.tier_7d_status,
+    "14d": full.redemption_status?.tier_14d_status,
+    "28d": full.redemption_status?.tier_28d_status,
+  };
+  for (const tier of full.redemption_status?.tiers ?? []) {
+    const status = statuses[tier.tier];
+    if (status === "locked" || status === "claimed") continue;
+    try {
+      await growthRedeemTier(cfg, a, tier.tier);
+      redeemed++;
+      console.log("[streak-bonus] " + a.uid + ": 兑换 " + tier.tier + " 档（+" + (tier.credit ?? 0) + "c +" + (tier.energy ?? 0) + "e 卡×" + (tier.cards ?? 0) + " 抽奖×" + (tier.chances ?? 0) + "）");
+    } catch (e) {
+      // 未解锁（403）属预期，静默；其余记日志。
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/403/.test(msg)) console.log("[streak-bonus] " + a.uid + ": redeem " + tier.tier + ": " + msg);
+    }
+  }
+  // 2. 抽奖：按当前 chances 全抽完（兑换刚发的次数已在服务端累加）。
+  let chances = 0;
+  try {
+    chances = await lotteryChances(cfg, a);
+  } catch (e) {
+    console.log("[streak-bonus] " + a.uid + ": lottery summary: " + (e instanceof Error ? e.message : String(e)));
+    return { redeemed, drawn };
+  }
+  for (let i = 0; i < chances; i++) {
+    try {
+      await lotteryDraw(cfg, a);
+      drawn++;
+    } catch (e) {
+      console.log("[streak-bonus] " + a.uid + ": draw: " + (e instanceof Error ? e.message : String(e)));
+      break;
+    }
+  }
+  if (chances > 0) console.log("[streak-bonus] " + a.uid + ": 抽奖完成 " + chances + " 次");
+  return { redeemed, drawn };
+}
+
+// makeupYesterday 昨日漏签且有补签卡时自动补签（保住连登连续天数）。
+async function makeupYesterday(cfg: AppConfig, a: AuthShape): Promise<void> {
+  const missed = await heatmapYesterdayMissed(cfg, a);
+  if (!missed) return;
+  const full = await growthStreakFull(cfg, a);
+  if ((full.makeup_cards?.balance ?? 0) <= 0) return;
+  const yesterday = new Date(Date.now() - 24 * 3600_000)
+    .toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
+  await useMakeupCard(cfg, a, yesterday);
+  console.log("[streak-bonus] " + a.uid + ": 已用补签卡补签 " + yesterday + "（保连登）");
 }

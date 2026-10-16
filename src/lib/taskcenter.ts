@@ -64,6 +64,7 @@ export interface TaskAccountRow {
   realm: string;
   enterpriseId: string;
   disabled: boolean;
+  paused?: boolean;
   auth: AuthShape;
 }
 
@@ -82,6 +83,7 @@ export async function listActiveAccounts(includeDisabled = false): Promise<TaskA
     realm: r.realm,
     enterpriseId: r.enterpriseId,
     disabled: r.state?.disabled ?? false,
+    paused: r.state?.paused ?? false,
     auth: {
       uid: r.uid,
       nickname: r.nickname,

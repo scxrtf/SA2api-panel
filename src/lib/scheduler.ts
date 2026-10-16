@@ -9,7 +9,7 @@ import { getConfig } from "./config";
 import { prisma } from "./db";
 import * as cron from "./cron";
 import * as pool from "./pool";
-import { startGrowthQueue } from "./taskcenter";
+import { startGrowthQueue, listActiveAccounts } from "./taskcenter";
 import { isAlreadyCheckin } from "./upstream/errors";
 
 type TaskKind = "checkin" | "travel" | "activity" | "keepalive" | "blackcat" | "growth";
@@ -143,7 +143,14 @@ async function execCheckin(): Promise<void> {
       console.log("[scheduler] user-resource " + a.uid + ": " + (e instanceof Error ? e.message : String(e)));
     }
   }
-  // TODO(P4): RunStreakBonusNow 连登管家（可兑换档位自动兑换 + 抽奖）。
+  // 连登管家（对齐 Go RunCheckinNow 末尾的 RunStreakBonusNow）：
+  // 可兑换档位自动兑换 + 抽奖次数抽完 + 昨日漏签补签保连登。
+  try {
+    const r = await cron.runStreakBonusNow();
+    console.log("[scheduler] streak-bonus: redeemed=" + r.redeemed + " drawn=" + r.drawn + " skipped=" + r.skipped);
+  } catch (e) {
+    console.log("[scheduler] streak-bonus error: " + (e instanceof Error ? e.message : String(e)));
+  }
 }
 
 async function execTravel(): Promise<void> {
@@ -161,25 +168,46 @@ async function execKeepalive(): Promise<void> {
   console.log("[scheduler] keepalive: refreshed=" + r.refreshed + " skipped=" + r.skipped + " failed=" + r.failed);
 }
 
-// 夜猫子：23:00–08:00 窗口内对池内账号补足 glm 对话并上报事件链。
-// TODO(P4)：真实对话链路（BlackcatNeed/RunNightChats 依赖 events_desktop 上报链）。
-// 当前仅做窗口判定 + 门控账号过滤并打日志，不发起上游调用。
+// 夜猫子：23:00–08:00 窗口内对池内账号补足 glm-5.2 真实对话并上报事件链。
+// 暂停（paused）账号跳过：夜猫子是全任务体系中唯一「整任务都是真实模型对话」的，
+// 与「让位防风控」正面冲突（对齐 Go RunBlackcatNow）。
 async function execBlackcat(): Promise<void> {
   if (!inNightWindow()) {
     console.log("[scheduler] blackcat: 当前不在 23:00-08:00 计数窗口，跳过");
     return;
   }
-  const rows = await prisma.account.findMany({ include: { state: true } });
-  let considered = 0;
-  for (const a of rows) {
-    if (a.state?.disabled) continue;
-    if (a.state?.paused) continue; // 夜猫子是唯一「整任务真实模型对话」，与让位防风控冲突
-    if (!a.accessToken) continue;
-    if (a.realm === "global") continue; // D4 门控
-    if (a.enterpriseId !== "") continue; // 企业版无成长体系
-    considered++;
+  const cfg = await getConfig();
+  const rows = await listActiveAccounts(true).catch(() => []);
+  const { runBlackCat } = await import("./autotask-actions");
+  let done = 0, skipped = 0, failed = 0;
+  for (const row of rows) {
+    if (row.paused) continue; // paused 账号让位防风控（夜猫子是真实模型对话）
+    if (!row.auth.accessToken) { skipped++; continue; }
+    if (row.realm === "global") continue; // D4 门控
+    if (row.enterpriseId !== "") continue; // 企业版无成长体系（growth 403）
+    let need = 0;
+    try {
+      const { listTasks } = await import("./upstream/tasks");
+      const tasks = await listTasks(cfg, row.auth);
+      const t = tasks.find((x) => x.task_code === "black_cat");
+      if (t && !t.claimed && t.current < t.target) need = t.target - t.current;
+    } catch (e) {
+      console.log("[scheduler] blackcat " + row.uid + ": " + (e instanceof Error ? e.message : String(e)));
+      failed++;
+      continue;
+    }
+    if (need <= 0) { skipped++; continue; }
+    try {
+      const msg = await runBlackCat(cfg, row.auth);
+      done++;
+      console.log("[scheduler] blackcat " + row.uid + ": " + msg);
+    } catch (e) {
+      failed++;
+      console.log("[scheduler] blackcat " + row.uid + ": " + (e instanceof Error ? e.message : String(e)));
+    }
+    await sleep(800); // activityAccountDelay 账号间限速（对齐 Go）
   }
-  console.log("[scheduler] blackcat: 窗口内 " + considered + " 账号待补足（真实对话链路 P4 实装）");
+  console.log("[scheduler] blackcat: done=" + done + " skipped=" + skipped + " failed=" + failed + "（nightWindow=" + inNightWindow() + "）");
 }
 
 // 成长任务队列：时点触发等同于面板「执行全部待办」（sequential 并发 1，扫描+执行）。
@@ -295,3 +323,4 @@ export function reconfigure(): void {
 export function stopScheduler(): void {
   st.stop = true;
 }
+
