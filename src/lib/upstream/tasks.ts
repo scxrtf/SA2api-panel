@@ -192,3 +192,26 @@ export async function buddyAgreement(cfg: AppConfig, a: AuthShape): Promise<unkn
 export async function streakReport(cfg: AppConfig, a: AuthShape): Promise<unknown> {
   return growthJSON(cfg, a, "POST", "/activity/growth/streak", {});
 }
+
+// ─── 开学季券码（school.go；活动期只读查询）───────────────────────────────────
+
+export interface SchoolVoucher {
+  grant_id: number;
+  draw_uuid?: string;
+  sku_code?: string;   // kfc_ice_cream / voucher_luckin / voucher_kugou …
+  prize_name?: string; // 肯德基冰淇淋
+  code: string;        // 券码本体（复制给店员核销）
+  valid_from?: string;
+  valid_to?: string;   // "2026-10-24"
+  granted_at?: string; // RFC3339
+}
+
+// schoolVouchers 查询账号的开学季券码列表（billing 同域 /portal/activity/school/vouchers）。
+export async function schoolVouchers(cfg: AppConfig, a: AuthShape): Promise<SchoolVoucher[]> {
+  const { billingBase } = await import("./client");
+  const data = (await doGrowthJSON(
+    billingBase(a) + "/portal/activity/school/vouchers",
+    billingHeaders(cfg, a), "GET", null,
+  )) as { items?: SchoolVoucher[] } | null;
+  return data?.items ?? [];
+}
