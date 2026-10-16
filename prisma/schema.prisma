@@ -15,8 +15,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // 迁移/建表走直连（Supabase session pooler），应用查询走 transaction pooler。
+  // pgbouncer 事务模式不支持 Prisma migrate 需要的会话级特性，必须分流。
+  directUrl = env("DIRECT_URL")
 }
 
 model Account {

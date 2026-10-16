@@ -24,19 +24,32 @@ npx prisma migrate dev      # 建表
 npm run dev                 # http://localhost:3000/panel
 ```
 
+## 数据库：Supabase Postgres
+
+1. [supabase.com](https://supabase.com) 建项目，**Connect → ORM → Prisma**，复制两条连接串：
+   - **Transaction pooler**（6543 端口，带 `pgbouncer=true`）→ 填 `DATABASE_URL`
+   - **Session pooler**（5432 端口）→ 填 `DIRECT_URL`（迁移用，schema.prisma 的 directUrl 已配）
+   - 不要用 Direct connection（IPv6-only，Railway 出站可能不通）。
+2. 密码是建项目时设的数据库密码（忘了：Settings → Database → Reset）。
+
+## 本地开发
+
+```bash
+npm ci
+cp .env.example .env        # 填 DATABASE_URL / DIRECT_URL / WB2A_API_KEY
+npx prisma migrate dev      # 建表（走 DIRECT_URL）
+npm run dev                 # http://localhost:3000/panel
+```
+
 ## 部署到 Railway
 
-1. 新建项目 → 添加 **PostgreSQL** 插件（自动注入 `DATABASE_URL`）。
-2. 添加服务，指向本目录（railway.toml 已内置 build/start 命令）：
-   - build: `npm ci && npx prisma generate && npm run build`
-   - start: `npx prisma migrate deploy && npm run start`
-3. 设置变量 `WB2A_API_KEY`（面板与 API 主密钥；公网部署务必设置）。
-4. 健康检查走 `/api/livez`（免鉴权存活探针）。
+1. Railway 项目 → **+ New → GitHub Repo** 选本仓库（若嵌套在 Go 项目内，
+   Settings → Root Directory 填 `wb2api-next`）。
+2. 服务 **Variables** 手动加三条：`DATABASE_URL` / `DIRECT_URL`（见上）/ `WB2A_API_KEY`。
+3. `railway.toml` 内置：build 时 generate + 编译；start 时 `prisma migrate deploy`（走 DIRECT_URL 建表，幂等）。
+4. **Settings → Networking → Generate Domain** 拿公网域名，访问 `https://域名/panel`。
 
 ### 定时任务（外部 cron）
-
-Railway 原生 cron 是独立服务，最简方式是 Railway Cron Service 或任意外部定时器
-（如 cron-job.org）以 Bearer 头调用：
 
 | 频率 | 端点 | 说明 |
 |---|---|---|

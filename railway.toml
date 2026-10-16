@@ -1,5 +1,8 @@
-# Railway 部署配置（单服务：Next.js 全栈 + Postgres 插件）。
-# 变量：DATABASE_URL 由 Postgres 插件注入；WB2A_API_KEY 需手动设置。
+# Railway 部署配置（Next.js 全栈 + 外部 Supabase Postgres）。
+# 变量（都需在 Railway 服务 Variables 里手动设置，Supabase 不会自动注入）：
+#   DATABASE_URL  — Supabase transaction pooler 连接串（6543，带 pgbouncer=true）
+#   DIRECT_URL    — Supabase session pooler 连接串（5432，迁移用）
+#   WB2A_API_KEY  — 面板主密钥
 [build]
 builder = "NIXPACKS"
 buildCommand = "npm ci && npx prisma generate && npm run build"
