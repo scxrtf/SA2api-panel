@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { req } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
-interface LogEntry { ts: string; channel: string; line: string }
+interface LogEntry { ts: number; ch: "task" | "chat" | "sys"; text: string }
 interface ReqLog {
   id: string; at: string; uid: string; model: string; status: number;
   durationMs: number; errKind: string; clientIp: string; ua: string;
@@ -12,14 +12,15 @@ interface ReqLog {
 }
 
 export function LogsView({ flash }: { flash: Flash }) {
-  const [mode, setMode] = useState<"runtime" | "requests">("requests");
+  const [mode, setMode] = useState<"runtime" | "requests">("runtime");
+  const [ch, setCh] = useState<"all" | "task" | "chat" | "sys">("all");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [reqs, setReqs] = useState<ReqLog[]>([]);
   const [filter, setFilter] = useState({ account: "", model: "", outcome: "" });
 
   const load = useCallback(() => {
     if (mode === "runtime") {
-      req<{ entries: LogEntry[] }>("logs").then((r) => setLogs(r.entries))
+      req<{ entries: LogEntry[] }>("logs").then((r) => setLogs(r.entries.filter((e) => ch === "all" || e.ch === ch)))
         .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
     } else {
       const q = new URLSearchParams();
@@ -29,7 +30,7 @@ export function LogsView({ flash }: { flash: Flash }) {
       req<{ entries: ReqLog[] }>("request_logs?" + q.toString()).then((r) => setReqs(r.entries))
         .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
     }
-  }, [mode, filter, flash]);
+  }, [mode, filter, ch, flash]);
   useEffect(load, [load]);
 
   return (
@@ -47,13 +48,22 @@ export function LogsView({ flash }: { flash: Flash }) {
         </select>
       </>}
       <button className="btn xs" onClick={load}>刷新</button>
+      {mode === "runtime" && <>
+        <select className="select" style={{ width: 104 }} value={ch}
+          onChange={(e) => setCh(e.target.value as typeof ch)}>
+          <option value="all">全部频道</option><option value="task">任务</option>
+          <option value="chat">对话</option><option value="sys">系统</option>
+        </select>
+      </>}
     </>}>
       {mode === "runtime" ? (
         <div className="pad">
           <div className="mono" style={{ maxHeight: 520, overflowY: "auto" }}>
             {logs.length === 0 && <div className="dim">暂无运行日志</div>}
             {logs.map((l, i) => (
-              <div key={i}>{new Date(l.ts).toLocaleTimeString("zh-CN", { hour12: false })} {l.line}</div>
+              <div key={i} className={"ln" + (/error|失败|错误/.test(l.text) ? " e" : /warn|冷却|熔断/.test(l.text) ? " w" : "")}>{
+                new Date(l.ts).toLocaleTimeString("zh-CN", { hour12: false })
+              } <span className={"lch c-" + l.ch}>{{ task: "任务", chat: "对话", sys: "系统" }[l.ch]}</span> {l.text}</div>
             ))}
           </div>
         </div>

@@ -70,7 +70,11 @@ export async function providerModels(): Promise<{ id: string; owned_by: string }
       if (!resp.ok) continue;
       const data = (await resp.json()) as { data?: { id?: string }[] };
       for (const m of data.data ?? []) {
-        if (m.id) out.push({ id: `${p.name}:${m.id}`, owned_by: p.name });
+        if (!m.id) continue;
+        // 白名单（逗号分隔）非空时只暴露勾选模型；空 = 全部。
+        const allow = p.models ? p.models.split(",").map((s) => s.trim()).filter(Boolean) : null;
+        if (allow && !allow.includes(m.id)) continue;
+        out.push({ id: `${p.name}:${m.id}`, owned_by: p.name });
       }
     } catch {
       // 单供应商失败不影响其他。

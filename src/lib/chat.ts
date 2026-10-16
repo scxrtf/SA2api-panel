@@ -26,6 +26,7 @@ import {
   type ErrKind,
 } from "./upstream/errors";
 import { streamPassthrough, aggregate, type StreamStats } from "./upstream/sse";
+import { runlog } from "./runlog";
 
 type Obj = Record<string, unknown>;
 
@@ -264,6 +265,11 @@ export async function handleChat(opts: {
   };
 
   const finishLog = (status: number, uid: string, errKind: string) => {
+    runlog(
+      "chat " + (status < 400 ? "OK " : "ERR ") + status + " " + bare +
+      (uid ? " uid=" + uid : "") + (errKind ? " kind=" + errKind : "") +
+      " " + (Date.now() - started) + "ms",
+    );
     void recordRequestLog({
       uid, model: bare, realm, provider: "",
       status, errKind, stream,

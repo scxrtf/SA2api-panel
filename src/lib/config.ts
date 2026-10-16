@@ -52,6 +52,8 @@ export interface AppConfig {
   // 快过期积分窗口（小时）：签到/余额刷新时把到期 ≤ now+window 的批次标记为快过期。
   // <=0 = 禁用路由门槛（展示仍用完整逐包数据）。
   expiring_soon_hours: number;
+  // 积分构成页每账号展开的明细包数量（0=全部展开），对齐 Go package_detail_limit。
+  package_detail_limit: number;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -98,6 +100,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   schedule_balance_refresh_enabled: true,
   schedule_balance_refresh_minutes: 5,
   expiring_soon_hours: 168, // 默认 7 天：官方活动奖励积分多在两周内过期
+  package_detail_limit: 5,
 };
 
 import { prisma } from "./db";

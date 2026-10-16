@@ -3,12 +3,14 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { req, fmtNum } from "../lib";
 import { Box, type Flash } from "../components/ui";
+import { UsageChart, type SeriesPoint } from "../components/usageChart";
 
 interface UsageResp {
   count: number; ok_count: number;
   prompt_tokens: number; completion_tokens: number; total_tokens: number; credit: number;
   by_model: { model: string; n: number; tokens: number; credit: number }[];
   by_account: { uid: string; nickname: string; n: number; tokens: number; credit: number }[];
+  series: SeriesPoint[];
 }
 
 export function UsageView({ flash }: { flash: Flash }) {
@@ -44,16 +46,29 @@ export function UsageView({ flash }: { flash: Flash }) {
           </div>
         </div>
       </Box>
+      <Box title="用量时序" hint="蓝=prompt · 绿=completion；横轴为真实时间"
+        extra={<span className="note">峰值 {u.series.length > 0 ? fmtNum(Math.max(...u.series.map((p) => p.total_tokens))) : "—"}</span>}>
+        <div className="uschart-body">
+          <UsageChart series={u.series} />
+        </div>
+      </Box>
       <Box title="按模型">
         <div className="tbl-wrap">
           <table className="tbl">
             <thead><tr><th>模型</th><th>请求</th><th>tokens</th><th>积分</th></tr></thead>
             <tbody>
               {u.by_model.length === 0 && <tr><td colSpan={4} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无数据</td></tr>}
-              {u.by_model.map((m) => (
+              {u.by_model.map((m) => {
+                const max = Math.max(1, ...u.by_model.map((x) => x.tokens));
+                return (
                 <tr key={m.model}><td className="mono">{m.model}</td><td>{fmtNum(m.n)}</td>
-                  <td>{fmtNum(m.tokens)}</td><td>{m.credit.toFixed(2)}</td></tr>
-              ))}
+                  <td>
+                    {fmtNum(m.tokens)}
+                    <div className="us-mix"><i style={{ width: (m.tokens / max * 100) + "%", background: "var(--accent)" }}></i></div>
+                  </td>
+                  <td>{m.credit.toFixed(2)}</td></tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -64,10 +79,18 @@ export function UsageView({ flash }: { flash: Flash }) {
             <thead><tr><th>账号</th><th>请求</th><th>tokens</th><th>积分</th></tr></thead>
             <tbody>
               {u.by_account.length === 0 && <tr><td colSpan={4} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无数据</td></tr>}
-              {u.by_account.map((a) => (
+              {u.by_account.map((a) => {
+                const max = Math.max(1, ...u.by_account.map((x) => x.tokens));
+                return (
                 <tr key={a.uid}><td>{a.nickname || a.uid}<div className="dim mono">{a.uid}</div></td>
-                  <td>{fmtNum(a.n)}</td><td>{fmtNum(a.tokens)}</td><td>{a.credit.toFixed(2)}</td></tr>
-              ))}
+                  <td>{fmtNum(a.n)}</td>
+                  <td>
+                    {fmtNum(a.tokens)}
+                    <div className="us-mix"><i style={{ width: (a.tokens / max * 100) + "%", background: "var(--ok)" }}></i></div>
+                  </td>
+                  <td>{a.credit.toFixed(2)}</td></tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

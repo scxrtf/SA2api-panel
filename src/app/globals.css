@@ -183,3 +183,94 @@ body {
 
 /* 模型测试进度 */
 .md-prog { font-size: 12px; color: var(--accent); }
+
+/* ─── 配置页：开关 / hint / 保存栏 ─────────────────────────────── */
+.cfg-fld { min-width: 0; }
+.form-hint { font-size: 12px; color: var(--fg-dim); margin-top: 4px; line-height: 1.45; }
+.switch {
+  display: inline-flex; align-items: center; width: 40px; height: 22px;
+  border-radius: 11px; background: var(--bg-soft); border: 1px solid var(--border);
+  position: relative; cursor: pointer; flex-shrink: 0; transition: background .15s, border-color .15s;
+}
+.switch:hover { border-color: var(--fg-dim); }
+.switch i {
+  position: absolute; left: 2px; top: 50%; margin-top: -8px;
+  width: 16px; height: 16px; border-radius: 50%; background: var(--fg-dim);
+  transition: transform .15s, background .15s;
+}
+.switch.on { background: var(--accent); border-color: var(--accent); }
+.switch.on i { transform: translateX(18px); background: #fff; }
+.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.savebar {
+  display: flex; align-items: center; gap: 8px;
+  position: sticky; bottom: 0; padding: 12px 0;
+  background: linear-gradient(to top, var(--bg) 65%, transparent);
+}
+
+/* ─── 用量图表（对齐 Go index.html .uschart）──────────────────── */
+.uschart-body { padding: 10px 12px 6px; }
+.uschart-body svg { width: 100%; height: auto; display: block; }
+.uschart-body .gl { stroke: var(--border); stroke-width: 1; }
+.uschart-body .ax { stroke: var(--fg-dim); stroke-width: 1.2; }
+.uschart-body .avg { stroke: var(--warn); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.uschart-body .tk { fill: var(--fg-dim); font-size: 11px; font-family: Consolas, monospace; }
+.uschart-body .tk-avg { fill: var(--warn); font-size: 11px; }
+.uschart-body .tk-peak { fill: var(--fg); font-size: 11px; font-weight: 700; }
+.uschart-body rect.usbar { transition: opacity .12s; }
+.uschart-body rect.usbar:hover { opacity: .75; }
+.us-empty { text-align: center; color: var(--fg-dim); padding: 34px 10px; font-size: 13px; }
+.us-mix {
+  display: flex; height: 3px; border-radius: 2px; overflow: hidden;
+  background: var(--bg-soft); margin-top: 5px; min-width: 60px;
+}
+.us-mix i { display: block; height: 100%; }
+
+/* ─── 积分构成：构成条 / 到期分布 ─────────────────────────────── */
+.mixbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg-soft); }
+.mixbar i { display: block; height: 100%; min-width: 1px; }
+.pk-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 12px; color: var(--fg-dim); }
+.pk-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.pk-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.pk-expiry-hdr {
+  display: grid; grid-template-columns: 88px 1fr 80px; gap: 10px; align-items: center;
+  padding: 8px 12px 6px; font-size: 12px; color: var(--fg-dim);
+}
+.pk-expiry-hdr b { text-align: right; font-weight: 600; }
+.pk-expiry-chart { max-height: 340px; overflow-y: auto; padding: 0 12px 8px; }
+.pk-expiry-row {
+  display: grid; grid-template-columns: 88px 1fr 80px; gap: 10px; align-items: center;
+  padding: 5px 0; font-size: 12.5px;
+}
+.pk-expiry-row > span:first-child { color: var(--fg-dim); }
+.pk-expiry-row > b { text-align: right; font-weight: 650; }
+.pk-expiry-track { display: flex; height: 16px; border-radius: 4px; overflow: hidden; background: var(--bg-soft); }
+.pk-expiry-seg { background: var(--seg-color, var(--accent)); cursor: default; min-width: 1px; }
+.pk-expiry-legend {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 10px 12px 0;
+  border-top: 1px solid var(--border); font-size: 12px; color: var(--fg-dim);
+}
+.pk-expiry-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.pk-expiry-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.pk-expiry-foot { padding: 8px 12px 12px; font-size: 12px; color: var(--fg-dim); }
+.pk-expiry-empty { text-align: center; color: var(--fg-dim); padding: 30px 10px; font-size: 13px; }
+
+/* ─── 供应商：获取模型勾选清单 ─────────────────────────────────── */
+.probe-models {
+  max-height: 150px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; background: var(--bg-soft);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.probe-models label { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer; }
+.probe-models input { accent-color: var(--accent); }
+
+/* ─── 运行日志：频道标签 / 级别着色（对齐 Go .ln/.lch）──────────── */
+.ln { display: block; padding: 1px 0; line-height: 1.55; white-space: pre-wrap; word-break: break-all; }
+.ln.e { color: var(--err); }
+.ln.w { color: var(--warn); }
+.lch {
+  display: inline-block; font-style: normal; font-size: 11px; padding: 0 6px;
+  border-radius: 8px; border: 1px solid var(--border); color: var(--fg-dim); margin-right: 2px;
+}
+.lch.c-task { color: var(--accent); border-color: var(--accent); }
+.lch.c-chat { color: var(--ok); border-color: var(--ok); }
+.lch.c-sys { color: var(--fg-dim); }

@@ -73,8 +73,9 @@ function KeysBox({ flash }: { flash: Flash }) {
 
 function ProvidersBox({ flash }: { flash: Flash }) {
   const [rows, setRows] = useState<ProviderRow[] | null>(null);
-  const [form, setForm] = useState({ name: "", base_url: "", key: "" });
+  const [form, setForm] = useState({ name: "", base_url: "", key: "", models: "" });
   const [probe, setProbe] = useState("");
+  const [probeModels, setProbeModels] = useState<string[]>([]);
 
   const load = useCallback(() => {
     req<{ providers: ProviderRow[] }>("providers").then((r) => setRows(r.providers))
@@ -85,7 +86,7 @@ function ProvidersBox({ flash }: { flash: Flash }) {
   const create = async () => {
     try {
       await req("providers", { method: "POST", body: form });
-      setForm({ name: "", base_url: "", key: "" }); load();
+      setForm({ name: "", base_url: "", key: "", models: "" }); load();
       flash("ok", "供应商已添加");
     } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   };
@@ -94,12 +95,23 @@ function ProvidersBox({ flash }: { flash: Flash }) {
     try { await req("providers/" + encodeURIComponent(n), { method: "DELETE" }); load(); flash("ok", "供应商已删除"); }
     catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   };
+  const [probing, setProbing] = useState(false);
   const probeNow = async () => {
+    setProbing(true);
     setProbe("探测中…");
     try {
-      const r = await req<{ ok_count?: number; message?: string }>("providers/probe", { method: "POST", body: { base_url: form.base_url, key: form.key } });
-      setProbe(r.message ?? "可达");
+      const r = await req<{ models?: string[]; ok_count?: number; message?: string }>("providers/probe", { method: "POST", body: { base_url: form.base_url, key: form.key } });
+      const models = r.models ?? [];
+      setProbeModels(models);
+      setProbe(models.length + " 个模型");
     } catch (e) { setProbe(e instanceof Error ? e.message : String(e)); }
+    finally { setProbing(false); }
+  };
+
+  const picked = form.models.split(",").map((s) => s.trim()).filter(Boolean);
+  const toggleModel = (m: string) => {
+    const next = picked.includes(m) ? picked.filter((x) => x !== m) : [...picked, m];
+    setForm({ ...form, models: next.join(", ") });
   };
 
   return (
@@ -114,12 +126,34 @@ function ProvidersBox({ flash }: { flash: Flash }) {
           <div className="form-row"><label className="form-label">API Key</label>
             <input className="input" type="password" value={form.key}
               onChange={(e) => setForm({ ...form, key: e.target.value })} /></div>
+          <div className="form-row"><label className="form-label">模型白名单（逗号分隔，空=全部）</label>
+            <input className="input" placeholder="留空 = 暴露上游全部模型" value={form.models}
+              onChange={(e) => setForm({ ...form, models: e.target.value })} /></div>
         </div>
         <div className="btn-row">
           <button className="btn primary" onClick={create} disabled={!form.name || !form.base_url || !form.key}>添加供应商</button>
-          <button className="btn" onClick={probeNow} disabled={!form.base_url || !form.key}>探测连通</button>
+          <button className="btn" onClick={probeNow} disabled={!form.base_url || !form.key || probing}>
+            {probing ? "探测中…" : "获取模型列表"}
+          </button>
           {probe && <span className="dim" style={{ alignSelf: "center" }}>{probe}</span>}
         </div>
+        {probeModels.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div className="btn-row" style={{ marginBottom: 6 }}>
+              <button className="btn xs" onClick={() => setForm({ ...form, models: probeModels.join(", ") })}>全选</button>
+              <button className="btn xs" onClick={() => setForm({ ...form, models: "" })}>清空勾选</button>
+              <button className="btn xs" onClick={() => { void navigator.clipboard.writeText(probeModels.join(",")).then(() => flash("ok", "名单已复制")); }}>复制名单</button>
+            </div>
+            <div className="probe-models">
+              {probeModels.map((m) => (
+                <label key={m}>
+                  <input type="checkbox" checked={picked.includes(m)} onChange={() => toggleModel(m)} />
+                  <span title={m}>{m}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="tbl-wrap" style={{ marginTop: 14 }}>
           <table className="tbl">
             <thead><tr><th>名称</th><th>Base URL</th><th>Key 掩码</th><th></th></tr></thead>

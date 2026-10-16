@@ -3,13 +3,14 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { req, fmtNum, fmtTime } from "../lib";
 import { Box, type Flash } from "../components/ui";
+import { PackageMixBar, ExpiryDistribution } from "../components/packageCharts";
 
-interface CreditPackage {
+export interface CreditPackage {
   name: string; remain: number; used: number; size: number;
   expires_at?: number; end_time?: string; created_at?: string;
   package_code?: string; sub_product_name?: string; cycle?: boolean;
 }
-interface PkgAccount {
+export interface PkgAccount {
   uid: string; nickname: string; realm: string;
   remain: number; size: number; packages: CreditPackage[]; error?: string;
 }
@@ -32,7 +33,11 @@ export function PackagesView({ flash }: { flash: Flash }) {
       ) : rows.length === 0 ? (
         <div className="pad dim">暂无账号</div>
       ) : (
-        rows.map((a) => (
+        <>
+        <div className="pad">
+          <ExpiryDistribution accounts={rows} />
+        </div>
+        {rows.map((a) => (
           <div className="tc-acct" key={a.uid}>
             <h4>
               {a.nickname || a.uid}
@@ -43,6 +48,11 @@ export function PackagesView({ flash }: { flash: Flash }) {
               </span>
             </h4>
             {a.error && <div className="msg err">{a.error}</div>}
+            {!a.error && (
+              <div style={{ marginBottom: 10 }}>
+                <PackageMixBar packs={a.packages} />
+              </div>
+            )}
             {!a.error && a.packages.length === 0 && <div className="dim" style={{ fontSize: 13 }}>无套餐包</div>}
             {a.packages.length > 0 && (
               <div className="tbl-wrap">
@@ -65,7 +75,8 @@ export function PackagesView({ flash }: { flash: Flash }) {
               </div>
             )}
           </div>
-        ))
+        ))}
+        </>
       )}
     </Box>
   );

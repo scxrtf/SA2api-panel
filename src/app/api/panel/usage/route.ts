@@ -57,6 +57,31 @@ export async function GET(req: Request) {
     ba.credit += e.credit;
     byAccount.set(e.uid, ba);
   }
+  // 时序分桶（对齐 Go usage series）：窗口 ≤7 天按小时、更长按天；只产出有数据的桶。
+  const scope = since && (Date.now() - since.getTime()) > 7 * 86_400_000 ? "day" : "hour";
+  const byTime = new Map<string, { t: string; label: string; prompt_tokens: number; completion_tokens: number; total_tokens: number; requests: number }>();
+  for (const e of events) {
+    const d = new Date(e.at);
+    let key: string, label: string;
+    if (scope === "day") {
+      key = d.toISOString().slice(0, 10);
+      label = (d.getMonth() + 1) + "-" + String(d.getDate()).padStart(2, "0");
+    } else {
+      key = d.toISOString().slice(0, 13);
+      label = String(d.getHours()).padStart(2, "0") + ":00";
+    }
+    const b = byTime.get(key) ?? { t: key, label, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, requests: 0 };
+    b.prompt_tokens += e.promptTokens;
+    b.completion_tokens += e.completionTok;
+    b.total_tokens += e.totalTokens;
+    b.requests++;
+    byTime.set(key, b);
+  }
+  const series = [...byTime.values()].map((b) => ({
+    ...b,
+    t: Date.parse(b.t.length === 13 ? b.t + ":00:00Z" : b.t + "T00:00:00Z"),
+  })).sort((a, b) => a.t - b.t);
+
   return ok({
     count: events.length,
     ok_count: okCount,
@@ -66,6 +91,7 @@ export async function GET(req: Request) {
     credit,
     by_model: [...byModel.entries()].map(([model, v]) => ({ model, ...v })),
     by_account: [...byAccount.entries()].map(([uid, v]) => ({ uid, ...v })),
+    series,
   });
 }
 

@@ -19,6 +19,7 @@ import {
   taskProgressText,
 } from "./autotask";
 import { prisma } from "./db";
+import { runlog } from "./runlog";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -129,6 +130,7 @@ export async function tasksScanAll(cfg: AppConfig) {
   const scanned = await Promise.all(rows.map((r) => scanAccountGrowth(cfg, r)));
   const accounts = scanned.filter((it) => it.growth != null || it.growth_error != null);
   const pending = accounts.reduce((n, it) => n + (it.growth?.length ?? 0), 0);
+  runlog("school 扫描完成：" + accounts.length + " 个账号有待办，共 " + pending + " 项");
   return { accounts, pending_count: pending };
 }
 
@@ -239,6 +241,7 @@ export async function startGrowthQueue(
   ).catch(() => { /* noop */ });
 
   void runQueueItems(cfg, accts, conc);
+  runlog("school 队列已启动：" + items.length + " 项待办，并发 " + conc);
   return { started: true, total: items.length, seq, msg: "" };
 }
 
@@ -286,6 +289,9 @@ async function runQueueItems(cfg: AppConfig, accts: QueueAccount[], concurrency:
     })()));
   } finally {
     q.running = false;
+    const done = q.items.filter((i) => i.status === "done").length;
+    const err = q.items.filter((i) => i.status === "error").length;
+    runlog("school 队列已结束：done=" + done + " error=" + err + " skipped=" + (q.items.length - done - err));
   }
 }
 

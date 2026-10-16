@@ -19,6 +19,7 @@ import {
   heatmapYesterdayMissed, useMakeupCard, claimGift, claimCompensation,
 } from "./upstream/tasks";
 import { listActiveAccounts, reportGapMs } from "./taskcenter";
+import { runlog } from "./runlog";
 
 function shapeOf(a: {
   uid: string; nickname: string; realm: string; accessToken: string;
@@ -54,6 +55,7 @@ export async function runCheckin(): Promise<{ done: number; already: number; fai
       }
     }
   }
+  runlog("checkin 全量签到完成：done=" + done + " already=" + already + " failed=" + failed);
   return { done, already, failed };
 }
 
@@ -86,6 +88,7 @@ export async function runKeepalive(): Promise<{ refreshed: number; skipped: numb
       failed++;
     }
   }
+  runlog("keepalive 全量保活完成：refreshed=" + refreshed + " skipped=" + skipped + " failed=" + failed);
   return { refreshed, skipped, failed };
 }
 
@@ -104,6 +107,7 @@ export async function runBalanceRefresh(): Promise<{ updated: number; failed: nu
       failed++;
     }
   }
+  runlog("balance 全量余额刷新完成：updated=" + updated + " failed=" + failed);
   return { updated, failed };
 }
 
@@ -139,6 +143,7 @@ export async function runTravelNow(): Promise<{ adopted: number; departed: numbe
     else if (r === "claimed") claimed++;
     else skipped++;
   }
+  runlog("travel 旅行巡检完成：adopted=" + adopted + " departed=" + departed + " claimed=" + claimed + " skipped=" + skipped);
   return { adopted, departed, claimed, skipped };
 }
 
@@ -199,11 +204,12 @@ export async function runActivityNow(): Promise<{ reported: number; failed: numb
     first = false;
     try {
     await reportChatActivity(cfg, row.auth, "wb2api-" + Date.now(), "");
-      reported++;
-    } catch {
-      failed++;
-    }
+    reported++;
+  } catch {
+    failed++;
   }
+  }
+  runlog("activity 活跃上报完成：reported=" + reported + " failed=" + failed + " skipped=" + skipped);
   return { reported, failed, skipped };
 }
 

@@ -108,6 +108,7 @@ model Provider {
   name      String   @unique // 模型名前缀："[name:]model"
   baseUrl   String
   apiKey    String   @default("")
+  models    String   @default("") // 白名单，逗号分隔；空 = 全部
   createdAt DateTime @default(now())
 }
 
