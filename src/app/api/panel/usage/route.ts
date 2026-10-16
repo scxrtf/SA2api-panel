@@ -19,11 +19,12 @@ export async function GET(req: Request) {
     if (hours > 1440) hours = 1440;
     if (hours > 0) since = new Date(Date.now() - hours * 3600_000);
   }
+  // UsageEvent 的时间字段是 at（不是 createdAt），where 是弱类型 tsc 查不出，注意。
   const where: Record<string, unknown> = {};
   if (since || until) {
-    where["createdAt"] = {};
-    if (since) (where["createdAt"] as Record<string, unknown>)["gte"] = since;
-    if (until) (where["createdAt"] as Record<string, unknown>)["lte"] = until;
+    where["at"] = {};
+    if (since) (where["at"] as Record<string, unknown>)["gte"] = since;
+    if (until) (where["at"] as Record<string, unknown>)["lte"] = until;
   }
 
   const events = await prisma.usageEvent.findMany({ where, orderBy: { id: "asc" } });
