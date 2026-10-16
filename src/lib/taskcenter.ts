@@ -68,9 +68,11 @@ export interface TaskAccountRow {
 }
 
 // listActiveAccounts 拉取启用账号及其凭证（全量扫描/队列共用）。
-export async function listActiveAccounts(): Promise<TaskAccountRow[]> {
+// includeDisabled=true 时（schedule.include_disabled_in_tasks）禁用号也参与——
+// 对齐 Go：禁用只关选号，不停保号（签到/活跃/保活/余额照常跑）。
+export async function listActiveAccounts(includeDisabled = false): Promise<TaskAccountRow[]> {
   const rows = await prisma.account.findMany({
-    where: { state: { is: { disabled: false } } },
+    ...(includeDisabled ? {} : { where: { state: { is: { disabled: false } } } }),
     orderBy: { createdAt: "asc" },
     include: { state: true },
   });

@@ -29,6 +29,29 @@ export interface AppConfig {
   prompt_text: string;
   header_timeout_ms: number; // 上游响应头超时
   stream_idle_ms: number; // 流空闲看门狗（0=关）
+  // ─── schedule（对齐 Go config.schedule，扁平化进顶层）────────────────────
+  // 时点均为 Asia/Shanghai 本地整点小时（0-23）。
+  schedule_checkin_hours: number[]; // 默认 [9,21]
+  schedule_travel_hours: number[]; // 默认 [9,21]
+  schedule_activity_hours: number[]; // 默认 [10]
+  schedule_keepalive_hours: number[]; // 默认 [22]
+  schedule_blackcat_hours: number[]; // 默认 [23]（夜猫子 23:00–08:00 计数窗口）
+  schedule_growth_hours: number[]; // 默认 [1]（成长队列每日零点解锁后 01:00 扫执行）
+  // 开关用「禁用」命名：零值（false）即启用，对齐 Go 的 *_enabled 缺省 true。
+  schedule_checkin_disabled: boolean;
+  schedule_travel_disabled: boolean;
+  schedule_activity_disabled: boolean;
+  schedule_keepalive_disabled: boolean;
+  schedule_blackcat_disabled: boolean;
+  schedule_growth_disabled: boolean;
+  // 保号类四任务（签到/活跃/保活/余额）对已禁用账号也执行（禁用只关选号，不停保号）。
+  schedule_include_disabled_in_tasks: boolean;
+  // 余额刷新：false=关停循环；分钟 <=0 回落 5。
+  schedule_balance_refresh_enabled: boolean;
+  schedule_balance_refresh_minutes: number;
+  // 快过期积分窗口（小时）：签到/余额刷新时把到期 ≤ now+window 的批次标记为快过期。
+  // <=0 = 禁用路由门槛（展示仍用完整逐包数据）。
+  expiring_soon_hours: number;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -59,6 +82,22 @@ export const DEFAULT_CONFIG: AppConfig = {
   prompt_text: "",
   header_timeout_ms: 600_000,
   stream_idle_ms: 120_000,
+  schedule_checkin_hours: [9, 21],
+  schedule_travel_hours: [9, 21],
+  schedule_activity_hours: [10],
+  schedule_keepalive_hours: [22],
+  schedule_blackcat_hours: [23],
+  schedule_growth_hours: [1],
+  schedule_checkin_disabled: false,
+  schedule_travel_disabled: false,
+  schedule_activity_disabled: false,
+  schedule_keepalive_disabled: false,
+  schedule_blackcat_disabled: false,
+  schedule_growth_disabled: false,
+  schedule_include_disabled_in_tasks: false,
+  schedule_balance_refresh_enabled: true,
+  schedule_balance_refresh_minutes: 5,
+  expiring_soon_hours: 168, // 默认 7 天：官方活动奖励积分多在两周内过期
 };
 
 import { prisma } from "./db";
@@ -95,7 +134,13 @@ export async function saveConfig(raw: unknown): Promise<AppConfig> {
     if (!(k in src)) continue;
     const v = src[k];
     const def = DEFAULT_CONFIG[k];
-    if (typeof def === "number") {
+    if (Array.isArray(def)) {
+      // 整点小时数组：必须全为 0-23 整数（对齐 validateScheduleHours fail-fast）。
+      if (!Array.isArray(v) || v.some((h) => typeof h !== "number" || !Number.isInteger(h) || h < 0 || h > 23)) {
+        throw new Error(`字段 ${k} 必须是 0-23 的整数小时数组；如要关闭该任务请设对应的 *_disabled=true`);
+      }
+      (next as unknown as Record<string, unknown>)[k] = v.slice();
+    } else if (typeof def === "number") {
       if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
         throw new Error(`字段 ${k} 必须是非负数字`);
       }
@@ -109,6 +154,16 @@ export async function saveConfig(raw: unknown): Promise<AppConfig> {
     }
   }
   if (next.max_rotate < 1) throw new Error("max_rotate 至少为 1");
+  // 空 hours 回落默认（对齐 Go normalize：len==0 时用缺省时点）。
+  for (const k of [
+    "schedule_checkin_hours", "schedule_travel_hours", "schedule_activity_hours",
+    "schedule_keepalive_hours", "schedule_blackcat_hours", "schedule_growth_hours",
+  ] as const) {
+    if (next[k].length === 0) (next as unknown as Record<string, unknown>)[k] = [...DEFAULT_CONFIG[k]];
+  }
+  if (next.schedule_balance_refresh_enabled && next.schedule_balance_refresh_minutes <= 0) {
+    next.schedule_balance_refresh_minutes = 5;
+  }
   await prisma.setting.upsert({
     where: { key: "config" },
     create: { key: "config", value: JSON.stringify(next) },
