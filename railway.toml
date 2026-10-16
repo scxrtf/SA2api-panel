@@ -2,14 +2,23 @@
 # 变量（都需在 Railway 服务 Variables 里手动设置，Supabase 不会自动注入）：
 #   DATABASE_URL  — Supabase transaction pooler 连接串（6543，带 pgbouncer=true）
 #   DIRECT_URL    — Supabase session pooler 连接串（5432，迁移用）
-#   WB2A_API_KEY  — 面板主密钥
+#   WB2A_API_KEY  — 面板主密钥（公网必须设置；面板 / /api/v1/* / cron 都靠它鉴权）
+
 [build]
 builder = "NIXPACKS"
 buildCommand = "npm ci && npx prisma generate && npm run build"
 
 [deploy]
+# 启动前先幂等执行迁移（走 DIRECT_URL session pooler；pgbouncer 事务模式不支持
+# migrate 的会话级特性，由 schema.prisma 的 directUrl 分流保证）。
 startCommand = "npx prisma migrate deploy && npm run start"
 healthcheckPath = "/api/livez"
-healthcheckTimeout = 100
+healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
+# 单容器语义：选号运行态（inFlight/lastUsed）是进程内 Map，不要水平扩多副本。
+
+[env]
+# 钉 Node LTS 大版本（Next 16 需要 >=20.9；nixpacks 默认跟随 package.json engines，
+# 未写 engines 时可能选过旧版本，这里显式钉住避免构建漂移）。
+NIXPACKS_NODE_VERSION = "22"
