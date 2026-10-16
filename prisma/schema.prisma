@@ -1,0 +1,178 @@
+// wb2api-next 数据模型（PostgreSQL / Prisma）。
+// 状态从 Go 版的本地文件（auths/*.json、state.json）迁移到 DB：
+//  - Account：账号凭证（access/refresh token、realm、企业信息），等价 Go 的 auth.Auth
+//  - AccountState：池运行时状态（积分、冷却、熔断、禁用），等价 Go 的 pool entry 持久层
+//  - ModelCooldown：(账号,模型) 级冷却/负缓存（6004 限流、11102 无此模型）
+//  - ModelCost：(账号,模型) 实测成本台账（成本分层选号用）
+//  - ApiKey / Provider：网关多密钥与聚合供应商通道
+//  - Setting：面板配置（等价 Go config.json，热生效）
+//  - UsageEvent / RequestLog：用量台账与请求日志
+//  - StickySession：会话粘性绑定（会话键 → 账号）
+//  - LoginSession：设备授权登录流的在途会话
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  uid          String   @id
+  nickname     String   @default("")
+  realm        String   @default("cn") // cn | global
+  accessToken  String   @default("")
+  refreshToken String   @default("")
+  expiresAt    BigInt   @default(0) // unix 秒
+  domain       String   @default("")
+  enterpriseId String   @default("")
+  deviceToken  String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  state          AccountState?
+  modelCooldowns ModelCooldown[]
+  modelCosts     ModelCost[]
+  stickySessions StickySession[]
+  usageEvents    UsageEvent[]
+  requestLogs    RequestLog[]
+}
+
+model AccountState {
+  uid            String  @id
+  account        Account @relation(fields: [uid], references: [uid], onDelete: Cascade)
+  credits        BigInt  @default(0) // 本地插值余额（签到权威值 - 实扣）
+  total          BigInt  @default(0)
+  expiring       BigInt  @default(0) // 窗口内将过期积分
+  earliestAt     BigInt  @default(0) // 最近到期时刻 unix 毫秒，0=无
+  earliestRemain BigInt  @default(0)
+  paused         Boolean @default(false) // 人工暂停（不参与选号，但不算禁用）
+  disabled       Boolean @default(false)
+  disableReason  String  @default("")
+  disabledAt     BigInt  @default(0)
+  softStreak     Int     @default(0) // 连续软冷却次数（指数退避指数，CooldownSoftRate 有界退避用）
+  degradeUntil   BigInt  @default(0) // 连败降权截止 unix 毫秒
+  sessionDead    Boolean @default(false) // 12153 会话失效标记（连续 3 次禁用）
+  sessionStrikes Int     @default(0)
+  cooldownUntil  BigInt  @default(0) // 冷却截止 unix 毫秒
+  cooldownReason String  @default("")
+  breakerFails   Int     @default(0) // 熔断连败计数
+  breakerUntil   BigInt  @default(0) // 熔断截止 unix 毫秒
+  lastUsed       BigInt  @default(0) // 上次选中 unix 毫秒（防并发撞号）
+  usedSeq        BigInt  @default(0) // 单调选中序号（LRU 兜底权威依据）
+  lastCheckinDay String  @default("") // 已签到日（Asia/Shanghai 的 YYYY-MM-DD）
+  balanceAt      BigInt  @default(0) // 上次余额同步 unix 毫秒
+  updatedAt      DateTime @updatedAt
+}
+
+model ModelCooldown {
+  id        String   @id @default(cuid())
+  uid       String
+  account   Account  @relation(fields: [uid], references: [uid], onDelete: Cascade)
+  model     String
+  until     BigInt // unix 毫秒
+  reason    String   @default("")
+  createdAt DateTime @default(now())
+
+  @@unique([uid, model])
+  @@index([until])
+}
+
+model ModelCost {
+  id         String  @id @default(cuid())
+  uid        String
+  account    Account @relation(fields: [uid], references: [uid], onDelete: Cascade)
+  model      String
+  costPer1k  Float   @default(0) // 实测每 1k token 扣费积分；<=0 = 免费
+  tokens     Int     @default(0)
+  observedAt BigInt  @default(0) // unix 毫秒
+  expiresAt  BigInt  @default(0) // 观测过期 unix 毫秒（过期后视为无观测 tier 1）
+
+  @@unique([uid, model])
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  key       String   @unique
+  createdAt DateTime @default(now())
+}
+
+model Provider {
+  id        String   @id @default(cuid())
+  name      String   @unique // 模型名前缀："[name:]model"
+  baseUrl   String
+  apiKey    String   @default("")
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  key       String   @id
+  value     String   @default("") // JSON 字符串
+  updatedAt DateTime @updatedAt
+}
+
+model UsageEvent {
+  id            String   @id @default(cuid())
+  uid           String
+  account       Account  @relation(fields: [uid], references: [uid], onDelete: Cascade)
+  model         String   @default("")
+  realm         String   @default("cn")
+  provider      String   @default("") // 聚合供应商名（空 = 内置池）
+  promptTokens  Int      @default(0)
+  completionTok Int      @default(0)
+  totalTokens   Int      @default(0)
+  credit        Float    @default(0) // 实扣积分（0 = 未上报/免费）
+  ok            Boolean  @default(true)
+  errKind       String   @default("")
+  at            DateTime @default(now())
+
+  @@index([at])
+  @@index([uid, at])
+}
+
+model RequestLog {
+  id         String   @id @default(cuid())
+  uid        String   @default("")
+  account    Account? @relation(fields: [uid], references: [uid], onDelete: SetNull)
+  model      String   @default("")
+  realm      String   @default("")
+  provider   String   @default("")
+  status     Int      @default(0)
+  errKind    String   @default("")
+  stream     Boolean  @default(false)
+  durationMs Int      @default(0)
+  clientIp   String   @default("")
+  ua         String   @default("")
+  path       String   @default("")
+  at         DateTime @default(now())
+
+  @@index([at])
+  @@index([uid, at])
+}
+
+model StickySession {
+  key       String   @id // 会话键（user/conversation 指纹哈希）
+  uid       String
+  account   Account  @relation(fields: [uid], references: [uid], onDelete: Cascade)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([uid])
+}
+
+model LoginSession {
+  id         String   @id // state
+  state      String   @unique @default("")
+  deviceCode String   @default("")
+  userCode   String   @default("")
+  verifyUrl  String   @default("")
+  realm      String   @default("cn")
+  status     String   @default("pending") // pending | done | expired | error
+  uid        String   @default("")
+  error      String   @default("")
+  expiresAt  BigInt   @default(0) // unix 毫秒
+  createdAt  DateTime @default(now())
+}
