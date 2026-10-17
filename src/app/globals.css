@@ -226,6 +226,12 @@ body {
 /* 模型测试进度 */
 .md-prog { font-size: 12px; color: var(--accent); }
 
+/* 行展开详情：键值网格 */
+.kv-grid {
+  display: grid; grid-template-columns: auto 1fr auto 1fr;
+  gap: 6px 18px; font-size: 12.5px; align-items: baseline;
+}
+
 /* ─── 配置页：开关 / hint / 保存栏 ─────────────────────────────── */
 .cfg-fld { min-width: 0; }
 .form-hint { font-size: 12px; color: var(--fg-dim); margin-top: 4px; line-height: 1.45; }

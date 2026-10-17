@@ -17,6 +17,8 @@ export function LogsView({ flash }: { flash: Flash }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [reqs, setReqs] = useState<ReqLog[]>([]);
   const [filter, setFilter] = useState({ account: "", model: "", outcome: "" });
+  const [ipFilter, setIpFilter] = useState("");
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const load = useCallback(() => {
     if (mode === "runtime") {
@@ -27,12 +29,13 @@ export function LogsView({ flash }: { flash: Flash }) {
       if (filter.account) q.set("account", filter.account);
       if (filter.model) q.set("model", filter.model);
       if (filter.outcome) q.set("outcome", filter.outcome);
+      if (ipFilter) q.set("client_ip", ipFilter);
       req<{ entries: ReqLog[] }>("request_logs?" + q.toString()).then((r) => setReqs(r.entries))
         .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
     }
-  }, [mode, filter, ch, flash]);
+  }, [mode, filter, ch, ipFilter, flash]);
   useEffect(load, [load]);
-  useAutoRefresh(load, 10_000, mode === "runtime");
+  useAutoRefresh(load, 10_000);
 
   return (
     <Box title={mode === "requests" ? "请求日志" : "运行日志"} extra={<>
@@ -47,6 +50,8 @@ export function LogsView({ flash }: { flash: Flash }) {
           onChange={(e) => setFilter({ ...filter, outcome: e.target.value })}>
           <option value="">全部结果</option><option value="ok">仅成功</option><option value="error">仅失败</option>
         </select>
+        <input className="input" style={{ width: 110 }} placeholder="IP 过滤" value={ipFilter}
+          onChange={(e) => setIpFilter(e.target.value)} />
       </>}
       <button className="btn xs" onClick={load}>刷新</button>
       {mode === "runtime" && <>
@@ -71,19 +76,49 @@ export function LogsView({ flash }: { flash: Flash }) {
       ) : (
         <div className="tbl-wrap">
           <table className="tbl">
-            <thead><tr><th>时间</th><th>账号</th><th>模型</th><th>状态</th><th>耗时</th><th>流式</th><th>错误</th></tr></thead>
+            <thead><tr><th>时间</th><th>账号</th><th>来源</th><th>模型</th><th>状态</th><th>耗时</th><th>流式</th><th>IP</th><th>错误</th><th style={{ width: 1 }}></th></tr></thead>
             <tbody>
-              {reqs.length === 0 && <tr><td colSpan={7} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无请求日志</td></tr>}
-              {reqs.map((r) => (
-                <tr key={r.id}>
-                  <td className="dim">{new Date(r.at).toLocaleString("zh-CN", { hour12: false })}</td>
-                  <td>{r.uid}</td><td className="mono">{r.model}</td>
-                  <td><span className={"tag " + (r.status < 400 ? "ok" : "err")}>{r.status}</span></td>
-                  <td>{r.durationMs}ms</td>
-                  <td>{r.stream ? "是" : "否"}</td>
-                  <td className="dim">{r.errKind}</td>
-                </tr>
-              ))}
+              {reqs.length === 0 && <tr><td colSpan={10} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无请求日志</td></tr>}
+              {reqs.map((r) => {
+                const open = expanded === r.id;
+                return (
+                  <React.Fragment key={r.id}>
+                    <tr onClick={() => setExpanded(open ? null : r.id)} style={{ cursor: "pointer", ...(open ? { background: "var(--bg-soft)" } : {}) }}>
+                      <td className="dim">{new Date(r.at).toLocaleString("zh-CN", { hour12: false })}</td>
+                      <td>{r.uid || <span className="dim">-</span>}</td>
+                      <td>{r.provider
+                        ? <span className="tag info">{r.provider}</span>
+                        : <span className="tag">{r.realm || "池"}</span>}</td>
+                      <td className="mono">{r.model}</td>
+                      <td><span className={"tag " + (r.status < 400 ? "ok" : "err")}>{r.status}</span></td>
+                      <td>{r.durationMs}ms</td>
+                      <td>{r.stream ? "是" : "否"}</td>
+                      <td className="mono">{r.clientIp || <span className="dim">-</span>}</td>
+                      <td className="dim">{r.errKind}</td>
+                      <td><span className="dim" style={{ fontSize: 12 }}>{open ? "▲" : "▼"}</span></td>
+                    </tr>
+                    {open && (
+                      <tr>
+                        <td colSpan={10} style={{ background: "var(--bg-soft)", padding: "10px 16px" }}>
+                          <div className="kv-grid">
+                            <span className="dim">请求 ID</span><span className="mono">{r.id}</span>
+                            <span className="dim">时间</span><span>{new Date(r.at).toLocaleString("zh-CN", { hour12: false })}</span>
+                            <span className="dim">账号 UID</span><span className="mono">{r.uid || "-"}</span>
+                            <span className="dim">通道</span><span>{r.provider ? "供应商 " + r.provider : "池 " + (r.realm || "-")}</span>
+                            <span className="dim">模型</span><span className="mono">{r.model}</span>
+                            <span className="dim">状态码</span><span>{r.status}</span>
+                            <span className="dim">耗时</span><span>{r.durationMs} ms</span>
+                            <span className="dim">流式</span><span>{r.stream ? "SSE" : "一次性"}</span>
+                            <span className="dim">客户端 IP</span><span className="mono">{r.clientIp || "-"}</span>
+                            <span className="dim">错误类型</span><span>{r.errKind || "-"}</span>
+                            <span className="dim">User-Agent</span><span style={{ wordBreak: "break-all" }}>{r.ua || "-"}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
