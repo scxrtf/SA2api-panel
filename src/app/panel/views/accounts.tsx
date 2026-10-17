@@ -22,6 +22,9 @@ export function AccountsView({ ov, flash, onRefresh }: {
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState<"" | "healthy" | "cooling" | "paused" | "disabled">("");
+  const [realm, setRealm] = useState("");
 
   const op = useCallback(async (uid: string, action: string, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
@@ -53,6 +56,21 @@ export function AccountsView({ ov, flash, onRefresh }: {
     return [...m.entries()];
   }, [ov.accounts]);
 
+  const realms = React.useMemo(() => [...new Set(ov.accounts.map((a) => a.realm))], [ov.accounts]);
+
+  const filtered = React.useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return ov.accounts.filter((a) => {
+      if (status === "healthy" && (a.disabled || a.paused || a.cooling)) return false;
+      if (status === "cooling" && !a.cooling) return false;
+      if (status === "paused" && !a.paused) return false;
+      if (status === "disabled" && !a.disabled) return false;
+      if (realm && a.realm !== realm) return false;
+      if (needle && !(a.uid.toLowerCase().includes(needle) || (a.nickname ?? "").toLowerCase().includes(needle))) return false;
+      return true;
+    });
+  }, [ov.accounts, q, status, realm]);
+
   return (
     <>
       <div className="stat-grid" style={{ marginBottom: 14 }}>
@@ -72,18 +90,39 @@ export function AccountsView({ ov, flash, onRefresh }: {
         <button className="btn xs" onClick={() => batch("balance_all", "刷新余额")}>刷新余额</button>
         <button className="btn xs primary" onClick={() => setAddOpen(true)}>添加账号</button>
       </>}>
+        <div className="pad" style={{ paddingBottom: 0, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input className="input" style={{ width: 220 }} placeholder="搜索 UID / 昵称"
+            value={q} onChange={(e) => setQ(e.target.value)} />
+          <select className="select" value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
+            <option value="">全部状态</option>
+            <option value="healthy">仅健康</option>
+            <option value="cooling">冷却中</option>
+            <option value="paused">已暂停</option>
+            <option value="disabled">已禁用</option>
+          </select>
+          <select className="select" value={realm} onChange={(e) => setRealm(e.target.value)}>
+            <option value="">全部域</option>
+            {realms.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+          {(q || status || realm) && (
+            <button className="btn ghost xs" onClick={() => { setQ(""); setStatus(""); setRealm(""); }}>清除筛选</button>
+          )}
+          <span className="dim" style={{ alignSelf: "center", fontSize: 12, marginLeft: "auto" }}>
+            {filtered.length} / {ov.accounts.length} 个账号
+          </span>
+        </div>
         <div className="tbl-wrap">
           <table className="tbl">
             <thead><tr>
               <th>账号</th><th>域</th><th>积分</th><th>状态</th><th style={{ width: 1 }}></th>
             </tr></thead>
             <tbody>
-              {ov.accounts.length === 0 && (
+              {filtered.length === 0 && (
                 <tr><td colSpan={5} className="dim" style={{ textAlign: "center", padding: 30 }}>
-                  暂无账号，点「添加账号」开始设备授权登录。
+                  {ov.accounts.length === 0 ? "暂无账号，点「添加账号」开始设备授权登录。" : "无匹配账号，调整筛选条件。"}
                 </td></tr>
               )}
-              {ov.accounts.map((a) => (
+              {filtered.map((a) => (
                 <tr key={a.uid}>
                   <td>
                     <div>{a.nickname || a.uid}</div>

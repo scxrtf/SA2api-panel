@@ -10,6 +10,7 @@ interface TestResult { model: string; first_token_ms: number; total_ms: number; 
 export function ModelsView({ flash }: { flash: Flash }) {
   const [models, setModels] = useState<ModelRow[] | null>(null);
   const [q, setQ] = useState("");
+  const [src, setSrc] = useState<"" | "pool" | "provider">("");
   const [results, setResults] = useState<Record<string, TestResult | "running" | string>>({});
   const gen = useRef(0);
 
@@ -32,8 +33,11 @@ export function ModelsView({ flash }: { flash: Flash }) {
     }
   }, []);
 
-  const filtered = (models ?? []).filter((m) =>
-    q === "" || m.id.toLowerCase().includes(q.toLowerCase()) || (m.vendor ?? "").toLowerCase().includes(q.toLowerCase()));
+  const filtered = (models ?? []).filter((m) => {
+    if (src === "pool" && m.provider) return false;
+    if (src === "provider" && !m.provider) return false;
+    return q === "" || m.id.toLowerCase().includes(q.toLowerCase()) || (m.vendor ?? "").toLowerCase().includes(q.toLowerCase());
+  });
 
   return (
     <Box title="模型能力"
@@ -41,6 +45,11 @@ export function ModelsView({ flash }: { flash: Flash }) {
       extra={<>
         <input className="input" style={{ width: 200 }} placeholder="过滤模型 / 供应商"
           value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="btn-row" style={{ gap: 4 }}>
+          {([["", "全部"], ["pool", "池"], ["provider", "供应商"]] as const).map(([v, label]) => (
+            <button key={v} className={"btn xs" + (src === v ? " primary" : "")} onClick={() => setSrc(v)}>{label}</button>
+          ))}
+        </div>
         <button className="btn xs" onClick={load}>重新获取</button>
       </>}>
       {!models ? (

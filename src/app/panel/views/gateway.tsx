@@ -76,6 +76,7 @@ function ProvidersBox({ flash }: { flash: Flash }) {
   const [rows, setRows] = useState<ProviderRow[] | null>(null);
   const [form, setForm] = useState({ name: "", base_url: "", key: "", models: "" });
   const [probe, setProbe] = useState("");
+  const [probeErr, setProbeErr] = useState(false);
   const [probeModels, setProbeModels] = useState<string[]>([]);
 
   const load = useCallback(() => {
@@ -101,12 +102,17 @@ function ProvidersBox({ flash }: { flash: Flash }) {
   const probeNow = async () => {
     setProbing(true);
     setProbe("探测中…");
+    setProbeErr(false);
     try {
       const r = await req<{ models?: string[]; ok_count?: number; message?: string }>("providers/probe", { method: "POST", body: { base_url: form.base_url, key: form.key } });
       const models = r.models ?? [];
       setProbeModels(models);
-      setProbe(models.length + " 个模型");
-    } catch (e) { setProbe(e instanceof Error ? e.message : String(e)); }
+      setProbe(models.length > 0 ? models.length + " 个模型" : "上游返回 0 个模型");
+    } catch (e) {
+      setProbeErr(true);
+      setProbeModels([]);
+      setProbe(e instanceof Error ? e.message : String(e));
+    }
     finally { setProbing(false); }
   };
 
@@ -137,7 +143,7 @@ function ProvidersBox({ flash }: { flash: Flash }) {
           <button className="btn" onClick={probeNow} disabled={!form.base_url || !form.key || probing}>
             {probing ? "探测中…" : "获取模型列表"}
           </button>
-          {probe && <span className="dim" style={{ alignSelf: "center" }}>{probe}</span>}
+          {probe && <span className={probeErr ? "" : "dim"} style={{ alignSelf: "center", ...(probeErr ? { color: "var(--err)", fontSize: 12 } : {}) }}>{probe}</span>}
         </div>
         {probeModels.length > 0 && (
           <div style={{ marginTop: 10 }}>

@@ -15,7 +15,8 @@ export async function POST(req: Request) {
   try {
     const headers: Record<string, string> = {};
     if (key) headers["Authorization"] = "Bearer " + key;
-    const resp = await fetch(baseUrl + "/v1/models", {
+    const url = /\/v\d+[a-z]*$/i.test(baseUrl) ? baseUrl + "/models" : baseUrl + "/v1/models";
+    const resp = await fetch(url, {
       headers,
       signal: AbortSignal.timeout(15_000),
     });
