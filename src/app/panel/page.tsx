@@ -46,6 +46,7 @@ export default function PanelPage() {
   const [view, setView] = useState<View>("accounts");
   const [ov, setOv] = useState<Overview | null>(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [syncAt, setSyncAt] = useState<number | null>(null);
 
   const flash = useCallback((kind: "ok" | "err", text: string) => {
     setMsg({ kind, text });
@@ -56,6 +57,7 @@ export default function PanelPage() {
     try {
       const r = await req<Overview>("overview");
       setOv(r); setAuthed(true);
+      setSyncAt(Date.now());
     } catch (e) {
       if (e instanceof Error && e.message === "__AUTH__") setAuthed(false);
       else flash("err", e instanceof Error ? e.message : String(e));
@@ -101,7 +103,7 @@ export default function PanelPage() {
           {NAV.map((n) => (
             <li key={n.id}>
               <a className={view === n.id ? "on" : ""} onClick={() => setView(n.id)}>
-                {n.icon}{n.label}
+                <span className="ic">{n.icon}</span>{n.label}
               </a>
             </li>
           ))}
@@ -124,7 +126,8 @@ export default function PanelPage() {
           <span className="meta">{t.sub}</span>
           <div className="grow"></div>
           {ov && <span className="meta">运行 {fmtDur(ov.uptime_sec)}</span>}
-          <button className="btn" onClick={loadOverview}>刷新</button>
+          <span className="meta">上次同步 {syncAt ? new Date(syncAt).toLocaleTimeString("zh-CN", { hour12: false }) : "—"}</span>
+          <button className="btn ghost" onClick={loadOverview}>刷新</button>
         </div>
 
         {msg && <div className={"msg " + msg.kind}>{msg.text}</div>}
