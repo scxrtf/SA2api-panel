@@ -53,3 +53,15 @@ export function fmtDur(sec: number): string {
   if (sec < 86400) return Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m";
   return Math.floor(sec / 86400) + "d" + Math.floor((sec % 86400) / 3600) + "h";
 }
+
+// useAutoRefresh：到点重跑一次 loader，页面不可见时暂停。
+// 用于面板视图轮询（对齐 Go app.js 的 setInterval 刷新约定）。
+import { useEffect } from "react";
+export function useAutoRefresh(loader: () => void, ms: number, enabled = true): void {
+  useEffect(() => {
+    if (!enabled || ms <= 0) return;
+    const tick = () => { if (document.visibilityState === "visible") loader(); };
+    const t = setInterval(tick, ms);
+    return () => clearInterval(t);
+  }, [loader, ms, enabled]);
+}

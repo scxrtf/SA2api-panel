@@ -1,7 +1,7 @@
 "use client";
 // 供应商与密钥视图（对齐 Go view-gateway：密钥环 + 聚合供应商合一页）。
 import React, { useCallback, useEffect, useState } from "react";
-import { req } from "../lib";
+import { req, useAutoRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
 interface KeyRow { name: string; key_mask: string; created_at: string }
@@ -26,6 +26,7 @@ function KeysBox({ flash }: { flash: Flash }) {
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [flash]);
   useEffect(load, [load]);
+  useAutoRefresh(load, 30_000);
 
   const create = async () => {
     try {
@@ -82,6 +83,7 @@ function ProvidersBox({ flash }: { flash: Flash }) {
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [flash]);
   useEffect(load, [load]);
+  useAutoRefresh(load, 30_000);
 
   const create = async () => {
     try {

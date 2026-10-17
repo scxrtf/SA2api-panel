@@ -1,16 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0f1115;
-  --bg-soft: #161a22;
-  --bg-card: #1b202b;
-  --border: #2a3140;
-  --fg: #e6e9f0;
-  --fg-dim: #8b93a5;
-  --accent: #4f8cff;
-  --ok: #34c07c;
-  --warn: #e0a53f;
-  --err: #e05f5f;
+  --bg: #f3f5f9;
+  --bg-soft: #f8fafc;
+  --bg-card: #ffffff;
+  --border: #e2e8f0;
+  --fg: #1e293b;
+  --fg-dim: #64748b;
+  --accent: #3b82f6;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --err: #dc2626;
 }
 
 body {
@@ -18,6 +18,7 @@ body {
   color: var(--fg);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
   font-size: 14px;
+  line-height: 1.55;
 }
 
 .panel-shell { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
@@ -37,7 +38,8 @@ body {
 
 .card {
   background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
+  border-radius: 10px; padding: 14px 16px; margin-bottom: 14px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .06);
 }
 .card-title { font-size: 13px; color: var(--fg-dim); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
 
@@ -50,6 +52,7 @@ body {
 .tbl th {
   text-align: left; padding: 8px 10px; color: var(--fg-dim); font-weight: 600;
   border-bottom: 1px solid var(--border); white-space: nowrap;
+  background: var(--bg-soft);
 }
 .tbl td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .tbl tr:hover td { background: var(--bg-soft); }
@@ -59,16 +62,17 @@ body {
   display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px;
   border: 1px solid var(--border); color: var(--fg-dim); margin-right: 4px; white-space: nowrap;
 }
-.tag.ok { color: var(--ok); border-color: var(--ok); }
-.tag.warn { color: var(--warn); border-color: var(--warn); }
-.tag.err { color: var(--err); border-color: var(--err); }
-.tag.info { color: var(--accent); border-color: var(--accent); }
+.tag.ok { color: var(--ok); border-color: #bbf7d0; background: #f0fdf4; }
+.tag.warn { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
+.tag.err { color: var(--err); border-color: #fecaca; background: #fef2f2; }
+.tag.info { color: var(--accent); border-color: #bfdbfe; background: #eff6ff; }
 
 .btn {
   padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
-  background: var(--bg-soft); color: var(--fg); cursor: pointer; font-size: 13px;
+  background: #fff; color: var(--fg); cursor: pointer; font-size: 13px;
+  transition: border-color .15s, box-shadow .15s, background .15s;
 }
-.btn:hover { border-color: var(--fg-dim); }
+.btn:hover { border-color: var(--fg-dim); box-shadow: 0 1px 2px rgba(15, 23, 42, .08); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.danger { color: var(--err); border-color: var(--err); background: transparent; }
 .btn.small { padding: 2px 8px; font-size: 12px; }
@@ -77,16 +81,21 @@ body {
 
 .input, .select, .textarea {
   width: 100%; padding: 6px 10px; border-radius: 6px; font-size: 13px;
-  border: 1px solid var(--border); background: var(--bg-soft); color: var(--fg);
+  border: 1px solid var(--border); background: #fff; color: var(--fg);
+  transition: border-color .15s, box-shadow .15s;
 }
-.input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--accent); }
+.input:focus, .select:focus, .textarea:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, .18);
+}
+.input::placeholder, .textarea::placeholder { color: #94a3b8; }
 .form-row { margin-bottom: 10px; }
 .form-label { display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 16px; }
 
 .msg { padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 13px; }
-.msg.err { background: rgba(224,95,95,.12); border: 1px solid var(--err); color: var(--err); }
-.msg.ok { background: rgba(52,192,124,.12); border: 1px solid var(--ok); color: var(--ok); }
+.msg.err { background: #fef2f2; border: 1px solid #fecaca; color: var(--err); }
+.msg.ok { background: #f0fdf4; border: 1px solid #bbf7d0; color: var(--ok); }
 
 .modal-mask {
   position: fixed; inset: 0; background: rgba(0,0,0,.55);
@@ -105,7 +114,7 @@ body {
 /* ─── P3 侧边栏布局（对齐 Go 面板 shell/nav/main/topbar）────────────────── */
 .shell { display: flex; min-height: 100vh; }
 .sidenav {
-  width: 208px; flex-shrink: 0; background: var(--bg-soft);
+  width: 208px; flex-shrink: 0; background: #fff;
   border-right: 1px solid var(--border); padding: 18px 12px;
   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
 }
@@ -119,8 +128,8 @@ body {
   color: var(--fg-dim); text-decoration: none; font-size: 13.5px; cursor: pointer;
   border: 1px solid transparent;
 }
-.sidenav a:hover { color: var(--fg); background: var(--bg-card); }
-.sidenav a.on { color: var(--fg); background: var(--bg-card); border-color: var(--border); }
+.sidenav a:hover { color: var(--fg); background: var(--bg-soft); }
+.sidenav a.on { color: var(--accent); background: #eff6ff; border-color: #bfdbfe; }
 .sidenav a svg { width: 15px; height: 15px; flex-shrink: 0; }
 .sidenav .sig { padding: 12px 10px 4px; border-top: 1px solid var(--border); font-size: 12px; color: var(--fg-dim); }
 .sidenav .sig .row { display: flex; align-items: center; gap: 7px; }
@@ -132,6 +141,8 @@ body {
   display: flex; align-items: center; gap: 12px; padding: 16px 0 14px;
   border-bottom: 1px solid var(--border); margin-bottom: 18px;
   position: sticky; top: 0; background: var(--bg); z-index: 10;
+  backdrop-filter: blur(6px);
+  background: rgba(243, 245, 249, .85);
 }
 .topbar h2 { font-size: 17px; margin: 0; font-weight: 700; }
 .topbar .sep { color: var(--fg-dim); }
@@ -141,7 +152,8 @@ body {
 /* box 容器（对齐 Go 的 .box） */
 .box {
   background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 9px; margin-bottom: 16px; overflow: hidden;
+  border-radius: 10px; margin-bottom: 16px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .06);
 }
 .box > header {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -264,7 +276,7 @@ body {
 .probe-models input { accent-color: var(--accent); }
 
 /* ─── 运行日志：频道标签 / 级别着色（对齐 Go .ln/.lch）──────────── */
-.ln { display: block; padding: 1px 0; line-height: 1.55; white-space: pre-wrap; word-break: break-all; }
+.ln { display: block; padding: 1px 0; line-height: 1.55; white-space: pre-wrap; word-break: break-all; font-family: Consolas, monospace; font-size: 12.5px; }
 .ln.e { color: var(--err); }
 .ln.w { color: var(--warn); }
 .lch {
@@ -274,3 +286,14 @@ body {
 .lch.c-task { color: var(--accent); border-color: var(--accent); }
 .lch.c-chat { color: var(--ok); border-color: var(--ok); }
 .lch.c-sys { color: var(--fg-dim); }
+
+/* 亮色主题下日志查看器用深色面板衬出层级（对齐常用 dashboard） */
+.logview {
+  background: #0f172a; color: #e2e8f0; border-radius: 8px;
+  padding: 10px 12px; max-height: 520px; overflow-y: auto;
+}
+.logview .lch { border-color: rgba(255,255,255,.18); }
+.logview .lch.c-task { color: #93c5fd; border-color: #93c5fd; }
+.logview .lch.c-chat { color: #86efac; border-color: #86efac; }
+.logview .ln.e { color: #fca5a5; }
+.logview .ln.w { color: #fcd34d; }

@@ -2,7 +2,7 @@
 // 管理面板外壳（P3 重构）：侧边栏导航 + 8 视图调度。
 // 对齐 Go internal/panel/index.html 的 shell/nav/main/topbar 结构。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, getKey, setKey, fmtDur } from "./lib";
+import { req, getKey, setKey, fmtDur, useAutoRefresh } from "./lib";
 import type { Overview } from "./components/ui";
 import { AccountsView } from "./views/accounts";
 import { UsageView } from "./views/usage";
@@ -63,6 +63,7 @@ export default function PanelPage() {
   }, [flash]);
 
   useEffect(() => { loadOverview(); }, [loadOverview]);
+  useAutoRefresh(() => { void loadOverview(); }, 15_000, authed === true);
 
   // 登录页
   if (authed === false) {

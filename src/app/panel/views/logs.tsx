@@ -1,7 +1,7 @@
 "use client";
 // 运行日志视图（对齐 Go view-logs）：请求日志 / 运行日志双模式 + 过滤。
 import React, { useCallback, useEffect, useState } from "react";
-import { req } from "../lib";
+import { req, useAutoRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
 interface LogEntry { ts: number; ch: "task" | "chat" | "sys"; text: string }
@@ -32,6 +32,7 @@ export function LogsView({ flash }: { flash: Flash }) {
     }
   }, [mode, filter, ch, flash]);
   useEffect(load, [load]);
+  useAutoRefresh(load, 10_000, mode === "runtime");
 
   return (
     <Box title={mode === "requests" ? "请求日志" : "运行日志"} extra={<>
@@ -58,8 +59,8 @@ export function LogsView({ flash }: { flash: Flash }) {
     </>}>
       {mode === "runtime" ? (
         <div className="pad">
-          <div className="mono" style={{ maxHeight: 520, overflowY: "auto" }}>
-            {logs.length === 0 && <div className="dim">暂无运行日志</div>}
+          <div className="logview">
+            {logs.length === 0 && <div style={{ color: "#64748b" }}>暂无运行日志</div>}
             {logs.map((l, i) => (
               <div key={i} className={"ln" + (/error|失败|错误/.test(l.text) ? " e" : /warn|冷却|熔断/.test(l.text) ? " w" : "")}>{
                 new Date(l.ts).toLocaleTimeString("zh-CN", { hour12: false })

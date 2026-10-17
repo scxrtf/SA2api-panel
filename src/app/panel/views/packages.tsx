@@ -1,7 +1,7 @@
 "use client";
 // 积分构成视图（对齐 Go view-packages）：按账号列出套餐包构成 + 到期分布。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, fmtNum, fmtTime } from "../lib";
+import { req, fmtNum, fmtTime, useAutoRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { PackageMixBar, ExpiryDistribution } from "../components/packageCharts";
 
@@ -24,6 +24,7 @@ export function PackagesView({ flash }: { flash: Flash }) {
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [flash]);
   useEffect(load, [load]);
+  useAutoRefresh(load, 60_000);
 
   return (
     <Box title="积分构成" hint="按账号列出套餐包 · 上游按失效时刻先后自动优先扣减（FEFO）"

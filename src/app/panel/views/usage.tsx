@@ -1,7 +1,7 @@
 "use client";
 // 用量视图（对齐 Go view-usage）：时间窗统计 + 按模型/账号分布。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, fmtNum } from "../lib";
+import { req, fmtNum, useAutoRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { UsageChart, type SeriesPoint } from "../components/usageChart";
 
@@ -22,6 +22,7 @@ export function UsageView({ flash }: { flash: Flash }) {
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [hours, flash]);
   useEffect(load, [load]);
+  useAutoRefresh(load, 30_000);
 
   if (!u) return <Box title="用量统计" pad><div className="dim">加载用量…</div></Box>;
 
