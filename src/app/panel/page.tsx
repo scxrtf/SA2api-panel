@@ -72,7 +72,7 @@ export default function PanelPage() {
     return (
       <div className="login-wrap">
         <div className="card">
-          <div className="card-title">workbuddy2api 面板登录</div>
+          <div className="card-title">WORKBUDDY2API</div>
           <div className="form-row">
             <input className="input" type="password" value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}
@@ -80,8 +80,10 @@ export default function PanelPage() {
               placeholder="输入 WB2A_API_KEY" autoFocus />
           </div>
           {msg && <div className={"msg " + msg.kind}>{msg.text}</div>}
-          <button className="btn primary" style={{ width: "100%" }}
-            onClick={() => { setKey(keyInput); loadOverview(); }}>进入面板</button>
+          <button className="btn-cta" style={{ marginTop: 6 }}
+            onClick={() => { setKey(keyInput); loadOverview(); }}>
+            <span>进入面板</span><span className="arr">→</span>
+          </button>
           <div className="dim" style={{ marginTop: 10, fontSize: 12 }}>
             密钥仅保存在浏览器 localStorage，所有请求以 Bearer 头携带。
           </div>
@@ -97,12 +99,13 @@ export default function PanelPage() {
       <nav className="sidenav">
         <div className="brand">
           <div className="name">WorkBuddy2API</div>
-          <div className="sub">控制台（Next.js 版）</div>
+          <div className="sub">WB2A · CONSOLE</div>
         </div>
         <ul>
-          {NAV.map((n) => (
+          {NAV.map((n, i) => (
             <li key={n.id}>
               <a className={view === n.id ? "on" : ""} onClick={() => setView(n.id)}>
+                <span className="num">{String(i + 1).padStart(2, "0")}</span>
                 <span className="ic">{n.icon}</span>{n.label}
               </a>
             </li>
