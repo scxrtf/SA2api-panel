@@ -376,3 +376,97 @@ body {
 .logview .lch.c-chat { color: #86efac; border-color: #86efac; }
 .logview .ln.e { color: #fca5a5; }
 .logview .ln.w { color: #fcd34d; }
+
+/* ─── P10.2 布局与动效（CloseRouter 分页式头部 + 全局面动）────────────── */
+
+/* 分页式顶栏：NN / MM · SLUG ········· 圆点分页器 */
+.topbar { flex-direction: column; align-items: stretch; gap: 6px; }
+.tb-meta {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 12px; color: var(--fg-dim);
+  letter-spacing: 1.5px; text-transform: uppercase;
+}
+.tb-idx { color: var(--accent); font-weight: 700; }
+.tb-dot-sep { opacity: .5; }
+.tb-slug { color: var(--fg); font-weight: 600; }
+.tb-dots { display: inline-flex; gap: 7px; align-items: center; margin-left: 8px; }
+.tb-dot {
+  width: 7px; height: 7px; border-radius: 999px; border: 0; padding: 0;
+  background: #d6d3d1; cursor: pointer;
+  transition: width .25s cubic-bezier(.34,1.4,.64,1), background .2s;
+}
+.tb-dot:hover { background: #a8a29e; }
+.tb-dot.on { width: 22px; background: var(--accent); }
+.tb-title {
+  font-size: 30px; font-weight: 800; letter-spacing: .5px; margin: 6px 0 0;
+  line-height: 1.2;
+}
+.tb-sub { color: var(--fg-dim); font-size: 13px; }
+.sidenav-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: #fff; cursor: pointer;
+  font-size: 13px; color: var(--fg-dim); transition: border-color .15s, color .15s;
+}
+.sidenav-toggle:hover { border-color: var(--border-strong); color: var(--fg); }
+
+/* 侧边栏收起态：滑出动画 */
+.sidenav { transition: margin-left .3s cubic-bezier(.4,0,.2,1), opacity .25s; }
+.shell.nav-off .sidenav { margin-left: -216px; opacity: 0; pointer-events: none; }
+
+/* 视图切换：淡入上移 */
+.view-anim { animation: viewIn .28s cubic-bezier(.22,.9,.36,1); }
+@keyframes viewIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 卡片错落入场（每个 box 依序延迟浮现） */
+.view-anim > .box, .view-anim > .stat-grid, .view-anim > * > .box {
+  animation: cardIn .4s cubic-bezier(.22,.9,.36,1) both;
+}
+.view-anim > *:nth-child(2), .view-anim > * > .box:nth-child(2) { animation-delay: .05s; }
+.view-anim > *:nth-child(3), .view-anim > * > .box:nth-child(3) { animation-delay: .1s; }
+.view-anim > *:nth-child(4), .view-anim > * > .box:nth-child(4) { animation-delay: .15s; }
+.view-anim > *:nth-child(5), .view-anim > * > .box:nth-child(5) { animation-delay: .2s; }
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 表格行淡入 */
+.tbl tbody tr { animation: rowIn .2s ease both; }
+@keyframes rowIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* 消息条滑入 */
+.msg { animation: msgIn .25s cubic-bezier(.22,.9,.36,1); }
+@keyframes msgIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 行展开详情：高度渐显 */
+.kv-grid { animation: kvIn .22s ease; }
+@keyframes kvIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 进度条流光（closerouter 机柜流光点） */
+.qbar i {
+  background: linear-gradient(90deg, var(--accent) 0%, #f5b78a 50%, var(--accent) 100%);
+  background-size: 200% 100%;
+  animation: qshimmer 1.6s linear infinite, qwidth .3s;
+}
+@keyframes qshimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes qwidth { from { width: 0; } }
+
+/* 供应商探测清单弹入 */
+.probe-models { animation: kvIn .25s ease; }
+
+/* 登录页卡片悬浮感 */
+.login-wrap .card {
+  border-radius: 20px; padding: 26px;
+  box-shadow: 0 8px 30px rgba(28, 25, 23, .08);
+  animation: cardIn .45s cubic-bezier(.22,.9,.36,1);
+}
+.login-wrap .card-title { font-size: 15px; letter-spacing: 3px; color: var(--fg); }
+
+/* 减少动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

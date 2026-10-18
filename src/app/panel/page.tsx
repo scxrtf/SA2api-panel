@@ -47,6 +47,7 @@ export default function PanelPage() {
   const [ov, setOv] = useState<Overview | null>(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [syncAt, setSyncAt] = useState<number | null>(null);
+  const [navOpen, setNavOpen] = useState(true);
 
   const flash = useCallback((kind: "ok" | "err", text: string) => {
     setMsg({ kind, text });
@@ -95,7 +96,7 @@ export default function PanelPage() {
   const t = TITLES[view];
 
   return (
-    <div className="shell">
+    <div className={"shell" + (navOpen ? "" : " nav-off")}>
       <nav className="sidenav">
         <div className="brand">
           <div className="name">WorkBuddy2API</div>
@@ -124,28 +125,44 @@ export default function PanelPage() {
 
       <div className="main">
         <div className="topbar">
-          <h2>{t.title}</h2>
-          <span className="sep">/</span>
-          <span className="meta">{t.sub}</span>
-          <div className="grow"></div>
-          {ov && <span className="meta">运行 {fmtDur(ov.uptime_sec)}</span>}
-          <span className="meta">上次同步 {syncAt ? new Date(syncAt).toLocaleTimeString("zh-CN", { hour12: false }) : "—"}</span>
-          <button className="btn ghost" onClick={loadOverview}>刷新</button>
+          <div className="tb-meta">
+            <span className="tb-idx">
+              {String(NAV.findIndex((n) => n.id === view) + 1).padStart(2, "0")} / {String(NAV.length).padStart(2, "0")}
+            </span>
+            <span className="tb-dot-sep">·</span>
+            <span className="tb-slug">{view}</span>
+            <span className="tb-dots">
+              {NAV.map((n) => (
+                <button key={n.id} title={n.label}
+                  className={"tb-dot" + (n.id === view ? " on" : "")}
+                  onClick={() => setView(n.id)} />
+              ))}
+            </span>
+            <span className="grow"></span>
+            {ov && <span className="meta">运行 {fmtDur(ov.uptime_sec)}</span>}
+            <span className="meta">上次同步 {syncAt ? new Date(syncAt).toLocaleTimeString("zh-CN", { hour12: false }) : "—"}</span>
+            <button className="btn ghost xs" onClick={loadOverview}>刷新</button>
+            <button className="sidenav-toggle" title="收起/展开导航" onClick={() => setNavOpen(!navOpen)}>☰</button>
+          </div>
+          <h2 className="tb-title">{t.title}</h2>
+          <div className="tb-sub">{t.sub}</div>
         </div>
 
         {msg && <div className={"msg " + msg.kind}>{msg.text}</div>}
 
-        {view === "accounts" && (ov
-          ? <AccountsView ov={ov} flash={flash} onRefresh={loadOverview} />
-          : <div className="box"><div className="pad dim">加载中…</div></div>)}
-        {view === "usage" && <UsageView flash={flash} />}
-        {view === "packages" && <PackagesView flash={flash} />}
-        {view === "taskscenter" && <TasksCenterView flash={flash} />}
-        {view === "models" && <ModelsView flash={flash} />}
-        {view === "gateway" && <GatewayView flash={flash} />}
-        {view === "connect" && <ConnectView />}
-        {view === "config" && <ConfigView flash={flash} />}
-        {view === "logs" && <LogsView flash={flash} />}
+        <div key={view} className="view-anim">
+          {view === "accounts" && (ov
+            ? <AccountsView ov={ov} flash={flash} onRefresh={loadOverview} />
+            : <div className="box"><div className="pad dim">加载中…</div></div>)}
+          {view === "usage" && <UsageView flash={flash} />}
+          {view === "packages" && <PackagesView flash={flash} />}
+          {view === "taskscenter" && <TasksCenterView flash={flash} />}
+          {view === "models" && <ModelsView flash={flash} />}
+          {view === "gateway" && <GatewayView flash={flash} />}
+          {view === "connect" && <ConnectView />}
+          {view === "config" && <ConfigView flash={flash} />}
+          {view === "logs" && <LogsView flash={flash} />}
+        </div>
       </div>
     </div>
   );
