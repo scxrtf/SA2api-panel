@@ -5,7 +5,64 @@ import { req, useAutoRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
 interface ModelRow { id: string; name: string; credits?: number | string; vendor?: string; provider?: boolean }
-interface TestResult { model: string; first_token_ms: number; total_ms: number; output_tokens: number; tokens_per_sec: number }
+interface TestResult {
+  model: string; first_token_ms: number; total_ms: number;
+  output_tokens: number; tokens_per_sec: number;
+  gen_ms?: number; chunks?: number; output_chars?: number; usage_tokens?: number | null;
+}
+interface ProbeRec {
+  claimed: number | null; measured: number | null; verdict: string;
+  note: string; tested_at: string; source: string;
+}
+
+// fmtK / probeDays / ProbeCell 移植 Go 面板 app.js 的实测上限标注（五态之三）。
+function fmtK(n: number): string { return n >= 1000 ? Math.round(n / 1000) + "K" : String(n); }
+function probeDays(ts: string): number | null {
+  if (!ts) return null;
+  const d = (Date.now() - new Date(ts).getTime()) / 86400000;
+  return isNaN(d) ? null : Math.floor(d);
+}
+function ProbeCell({ pr }: { pr: ProbeRec | undefined }) {
+  if (!pr) return <span className="dim">—</span>;
+  const tip = `声称 ${pr.claimed ? fmtK(pr.claimed) : "?"} · 实测 ${pr.measured ? fmtK(pr.measured) : "?"}` +
+    (pr.note ? " · " + pr.note : "") + (pr.tested_at ? " · 探测于 " + new Date(pr.tested_at).toLocaleString("zh-CN", { hour12: false }) : "");
+  const days = probeDays(pr.tested_at);
+  const stale = days !== null && days > 30 ? ` · ${days} 天前` : "";
+  if (pr.verdict === "clamped" && pr.measured) {
+    if (pr.claimed && pr.measured < pr.claimed) {
+      const x = pr.claimed / pr.measured;
+      const xs = (x >= 10 ? Math.round(x) : Math.round(x * 10) / 10) + "×";
+      return (
+        <span title={tip}>
+          <span style={{ color: "var(--warn)", fontWeight: 600 }}>{fmtK(pr.measured)} ⚠</span>
+          <div style={{ fontSize: 11, color: "var(--fg-dim)" }}>钳制 {xs}{stale}</div>
+        </span>
+      );
+    }
+    return (
+      <span title={tip}>
+        <span style={{ color: "var(--ok)" }}>{fmtK(pr.measured)}{pr.claimed && pr.measured > pr.claimed ? " ↑" : " ✓"}</span>
+      </span>
+    );
+  }
+  if (pr.verdict === "at_least" && pr.measured) {
+    return <span title={tip} style={{ color: "var(--fg-dim)" }}>≥{fmtK(pr.measured)}</span>;
+  }
+  return (
+    <span title={tip}>
+      <span style={{ color: "var(--fg-dim)" }}>?</span>
+      <div style={{ fontSize: 11, color: "var(--fg-dim)" }}>未测出{stale}</div>
+    </span>
+  );
+}
+
+// 实测状态分级：对齐 CloseRouter 测速页的直观好坏提示。
+function gradeOf(r: TestResult): { cls: string; text: string } {
+  const tps = r.tokens_per_sec;
+  if (tps >= 30 && r.first_token_ms <= 1500) return { cls: "ok", text: "优秀" };
+  if (tps >= 15 && r.first_token_ms <= 3000) return { cls: "info", text: "良好" };
+  return { cls: "warn", text: "偏慢" };
+}
 
 export function ModelsView({ flash }: { flash: Flash }) {
   const [models, setModels] = useState<ModelRow[] | null>(null);
@@ -14,13 +71,18 @@ export function ModelsView({ flash }: { flash: Flash }) {
   const [q, setQ] = useState("");
   const [src, setSrc] = useState<"" | "pool" | "provider">("");
   const [results, setResults] = useState<Record<string, TestResult | "running" | string>>({});
+  const [probes, setProbes] = useState<Record<string, ProbeRec>>({});
+  const [probing, setProbing] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const gen = useRef(0);
 
   const load = useCallback(() => {
     setLoading(true);
-    req<{ models: ModelRow[] }>("models")
-      .then((r) => { setModels(r.models); setLoadedAt(Date.now()); })
+    Promise.all([
+      req<{ models: ModelRow[] }>("models"),
+      req<{ probes: Record<string, ProbeRec> }>("model_probes").catch(() => ({ probes: {} })),
+    ])
+      .then(([r, pr]) => { setModels(r.models); setProbes(pr.probes ?? {}); setLoadedAt(Date.now()); })
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, [flash]);
@@ -37,6 +99,31 @@ export function ModelsView({ flash }: { flash: Flash }) {
       setResults((s) => ({ ...s, [id]: e instanceof Error ? e.message : String(e) }));
     }
   }, []);
+
+  // 探测键带域前缀（cn:glm-5.2），模型表 id 已是全前缀，直接精确命中。
+  const probeOf = (id: string) => probes[id];
+
+  const probe = useCallback(async (m: ModelRow) => {
+    const id = m.id;
+    setProbing((s) => ({ ...s, [id]: true }));
+    try {
+      const r = await req<{ result: { measured: number | null; verdict: string; note: string; elapsed_s: number } }>(
+        "models/probe", { method: "POST", body: { model: id } });
+      // 探测结果落库，本地同步刷新该行（claimed 面板探测未知，置 null）。
+      setProbes((s) => ({
+        ...s,
+        [id]: {
+          claimed: null, measured: r.result.measured, verdict: r.result.verdict,
+          note: r.result.note, tested_at: new Date().toISOString(), source: "panel-probe",
+        },
+      }));
+      flash("ok", `${id} 探测完成：${r.result.verdict}${r.result.measured ? " " + fmtK(r.result.measured) : ""}`);
+    } catch (e) {
+      flash("err", e instanceof Error ? e.message : String(e));
+    } finally {
+      setProbing((s) => ({ ...s, [id]: false }));
+    }
+  }, [flash]);
 
   const filtered = (models ?? []).filter((m) => {
     if (src === "pool" && m.provider) return false;
@@ -67,12 +154,13 @@ export function ModelsView({ flash }: { flash: Flash }) {
       ) : (
         <div className="tbl-wrap">
           <table className="tbl">
-            <thead><tr><th>模型 ID</th><th>名称</th><th>来源</th><th>积分/1k</th><th>实测</th><th style={{ width: 1 }}></th></tr></thead>
+            <thead><tr><th>模型 ID</th><th>名称</th><th>来源</th><th>积分/1k</th><th>实测上限</th><th>实测</th><th style={{ width: 1 }}></th></tr></thead>
             <tbody>
-              {filtered.length === 0 && <tr><td colSpan={6} className="dim" style={{ textAlign: "center", padding: 24 }}>无匹配模型</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={7} className="dim" style={{ textAlign: "center", padding: 24 }}>无匹配模型</td></tr>}
               {filtered.map((m) => {
                 const r = results[m.id];
                 const open = expanded === m.id;
+                const pr = probeOf(m.id);
                 return (
                   <React.Fragment key={m.id}>
                     <tr style={open ? { background: "var(--bg-soft)" } : undefined}>
@@ -80,20 +168,28 @@ export function ModelsView({ flash }: { flash: Flash }) {
                       <td>{m.name}</td>
                       <td>{m.provider ? <span className="tag info">{m.vendor}</span> : <span className="tag">池</span>}</td>
                       <td className="dim">{m.credits === "" || m.credits === undefined ? "-" : m.credits}</td>
+                      <td className="mono" style={{ fontSize: 12 }}><ProbeCell pr={pr} /></td>
                       <td>
                         {r === undefined && <span className="dim">-</span>}
                         {r === "running" && <span className="md-prog">测试中…</span>}
                         {typeof r === "string" && r !== "running" && <span className="tag err">{r}</span>}
                         {typeof r === "object" && (
-                          <span className="tag ok">
-                            首字 {r.first_token_ms}ms · {r.tokens_per_sec} tok/s
-                          </span>
+                          <>
+                            <span className={"tag " + gradeOf(r).cls}>{gradeOf(r).text}</span>{" "}
+                            <span className="mono" style={{ fontSize: 12 }}>
+                              TTFT {r.first_token_ms}ms · {r.tokens_per_sec} tok/s
+                            </span>
+                          </>
                         )}
                       </td>
                       <td>
                         <div className="btn-row" style={{ flexWrap: "nowrap" }}>
                           <button className="btn small" disabled={r === "running"} onClick={() => test(m)}>
                             {r === "running" ? "…" : "实测"}
+                          </button>
+                          <button className="btn small ghost" disabled={probing[m.id]} onClick={() => probe(m)}
+                            title="阶梯上探真实输出上限（耗时较长，结果落库）">
+                            {probing[m.id] ? "探测中…" : "探测"}
                           </button>
                           {r !== undefined && r !== "running" && (
                             <button className="btn small ghost" onClick={() => setExpanded(open ? null : m.id)}>
@@ -105,18 +201,8 @@ export function ModelsView({ flash }: { flash: Flash }) {
                     </tr>
                     {open && (
                       <tr>
-                        <td colSpan={6} style={{ background: "var(--bg-soft)", padding: "10px 16px" }}>
-                          {typeof r === "object" ? (
-                            <div className="kv-grid">
-                              <span className="dim">模型</span><span className="mono">{r.model}</span>
-                              <span className="dim">首字延迟</span><span>{r.first_token_ms} ms</span>
-                              <span className="dim">总耗时</span><span>{r.total_ms} ms</span>
-                              <span className="dim">输出 tokens</span><span>{r.output_tokens}</span>
-                              <span className="dim">吞吐</span><span>{r.tokens_per_sec} tok/s</span>
-                              <span className="dim">输入侧耗时</span><span>{Math.max(0, r.first_token_ms)} ms（首字前）</span>
-                              <span className="dim">生成侧耗时</span><span>{Math.max(0, r.total_ms - r.first_token_ms)} ms</span>
-                            </div>
-                          ) : (
+                        <td colSpan={7} style={{ background: "var(--bg-soft)", padding: "10px 16px" }}>
+                          {typeof r === "object" ? <TestDetail r={r} /> : (
                             <span className="tag err">{String(r)}</span>
                           )}
                         </td>
@@ -130,5 +216,48 @@ export function ModelsView({ flash }: { flash: Flash }) {
         </div>
       )}
     </Box>
+  );
+}
+
+// TestDetail：实测细分面板（CloseRouter SpeedTester 口径）。
+function TestDetail({ r }: { r: TestResult }) {
+  const genMs = r.gen_ms ?? Math.max(0, r.total_ms - r.first_token_ms);
+  const firstPct = r.total_ms > 0 ? Math.min(1, r.first_token_ms / r.total_ms) : 0;
+  return (
+    <div className="md-detail">
+      <div className="md-metrics">
+        <div className="stat">
+          <div className="stat-label">首字延迟 TTFT</div>
+          <span className="stat-num">{r.first_token_ms}</span><span className="stat-unit">MS</span>
+        </div>
+        <div className="stat">
+          <div className="stat-label">生成吞吐</div>
+          <span className="stat-num">{r.tokens_per_sec}</span><span className="stat-unit">TOK/S</span>
+        </div>
+        <div className="stat">
+          <div className="stat-label">总耗时</div>
+          <span className="stat-num">{r.total_ms}</span><span className="stat-unit">MS</span>
+        </div>
+        <div className="stat">
+          <div className="stat-label">输出 TOKENS</div>
+          <span className="stat-num">{r.usage_tokens ?? r.output_tokens}</span>
+          <span className="stat-unit">{r.usage_tokens != null ? "USAGE" : "估算"}</span>
+        </div>
+      </div>
+      <div className="md-timeline" title={"首字前 " + r.first_token_ms + "ms · 生成 " + genMs + "ms"}>
+        <i className="ttft" style={{ width: (firstPct * 100).toFixed(1) + "%" }}></i>
+        <i className="gen" style={{ width: ((1 - firstPct) * 100).toFixed(1) + "%" }}></i>
+      </div>
+      <div className="md-timeline-legend">
+        <span><i className="sw ttft"></i>首字前 {r.first_token_ms} ms（{(firstPct * 100).toFixed(0)}%）</span>
+        <span><i className="sw gen"></i>生成 {genMs} ms（{((1 - firstPct) * 100).toFixed(0)}%）</span>
+      </div>
+      <div className="kv-grid" style={{ marginTop: 10 }}>
+        <span className="dim">模型</span><span className="mono">{r.model}</span>
+        <span className="dim">输出字符</span><span>{r.output_chars ?? "-"}</span>
+        <span className="dim">SSE 帧数</span><span>{r.chunks ?? "-"}</span>
+        <span className="dim">口径</span><span>tok/s = 输出 tokens ÷（总耗时 − TTFT）</span>
+      </div>
+    </div>
   );
 }

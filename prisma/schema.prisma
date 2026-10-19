@@ -197,3 +197,16 @@ model TaskQueueItem {
   @@index([status, createdAt])
   @@index([uid])
 }
+
+// 模型输出上限探测结果（对齐 Go output_probes.json 契约，落库替代外部文件）。
+// key 带域前缀（cn:glm-5.2 / artex:xxx）；合并语义：未重测的模型保留旧记录。
+model ModelProbe {
+  key       String   @id // 探测键：realm:model 或 provider:model
+  claimed   Int?     // 上游声称 max_output_tokens（null = 未知）
+  measured  Int?     // 实测值：clamped = 截断值（可信），at_least = 已知下界
+  verdict   String   @default("inconclusive") // clamped | at_least | inconclusive
+  note      String   @default("") // 原始判据文本（中文）
+  source    String   @default("panel-probe")
+  testedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
