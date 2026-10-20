@@ -40,8 +40,13 @@ export function CtrlAction({ text, code, onClick, secondary, disabled, title, pe
   pendingText?: string;
 }) {
   const [busy, setBusy] = useState(false);
+  // mounted 守卫防卸载后 setState；StrictMode 下 effect 会「挂载→清理→再挂载」，
+  // 挂载段必须把它重置回 true，否则第二次挂载后守卫恒为 false，busy 永远不会复位。
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const handle = () => {
     if (busy || disabled) return;
     const p = onClick();
