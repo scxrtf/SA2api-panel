@@ -8,6 +8,7 @@ import {
   getModelScanSnapshot,
   runModelScan,
 } from "@/lib/modelscan";
+import { runlogAccount } from "@/lib/runlog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
   if (auth) return auth;
   const job = beginModelScan();
   if (!job) return fail(409, "model scan already running");
+  runlogAccount("模型扫描已启动");
   after(() => {
     void runModelScan(job);
   });
@@ -34,5 +36,6 @@ export async function DELETE(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const cancelled = cancelModelScan();
+  if (cancelled) runlogAccount("模型扫描已取消");
   return ok({ cancelled, scan: getModelScanSnapshot() });
 }

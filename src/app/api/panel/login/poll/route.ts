@@ -6,6 +6,8 @@ import * as pool from "@/lib/pool";
 import { loginEndpoints, loginDoJSON, validUID } from "@/lib/login";
 import { claimTrial, dailyCheckin, userResource, expiringSoonMs } from "@/lib/upstream/client";
 import { globalCompleteRegistration } from "@/lib/upstream/global_register";
+import { runlogAccount } from "@/lib/runlog";
+import { label } from "@/lib/logfmt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,9 +44,11 @@ export async function GET(req: Request) {
     // 忽略：仅缺展示名。
   }
   if (!acct.uid) {
+    runlogAccount("添加账号失败", "realm=" + sess.realm + ": login done but no uid");
     return fail(502, "login done but no uid（token 已发但账号信息获取失败，请重试）");
   }
   if (!validUID(acct.uid)) {
+    runlogAccount("添加账号失败", "realm=" + sess.realm + ": 上游返回的 uid 含非法字符");
     return fail(502, "上游返回的 uid 含非法字符，拒绝落库");
   }
 
@@ -73,6 +77,11 @@ export async function GET(req: Request) {
   });
   // 全新登录 = 人工恢复口径：清掉旧号遗留的禁用/冷却/熔断。
   await pool.revive(acct.uid);
+  const who = label(acct.uid, acct.nickname ?? "");
+  runlogAccount(
+    "添加账号",
+    who + " realm=" + sess.realm + " 企业=" + (acct.enterpriseId ? "yes" : "no"),
+  );
 
   // 顺带签到 + 余额刷新（幂等；失败不影响登录结果，只体现在返回字段里）。
   const cfg = await getConfig();
@@ -92,19 +101,25 @@ export async function GET(req: Request) {
     try {
       await globalCompleteRegistration(shape);
     } catch (e) {
-      checkinMsg = joinMsg(checkinMsg, "注册激活失败: " + (e instanceof Error ? e.message : String(e)));
+      const msg = e instanceof Error ? e.message : String(e);
+      checkinMsg = joinMsg(checkinMsg, "注册激活失败: " + msg);
+      runlogAccount("添加账号", who + " 注册激活失败: " + msg);
     }
     try {
       await claimTrial(cfg, shape);
     } catch (e) {
-      checkinMsg = joinMsg(checkinMsg, "trial 领取失败: " + (e instanceof Error ? e.message : String(e)));
+      const msg = e instanceof Error ? e.message : String(e);
+      checkinMsg = joinMsg(checkinMsg, "trial 领取失败: " + msg);
+      runlogAccount("添加账号", who + " trial 领取失败: " + msg);
     }
   } else if (!shape.enterpriseId) {
     try {
       await dailyCheckin(cfg, shape);
       await pool.markCheckin(acct.uid);
+      runlogAccount("添加账号", who + " 签到成功");
     } catch (e) {
       checkinMsg = e instanceof Error ? e.message : String(e);
+      runlogAccount("添加账号", who + " 签到: " + checkinMsg);
     }
   }
   try {
@@ -115,8 +130,10 @@ export async function GET(req: Request) {
       acct.uid, BigInt(r.remain), BigInt(r.total),
       BigInt(r.expiring), BigInt(r.earliestAt), BigInt(r.earliestRemain),
     );
-  } catch {
-    // 余额失败不阻塞登录。
+    runlogAccount("添加账号", who + " 余额 " + r.remain + "/" + r.total);
+  } catch (e) {
+    // 余额失败不阻塞登录，但要留一行便于排查。
+    runlogAccount("添加账号", who + " 余额刷新失败: " + (e instanceof Error ? e.message : String(e)));
   }
   await prisma.loginSession.update({
     where: { state },

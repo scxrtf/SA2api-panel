@@ -16,6 +16,8 @@ import {
   autoActionFor, isMPTaskCode, taskByCode, taskByCodeMP, taskByCodeWaiting, taskProgressText,
 } from "@/lib/autotask";
 import { tryLockAccount, unlockAccount, claimTaskReward } from "@/lib/taskcenter";
+import { runlogAccount } from "@/lib/runlog";
+import { label } from "@/lib/logfmt";
 
 // POST 一键完成单个任务：执行动作 → 回读 → 达标自动领奖（对齐 accountTaskAuto）。
 export async function POST(req: Request, ctx: Ctx) {
@@ -47,7 +49,9 @@ export async function POST(req: Request, ctx: Ctx) {
     try {
       msg = await act.run(cfg, a);
     } catch (e) {
-      return fail(502, "执行失败: " + (e instanceof Error ? e.message : String(e)));
+      const err = e instanceof Error ? e.message : String(e);
+      runlogAccount("自动任务失败", label(a.uid, a.nickname) + " " + act.taskCode + ": " + err);
+      return fail(502, "执行失败: " + err);
     }
     const after = mp ? await taskByCodeMP(cfg, a, act.taskCode).catch(() => null)
       : await taskByCodeWaiting(cfg, a, act.taskCode).catch(() => null);
@@ -73,6 +77,7 @@ export async function POST(req: Request, ctx: Ctx) {
         resp["message"] = msg + "；达标但领奖失败，可在任务列表手动点「领取」重试";
       }
     }
+    runlogAccount("自动任务", label(a.uid, a.nickname) + " " + act.taskCode + ": " + String(resp["message"]));
     return ok(resp);
   } finally {
     unlockAccount(uid);

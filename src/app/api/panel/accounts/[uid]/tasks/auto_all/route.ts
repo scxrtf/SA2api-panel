@@ -14,6 +14,8 @@ async function loadAuth(uid: string) {
 
 import { runAutoAll } from "@/lib/autotask";
 import { tryLockAccount, unlockAccount } from "@/lib/taskcenter";
+import { runlogAccount } from "@/lib/runlog";
+import { label } from "@/lib/logfmt";
 
 // POST 一键完成该账号全部可自动任务（逐项执行，单项失败不阻塞）。
 export async function POST(req: Request, ctx: Ctx) {
@@ -27,6 +29,12 @@ export async function POST(req: Request, ctx: Ctx) {
   }
   try {
     const results = await runAutoAll(await getConfig(), a);
+    const done = results.filter((r) => r.status === "done").length;
+    const failed = results.filter((r) => r.status === "error").length;
+    runlogAccount(
+      "自动全部任务",
+      label(a.uid, a.nickname) + " done=" + done + " error=" + failed,
+    );
     return ok({ results });
   } finally {
     unlockAccount(uid);

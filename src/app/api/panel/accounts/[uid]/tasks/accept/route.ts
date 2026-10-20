@@ -13,6 +13,8 @@ async function loadAuth(uid: string) {
 }
 
 import { acceptTasks } from "@/lib/upstream/tasks";
+import { runlogAccount } from "@/lib/runlog";
+import { label } from "@/lib/logfmt";
 
 // POST 接受任务（报名；幂等）。body: {task_codes: [...]}。
 export async function POST(req: Request, ctx: Ctx) {
@@ -26,8 +28,11 @@ export async function POST(req: Request, ctx: Ctx) {
   if (!body.task_codes || body.task_codes.length === 0) return fail(400, "task_codes required");
   try {
     await acceptTasks(await getConfig(), a, body.task_codes);
+    runlogAccount("接受任务", label(a.uid, a.nickname) + ": " + body.task_codes.join(","));
     return ok();
   } catch (e) {
-    return fail(502, "accept: " + (e instanceof Error ? e.message : String(e)));
+    const msg = e instanceof Error ? e.message : String(e);
+    runlogAccount("接受任务失败", label(a.uid, a.nickname) + ": " + msg);
+    return fail(502, "accept: " + msg);
   }
 }

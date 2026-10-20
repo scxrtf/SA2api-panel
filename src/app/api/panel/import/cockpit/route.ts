@@ -8,6 +8,8 @@ import * as pool from "@/lib/pool";
 import { validUID } from "@/lib/login";
 import { claimTrial, dailyCheckin, userResource, expiringSoonMs } from "@/lib/upstream/client";
 import { globalCompleteRegistration } from "@/lib/upstream/global_register";
+import { runlogAccount } from "@/lib/runlog";
+import { label } from "@/lib/logfmt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,6 +56,7 @@ export async function POST(req: Request) {
   let imported = 0;
   let skipped = 0;
   const errs: string[] = [];
+  runlogAccount("导入开始", "total=" + accounts.length);
 
   for (const acc of accounts) {
     const uid = (acc.uid ?? "").trim();
@@ -100,20 +103,22 @@ export async function POST(req: Request) {
     if (realm === "global") {
       try {
         await globalCompleteRegistration(shape);
-      } catch {
-        // 注册激活失败静默。
+      } catch (e) {
+        // 注册激活失败不阻断导入，但记一行便于排查。
+        runlogAccount("导入账号", label(uid, nickname) + " 激活失败: " + (e instanceof Error ? e.message : String(e)));
       }
       try {
         await claimTrial(cfg, shape);
-      } catch {
-        // trial 领取失败静默。
+      } catch (e) {
+        runlogAccount("导入账号", label(uid, nickname) + " trial 领取失败: " + (e instanceof Error ? e.message : String(e)));
       }
     } else {
       try {
         await dailyCheckin(cfg, shape);
         await pool.markCheckin(uid);
-      } catch {
-        // 已签到等业务错误静默。
+      } catch (e) {
+        // 已签到等业务错误不阻断导入。
+        runlogAccount("导入账号", label(uid, nickname) + " 签到: " + (e instanceof Error ? e.message : String(e)));
       }
     }
     try {
@@ -122,11 +127,17 @@ export async function POST(req: Request) {
         uid, BigInt(r.remain), BigInt(r.total),
         BigInt(r.expiring), BigInt(r.earliestAt), BigInt(r.earliestRemain),
       );
-    } catch {
-      // 余额失败不阻断。
+    } catch (e) {
+      runlogAccount("导入账号", label(uid, nickname) + " 余额刷新失败: " + (e instanceof Error ? e.message : String(e)));
     }
+    runlogAccount("导入账号", label(uid, nickname) + " realm=" + realm);
     imported++;
   }
 
+  runlogAccount("导入完成", "total=" + accounts.length + " imported=" + imported + " skipped=" + skipped);
+  if (errs.length > 0) {
+    // 跳过原因只摘前 3 条，避免一次导入刷满环形缓冲。
+    runlogAccount("导入跳过", errs.slice(0, 3).join(" | "));
+  }
   return ok({ total: accounts.length, imported, skipped, errors: errs });
 }
