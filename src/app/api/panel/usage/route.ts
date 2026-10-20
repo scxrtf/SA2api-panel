@@ -1,9 +1,178 @@
-// GET /api/panel/usage — 用量聚合（hours 滚动窗口默认 72 / from-to 显式区间）。
+// GET /api/panel/usage — 用量聚合（对齐 Go usage.SnapshotWindow 的同构输出）。
+// 口径：hours 滚动窗口（默认 72）/ from-to 显式区间 / 全部历史（hours=0）。
+// 聚合维度：totals / by_realm / by_account / by_model / by_key / by_provider /
+// by_provider_model / series / credit_by_account / credit_by_model。
 import { panelAuth, ok } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
+import { currentModelRate } from "@/lib/upstream/modelCatalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+interface Agg {
+  requests: number;
+  errors: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  credits: number;
+  credit_samples: number;
+  credit_tokens: number;
+  credits_per_1m_tokens: number;
+  cache_hit_tokens: number;
+  cache_miss_tokens: number;
+  cache_hit_rate: number;
+  avg_latency_ms: number;
+  avg_tokens_per_second: number;
+}
+
+class AggAcc {
+  requests = 0; errors = 0;
+  prompt = 0; completion = 0; total = 0;
+  credits = 0; creditSamples = 0; creditTokens = 0;
+  cacheHit = 0; cacheMiss = 0;
+  latSum = 0; latSamples = 0;
+  tpsSum = 0; tpsSamples = 0;
+
+  add(e: UsageRow): void {
+    this.requests++;
+    if (!e.ok) this.errors++;
+    this.prompt += e.promptTokens;
+    this.completion += e.completionTok;
+    this.total += e.totalTokens;
+    if (e.hasCredit) {
+      this.credits += e.credit;
+      this.creditSamples++;
+      this.creditTokens += e.totalTokens;
+    }
+    this.cacheHit += e.cacheHitTok;
+    this.cacheMiss += e.cacheMissTok;
+    if (e.latencyMs > 0) {
+      this.latSum += e.latencyMs;
+      this.latSamples++;
+    }
+    if (e.tps > 0) {
+      this.tpsSum += e.tps;
+      this.tpsSamples++;
+    }
+  }
+
+  finish(): Agg {
+    return {
+      requests: this.requests,
+      errors: this.errors,
+      prompt_tokens: this.prompt,
+      completion_tokens: this.completion,
+      total_tokens: this.total,
+      credits: this.credits,
+      credit_samples: this.creditSamples,
+      credit_tokens: this.creditTokens,
+      credits_per_1m_tokens: this.creditTokens > 0 ? this.credits / this.creditTokens * 1_000_000 : 0,
+      cache_hit_tokens: this.cacheHit,
+      cache_miss_tokens: this.cacheMiss,
+      cache_hit_rate: this.cacheHit + this.cacheMiss > 0 ? this.cacheHit / (this.cacheHit + this.cacheMiss) * 100 : 0,
+      avg_latency_ms: this.latSamples > 0 ? this.latSum / this.latSamples : 0,
+      avg_tokens_per_second: this.tpsSamples > 0 ? this.tpsSum / this.tpsSamples : 0,
+    };
+  }
+}
+
+interface UsageRow {
+  uid: string; model: string; realm: string;
+  promptTokens: number; completionTok: number; totalTokens: number;
+  credit: number; hasCredit: boolean;
+  cacheHitTok: number; cacheMissTok: number;
+  latencyMs: number; tps: number;
+  keyName: string; modelRate: string;
+  ok: boolean;
+  at: Date;
+}
+
+interface KeyedAgg { key: string; realm?: string; extra?: string; agg: Agg }
+
+function keyedFinish(m: Map<string, AggAcc>, label: (k: string) => { realm?: string; extra?: string }): KeyedAgg[] {
+  const out: KeyedAgg[] = [];
+  for (const [k, acc] of m) {
+    const { realm, extra } = label(k);
+    out.push({ key: k, realm, extra, agg: acc.finish() });
+  }
+  out.sort((a, b) =>
+    b.agg.total_tokens - a.agg.total_tokens ||
+    b.agg.requests - a.agg.requests ||
+    a.key.localeCompare(b.key),
+  );
+  return out;
+}
+
+interface CreditAgg {
+  key: string; realm?: string; nickname?: string; rate?: string;
+  requests: number; credits: number; credit_samples: number; credit_tokens: number;
+  credits_per_1m_tokens: number;
+  cache_hit_tokens: number; cache_miss_tokens: number; cache_hit_rate: number;
+}
+
+class CreditAcc {
+  requests = 0; credits = 0; samples = 0; tokens = 0;
+  cacheHit = 0; cacheMiss = 0;
+  add(e: UsageRow): void {
+    this.requests++;
+    this.credits += e.credit;
+    this.samples++;
+    this.tokens += e.totalTokens;
+    this.cacheHit += e.cacheHitTok;
+    this.cacheMiss += e.cacheMissTok;
+  }
+}
+
+function creditFinish(m: Map<string, CreditAcc>): CreditAgg[] {
+  const out: CreditAgg[] = [];
+  for (const [k, acc] of m) {
+    const [key, rate] = k.split("\x00");
+    out.push({
+      key,
+      rate: rate || "",
+      requests: acc.requests,
+      credits: acc.credits,
+      credit_samples: acc.samples,
+      credit_tokens: acc.tokens,
+      credits_per_1m_tokens: acc.tokens > 0 ? acc.credits / acc.tokens * 1_000_000 : 0,
+      cache_hit_tokens: acc.cacheHit,
+      cache_miss_tokens: acc.cacheMiss,
+      cache_hit_rate: acc.cacheHit + acc.cacheMiss > 0 ? acc.cacheHit / (acc.cacheHit + acc.cacheMiss) * 100 : 0,
+    });
+  }
+  out.sort((a, b) => b.credits - a.credits || b.credit_tokens - a.credit_tokens || a.key.localeCompare(b.key));
+  return out;
+}
+
+// canonicalUsageModel 去掉 cn:/global: 前缀（Go canonicalUsageModel）。
+function canonicalUsageModel(model: string): string {
+  let m = (model ?? "").trim();
+  for (const p of ["cn:", "global:"]) {
+    if (m.startsWith(p)) { m = m.slice(p.length); break; }
+  }
+  return m || "(unknown)";
+}
+
+// providerNameFromRealm 提取 "provider:名字" 的供应商名；非供应商桶返回空。
+function providerNameFromRealm(realm: string): string {
+  if (!realm.startsWith("provider:")) return "";
+  return realm.slice("provider:".length);
+}
+
+// beijingParts 分桶锚定北京时间（Go tz.Beijing 同语义）。
+function beijingParts(d: Date): { hour: string; day: string } {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", hour12: false,
+  });
+  const parts: Record<string, string> = {};
+  for (const p of fmt.formatToParts(d)) parts[p.type] = p.value;
+  const day = `${parts.year}-${parts.month}-${parts.day}`;
+  const hh = parts.hour === "24" ? "00" : parts.hour;
+  return { hour: `${day}T${hh}`, day };
+}
 
 export async function GET(req: Request) {
   const auth = await panelAuth(req);
@@ -13,13 +182,15 @@ export async function GET(req: Request) {
   const to = parseTime(q.get("to"));
   let since: Date | null = from;
   let until: Date | null = to;
+  let explicit = false;
   if (!since && !until) {
     let hours = parseInt(q.get("hours") ?? "72", 10);
     if (!Number.isFinite(hours) || hours < 0) hours = 72;
     if (hours > 1440) hours = 1440;
     if (hours > 0) since = new Date(Date.now() - hours * 3600_000);
+  } else {
+    explicit = true;
   }
-  // UsageEvent 的时间字段是 at（不是 createdAt），where 是弱类型 tsc 查不出，注意。
   const where: Record<string, unknown> = {};
   if (since || until) {
     where["at"] = {};
@@ -27,71 +198,129 @@ export async function GET(req: Request) {
     if (until) (where["at"] as Record<string, unknown>)["lte"] = until;
   }
 
-  const events = await prisma.usageEvent.findMany({ where, orderBy: { id: "asc" } });
+  const events = (await prisma.usageEvent.findMany({
+    where,
+    orderBy: { at: "asc" },
+  })) as unknown as UsageRow[];
   const nicks = new Map<string, string>();
   for (const a of await prisma.account.findMany({ select: { uid: true, nickname: true } })) {
     nicks.set(a.uid, a.nickname);
   }
 
-  let prompt = 0;
-  let completion = 0;
-  let total = 0;
-  let credit = 0;
-  let okCount = 0;
-  const byModel = new Map<string, { n: number; tokens: number; credit: number }>();
-  const byAccount = new Map<string, { n: number; tokens: number; credit: number; nickname: string }>();
-  for (const e of events) {
-    prompt += e.promptTokens;
-    completion += e.completionTok;
-    total += e.totalTokens;
-    credit += e.credit;
-    if (e.ok) okCount++;
-    const bm = byModel.get(e.model) ?? { n: 0, tokens: 0, credit: 0 };
-    bm.n++;
-    bm.tokens += e.totalTokens;
-    bm.credit += e.credit;
-    byModel.set(e.model, bm);
-    const ba = byAccount.get(e.uid) ?? { n: 0, tokens: 0, credit: 0, nickname: nicks.get(e.uid) ?? "" };
-    ba.n++;
-    ba.tokens += e.totalTokens;
-    ba.credit += e.credit;
-    byAccount.set(e.uid, ba);
-  }
-  // 时序分桶（对齐 Go usage series）：窗口 ≤7 天按小时、更长按天；只产出有数据的桶。
-  const scope = since && (Date.now() - since.getTime()) > 7 * 86_400_000 ? "day" : "hour";
-  const byTime = new Map<string, { t: string; label: string; prompt_tokens: number; completion_tokens: number; total_tokens: number; requests: number }>();
-  for (const e of events) {
-    const d = new Date(e.at);
-    let key: string, label: string;
-    if (scope === "day") {
-      key = d.toISOString().slice(0, 10);
-      label = (d.getMonth() + 1) + "-" + String(d.getDate()).padStart(2, "0");
-    } else {
-      key = d.toISOString().slice(0, 13);
-      label = String(d.getHours()).padStart(2, "0") + ":00";
-    }
-    const b = byTime.get(key) ?? { t: key, label, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, requests: 0 };
-    b.prompt_tokens += e.promptTokens;
-    b.completion_tokens += e.completionTok;
-    b.total_tokens += e.totalTokens;
-    b.requests++;
-    byTime.set(key, b);
-  }
-  const series = [...byTime.values()].map((b) => ({
-    ...b,
-    t: Date.parse(b.t.length === 13 ? b.t + ":00:00Z" : b.t + "T00:00:00Z"),
-  })).sort((a, b) => a.t - b.t);
+  const total = new AggAcc();
+  const realmAgg = new Map<string, AggAcc>();
+  const acctAgg = new Map<string, AggAcc>();
+  const acctRealm = new Map<string, string>();
+  const modelAgg = new Map<string, AggAcc>();
+  const keyAgg = new Map<string, AggAcc>();
+  const providerAgg = new Map<string, AggAcc>();
+  const providerModelAgg = new Map<string, AggAcc>();
+  const hourSeries = new Map<string, AggAcc>();
+  const daySeries = new Map<string, AggAcc>();
+  const creditAcctAgg = new Map<string, CreditAcc>();
+  const creditModelAgg = new Map<string, CreditAcc>();
+  const rateCache = new Map<string, string>();
+  // 窗口 > 7 天按日分桶，否则按小时（旧版前端同口径）。
+  const dayScope = since !== null && (Date.now() - since.getTime()) > 7 * 86_400_000;
 
+  for (const e of events) {
+    total.add(e);
+    const realm = e.realm || "cn";
+    if (!realmAgg.has(realm)) realmAgg.set(realm, new AggAcc());
+    realmAgg.get(realm)!.add(e);
+    if (!acctAgg.has(e.uid)) acctAgg.set(e.uid, new AggAcc());
+    acctAgg.get(e.uid)!.add(e);
+    if (!acctRealm.has(e.uid)) acctRealm.set(e.uid, realm);
+    const model = e.model || "(unknown)";
+    if (!modelAgg.has(model)) modelAgg.set(model, new AggAcc());
+    modelAgg.get(model)!.add(e);
+    // 按 key 维度：旧记录 keyName 为空 = 上线前未归属，归入 "(未知)"。
+    const kn = e.keyName || "(未知)";
+    if (!keyAgg.has(kn)) keyAgg.set(kn, new AggAcc());
+    keyAgg.get(kn)!.add(e);
+    // 供应商维度：realm 形如 "provider:名字"；第二层按供应商×裸模型名。
+    const prov = providerNameFromRealm(realm);
+    if (prov) {
+      if (!providerAgg.has(prov)) providerAgg.set(prov, new AggAcc());
+      providerAgg.get(prov)!.add(e);
+      const pmKey = prov + ":" + canonicalUsageModel(model);
+      if (!providerModelAgg.has(pmKey)) providerModelAgg.set(pmKey, new AggAcc());
+      providerModelAgg.get(pmKey)!.add(e);
+    }
+    const { hour, day } = beijingParts(new Date(e.at));
+    const scopeKey = dayScope ? day : hour;
+    const scopeMap = dayScope ? daySeries : hourSeries;
+    if (!scopeMap.has(scopeKey)) scopeMap.set(scopeKey, new AggAcc());
+    scopeMap.get(scopeKey)!.add(e);
+    // 积分维度只统计 hasCredit 样本；模型维度按 (裸模型, 生效倍率) 分组，
+    // 旧记录缺倍率时用当前目录倍率回填（不伪造未知价格）。
+    if (e.hasCredit) {
+      if (!creditAcctAgg.has(e.uid)) creditAcctAgg.set(e.uid, new CreditAcc());
+      creditAcctAgg.get(e.uid)!.add(e);
+      const cm = canonicalUsageModel(model);
+      let rate = e.modelRate;
+      if (!rate) {
+        const ck = realm + "\x00" + cm;
+        if (rateCache.has(ck)) {
+          rate = rateCache.get(ck)!;
+        } else {
+          rate = providerNameFromRealm(realm) ? "" : currentModelRate(realm, cm);
+          rateCache.set(ck, rate);
+        }
+      }
+      const mk = cm + "\x00" + rate;
+      if (!creditModelAgg.has(mk)) creditModelAgg.set(mk, new CreditAcc());
+      creditModelAgg.get(mk)!.add(e);
+    }
+  }
+
+  // 时序升序输出（day 与 hour 不会混用——同一窗口同一口径）。
+  const series = [...(dayScope ? daySeries : hourSeries).entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([t, acc]) => {
+      const agg = acc.finish();
+      const ts = dayScope
+        ? Date.parse(t + "T00:00:00+08:00")
+        : Date.parse(t + ":00:00+08:00");
+      return { t: ts, scope: dayScope ? "day" : "hour", label: t.slice(5), ...agg };
+    });
+
+  const byAccount = keyedFinish(acctAgg, (k) => ({ extra: nicks.get(k) ?? "" }));
+  for (const row of byAccount) row.realm = acctRealm.get(row.key) ?? "";
+
+  const byProviderModel = [...providerModelAgg.entries()]
+    .map(([k, acc]) => {
+      const idx = k.indexOf(":");
+      const prov = k.slice(0, idx);
+      const model = k.slice(idx + 1);
+      return { key: k, realm: prov, extra: model, agg: acc.finish() };
+    })
+    .sort((a, b) =>
+      (a.realm ?? "").localeCompare(b.realm ?? "") ||
+      b.agg.total_tokens - a.agg.total_tokens ||
+      a.key.localeCompare(b.key),
+    );
+
+  const creditByAccount = creditFinish(creditAcctAgg);
+  for (const r of creditByAccount) r.nickname = nicks.get(r.key) ?? "";
+
+  const sinceRow = events.length > 0 ? events[0].at : null;
   return ok({
-    count: events.length,
-    ok_count: okCount,
-    prompt_tokens: prompt,
-    completion_tokens: completion,
-    total_tokens: total,
-    credit,
-    by_model: [...byModel.entries()].map(([model, v]) => ({ model, ...v })),
-    by_account: [...byAccount.entries()].map(([uid, v]) => ({ uid, ...v })),
+    totals: total.finish(),
+    by_realm: keyedFinish(realmAgg, () => ({})),
+    by_account: byAccount,
+    by_model: keyedFinish(modelAgg, () => ({})),
+    by_key: keyedFinish(keyAgg, () => ({})),
+    by_provider: keyedFinish(providerAgg, () => ({})),
+    by_provider_model: byProviderModel,
+    credit_by_account: creditByAccount,
+    credit_by_model: creditFinish(creditModelAgg),
     series,
+    buckets: events.length,
+    since: sinceRow ? new Date(sinceRow).toISOString() : "",
+    window_from: explicit && from ? from.toISOString() : "",
+    window_to: explicit && to ? to.toISOString() : "",
+    generated: new Date().toISOString(),
   });
 }
 

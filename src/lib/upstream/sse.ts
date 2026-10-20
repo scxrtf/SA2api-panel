@@ -3,6 +3,7 @@
 //  - aggregate：把 SSE 流聚合成单个非流式响应（tool_calls 分片合并）
 
 import { MarkupRepair, markupToolCalls } from "./dsml";
+import { normalizeUsage, usageCacheHitTokens, usageCacheMissTokens } from "./usage";
 
 export interface StreamStats {
   validFrames: number;
@@ -14,6 +15,9 @@ export interface StreamStats {
   credit: number;
   hasCredit: boolean;
   ttfbMs: number; // 首帧延迟（0 = 无观测）
+  cacheHitTokens: number; // 前缀缓存命中（0 = 无观测）
+  cacheMissTokens: number;
+  hasCache: boolean;
 }
 
 type Obj = Record<string, unknown>;
@@ -61,7 +65,11 @@ export function normalizeFrame(obj: Obj): Obj {
     }
     out["choices"] = nchs;
   }
-  out["usage"] = obj["usage"] ?? null;
+  const rawUsage = obj["usage"];
+  out["usage"] =
+    rawUsage && typeof rawUsage === "object" && !Array.isArray(rawUsage)
+      ? normalizeUsage(rawUsage as Obj)
+      : rawUsage ?? null;
   return out;
 }
 
@@ -83,6 +91,15 @@ function readUsageInto(stats: StreamStats, u: Obj): void {
   if (typeof c === "number" && c > 0) {
     stats.credit = c;
     stats.hasCredit = true;
+  }
+  // 缓存命中观测（Go logging.go:220 同口径）：命中读多别名最优；miss 缺失时
+  // 按 prompt-hit 推导（推导工具函数与客户端回写共用同一口径）。
+  const hit = usageCacheHitTokens(u);
+  if (hit !== null) {
+    stats.hasCache = true;
+    stats.cacheHitTokens = hit;
+    const miss = usageCacheMissTokens(u) ?? 0;
+    stats.cacheMissTokens = miss;
   }
 }
 
@@ -158,6 +175,7 @@ export async function streamPassthrough(
     validFrames: 0, errorFrame: "",
     promptTokens: 0, completionTokens: 0, totalTokens: 0, hasUsage: false,
     credit: 0, hasCredit: false, ttfbMs: 0,
+    cacheHitTokens: 0, cacheMissTokens: 0, hasCache: false,
   };
   const started = Date.now();
   const reader = upstream.getReader();
@@ -404,6 +422,7 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
     validFrames: 0, errorFrame: "",
     promptTokens: 0, completionTokens: 0, totalTokens: 0, hasUsage: false,
     credit: 0, hasCredit: false, ttfbMs: 0,
+    cacheHitTokens: 0, cacheMissTokens: 0, hasCache: false,
   };
   const reader = upstream.getReader();
   const dec = new TextDecoder();
@@ -415,6 +434,7 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
   let finishReason = "";
   let sawDone = false;
   const toolCalls: Obj[] = [];
+  let usageObj: Obj | null = null; // 上游 usage 原对象（出口保留原字段 + 补 total + 归一别名）
 
   const mergeChunk = (obj: Obj) => {
     for (const k of ["id", "object", "created", "model", "system_fingerprint", "service_tier"]) {
@@ -449,6 +469,7 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
     }
     const u = usageFromFrame(obj);
     if (u) readUsageInto(stats, u);
+    if (u) usageObj = u;
   };
 
   for (;;) {
@@ -496,13 +517,6 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
   if (finalToolCalls.length > 0) message["tool_calls"] = finalToolCalls;
   out["object"] = "chat.completion";
   out["choices"] = [{ index: 0, message, finish_reason: finishReason || "stop" }];
-  out["usage"] = stats.hasUsage
-    ? {
-        prompt_tokens: stats.promptTokens,
-        completion_tokens: stats.completionTokens,
-        total_tokens: stats.totalTokens,
-        ...(stats.hasCredit ? { credit: stats.credit } : {}),
-      }
-    : null;
+  out["usage"] = usageObj ? normalizeUsage(usageObj) : null;
   return { resp: out, stats };
 }

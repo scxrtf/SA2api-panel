@@ -129,29 +129,48 @@ model UsageEvent {
   completionTok Int      @default(0)
   totalTokens   Int      @default(0)
   credit        Float    @default(0) // 实扣积分（0 = 未上报/免费）
+  hasCredit     Boolean  @default(false) // credit 字段是否被上游明确观测（区分真实 0）
+  cacheHitTok   Int      @default(0) // 前缀缓存命中 token（上游回该维度才累计）
+  cacheMissTok  Int      @default(0) // 前缀缓存未命中 token
+  latencyMs     Int      @default(0) // 总延迟（请求开始到收尾）
+  tps           Float    @default(0) // 吐字速率（completion/生成窗；0=无样本）
+  keyName       String   @default("") // 网关密钥归属名（多 sk-key；空=单 key/无鉴权）
+  modelRate     String   @default("") // 请求时生效积分倍率（规范化数值）
   ok            Boolean  @default(true)
   errKind       String   @default("")
   at            DateTime @default(now())
 
   @@index([at])
   @@index([uid, at])
+  @@index([model, at])
 }
 
 model RequestLog {
-  id         String   @id @default(cuid())
-  uid        String   @default("")
-  account    Account? @relation(fields: [uid], references: [uid], onDelete: SetNull)
-  model      String   @default("")
-  realm      String   @default("")
-  provider   String   @default("")
-  status     Int      @default(0)
-  errKind    String   @default("")
-  stream     Boolean  @default(false)
-  durationMs Int      @default(0)
-  clientIp   String   @default("")
-  ua         String   @default("")
-  path       String   @default("")
-  at         DateTime @default(now())
+  id            String   @id @default(cuid())
+  uid           String   @default("")
+  account       Account? @relation(fields: [uid], references: [uid], onDelete: SetNull)
+  model         String   @default("")
+  realm         String   @default("")
+  provider      String   @default("")
+  status        Int      @default(0)
+  errKind       String   @default("")
+  stream        Boolean  @default(false)
+  durationMs    Int      @default(0)
+  ttfbMs        Int      @default(0) // 流式首帧延迟
+  attempts      Int      @default(0) // 轮转尝试次数
+  promptTokens  Int      @default(0)
+  completionTok Int      @default(0)
+  totalTokens   Int      @default(0)
+  credit        Float    @default(0)
+  hasCredit     Boolean  @default(false)
+  cacheHitTok   Int      @default(0)
+  cacheMissTok  Int      @default(0)
+  clientIp      String   @default("")
+  ua            String   @default("")
+  keyName       String   @default("") // 命中的网关密钥名；供应商路径为槽位名
+  slot          String   @default("") // 供应商内实际命中的 key 槽位
+  path          String   @default("")
+  at            DateTime @default(now())
 
   @@index([at])
   @@index([uid, at])

@@ -80,6 +80,45 @@ body {
 .tbl tbody tr:hover td { background: var(--bg-soft); }
 .tbl-wrap { overflow-x: auto; }
 
+/* ─── 用量 KPI 卡 / 维度切换（Go .kpi/.kbar/.ustabs 同构） ────── */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.kpi {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 13px; display: flex; flex-direction: column; gap: 6px;
+}
+.kpi .k { font-size: 10px; color: var(--fg-dim); letter-spacing: .5px; }
+.kpi .v {
+  font-family: var(--mono); font-size: 22px; font-weight: 500; line-height: 1.1;
+  color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: -.5px;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kpi .s { font-size: 11px; color: var(--fg-dim); }
+.kbar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--bg-soft); }
+.kbar i { display: block; height: 100%; }
+
+/* 维度切换按钮组（带条数徽标） */
+.ustabs { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.ustabs button {
+  border: 1px solid var(--border); background: var(--surface); color: var(--fg-dim);
+  border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; transition: all .12s;
+  font-family: inherit;
+}
+.ustabs button:hover { border-color: var(--border-soft); color: var(--fg); }
+.ustabs button.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.ustabs button .cnt {
+  font-family: var(--mono); font-size: 10px; background: var(--bg-soft); color: var(--fg-dim);
+  border-radius: 999px; padding: 0 5px; line-height: 15px;
+}
+.ustabs button.on .cnt { color: var(--accent); }
+
+/* 表格行首 mark 列 + 供应商展开行 */
+.tbl .mark { width: 8px; padding: 9px 0 !important; }
+.tbl tr.exp { cursor: pointer; }
+.tbl tr.exp .expv { font-size: 10px; color: var(--fg-dim); }
+.tbl tr.sub td { background: var(--bg-soft); }
+.tbl tr.sub td:first-of-type, .tbl tr.sub td:nth-child(2) { padding-left: calc(12px + 14px * var(--depth, 1)); }
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-soft); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }

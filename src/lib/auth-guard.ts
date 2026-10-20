@@ -30,6 +30,25 @@ export function verifyBearer(req: Request, key: string): boolean {
   return constTimeEq(extractToken(req), key);
 }
 
+// identifyKeyName 识别请求凭证的 key 归属名（多 sk-key 模式）：命中 ApiKey 环
+// 中某把 key 时返回其 name（name 空时回落掩码，对齐 Go keyring.Identify）。
+// 单 key 模式 / 未携带 / DB 不可用时返回空串（归档字段自动省略，零回归）。
+export async function identifyKeyName(req: Request): Promise<string> {
+  const tok = extractToken(req);
+  if (!tok) return "";
+  try {
+    const rows = await prisma.apiKey.findMany({ select: { name: true, key: true } });
+    for (const r of rows) {
+      if (r.key && constTimeEq(tok, r.key)) {
+        return r.name || mask(r.key);
+      }
+    }
+  } catch {
+    // DB 不可用：归属识别失败不阻断主链路。
+  }
+  return "";
+}
+
 // verifyAny 校验凭证是否命中 主密钥 ∪ ApiKey 环 中的任意一把。
 // 全部为空 = 未启用鉴权，恒 true（与 Go VerifyAny 同语义）。
 export async function verifyAny(req: Request): Promise<boolean> {

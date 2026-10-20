@@ -821,6 +821,57 @@ export function effortsSnapshot(realm: string): {
   return { efforts: Object.fromEntries(b.efforts), defaults: Object.fromEntries(b.defaults) };
 }
 
+// ---------- 模型生效倍率快照（对齐 Go client.go modelRates 桶） ----------
+
+// modelRateBuckets 按 realm 分层的倍率快照；目录成功刷新时整体替换对应域。
+const modelRateBuckets = new Map<string, Map<string, string>>();
+
+// normalizeModelRate 把上游倍率原文规范化为可比较数值键（"x0.05 credits" →
+// "0.05"）；无法数值化时保留去后缀原文，避免编造倍率。
+export function normalizeModelRate(raw: string): string {
+  let s = (raw ?? "").trim();
+  if (s === "") return "";
+  if (s.toLowerCase().endsWith("credits")) {
+    s = s.slice(0, -"credits".length).trim();
+  }
+  if (s.toLowerCase().startsWith("x")) {
+    s = s.slice(1).trim();
+  } else if (s.toLowerCase().endsWith("x")) {
+    s = s.slice(0, -1).trim();
+  }
+  if (s === "") return "";
+  const v = Number(s);
+  if (!Number.isFinite(v)) return (raw ?? "").trim();
+  return String(v);
+}
+
+// effectiveModelRate 有机器可读优惠取折扣价，否则取牌价；均缺省为空。
+function effectiveModelRate(mi: ModelInfoFull): string {
+  if (typeof mi.promoFactor === "number" && (mi.promoCredits ?? "").trim() !== "") {
+    return normalizeModelRate(mi.promoCredits!);
+  }
+  return normalizeModelRate(mi.credits ?? "");
+}
+
+// storeModelRates 按 realm 整体替换倍率快照；目录刷新成功但没有可解析倍率时
+// 写入空桶，使旧倍率不会继续冒充当前价。
+export function storeModelRates(realm: string, infos: ModelInfoFull[]): void {
+  const rates = new Map<string, string>();
+  for (const mi of infos) {
+    if (!mi.id) continue;
+    const rate = effectiveModelRate(mi);
+    if (rate !== "") rates.set(mi.id, rate);
+  }
+  modelRateBuckets.set(effortRealmKey(realm), rates);
+}
+
+// currentModelRate 返回最近成功刷新的指定域模型生效倍率；未知返回空串
+//（对齐 Go Client.ModelRate——未知不伪造价格）。
+export function currentModelRate(realm: string, model: string): string {
+  if (!model) return "";
+  return modelRateBuckets.get(effortRealmKey(realm))?.get(model) ?? "";
+}
+
 function extractEffortsFromInfos(infos: ModelInfoFull[]): {
   efforts: Record<string, string[]>;
   defaults: Record<string, string>;
@@ -861,6 +912,8 @@ export async function fetchModelsFull(cfg: AppConfig, a: AuthShape): Promise<Mod
   const entInfos = enterprise.status === "fulfilled" ? enterprise.value : [];
   const out = mergeModelInfos(v3Infos, entInfos);
   if (out.length === 0) throw new Error("models api returned empty list");
+  // 刷新模型倍率快照（Go storeModelRates：credits 等字段以主端点为权威）。
+  storeModelRates(a.realm || "cn", out);
   // 刷新 effort 能力缓存：空桶时跳过写（避免「某探测无档位数据」清掉既有桶）；
   // 按探测账号 realm 写对应桶（CN 探测只进 cn 桶，global 同模型名不被污染）。
   const { efforts, defaults } = extractEffortsFromInfos(out);

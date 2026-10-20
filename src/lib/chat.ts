@@ -31,10 +31,13 @@ import {
 } from "./upstream/errors";
 import { catalogSupportsImages } from "./upstream/modelCatalog";
 import { streamPassthrough, aggregate, type StreamStats } from "./upstream/sse";
+import { tokensPerSecond } from "./upstream/usage";
+import { currentModelRate } from "./upstream/modelCatalog";
 import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
 import * as wafip from "./wafip";
 import { backoffAfter, sleep } from "./backoff";
+import { identifyKeyName } from "./auth-guard";
 
 type Obj = Record<string, unknown>;
 
@@ -158,20 +161,33 @@ interface AttemptRec {
   ok: boolean;
   errKind: string;
   stats?: Partial<StreamStats>;
+  latencyMs?: number;
+  tps?: number | null;
+  keyName?: string;
+  modelRate?: string;
 }
 
 async function recordAttempt(r: AttemptRec): Promise<void> {
   try {
+    const s = r.stats;
+    const tps = r.tps ?? null;
     await prisma.usageEvent.create({
       data: {
         uid: r.uid,
         model: r.model,
         realm: r.realm,
         provider: r.provider,
-        promptTokens: r.stats?.promptTokens ?? 0,
-        completionTok: r.stats?.completionTokens ?? 0,
-        totalTokens: r.stats?.totalTokens ?? 0,
-        credit: r.stats?.hasCredit ? (r.stats?.credit ?? 0) : 0,
+        promptTokens: s?.promptTokens ?? 0,
+        completionTok: s?.completionTokens ?? 0,
+        totalTokens: s?.totalTokens ?? 0,
+        credit: s?.hasCredit ? (s?.credit ?? 0) : 0,
+        hasCredit: s?.hasCredit === true,
+        cacheHitTok: s?.hasCache ? (s?.cacheHitTokens ?? 0) : 0,
+        cacheMissTok: s?.hasCache ? (s?.cacheMissTokens ?? 0) : 0,
+        latencyMs: r.latencyMs ?? 0,
+        tps: tps ?? 0,
+        keyName: r.keyName ?? "",
+        modelRate: r.modelRate ?? "",
         ok: r.ok,
         errKind: r.errKind,
       },
@@ -193,12 +209,57 @@ async function recordRequestLog(r: {
   clientIp: string;
   ua: string;
   path: string;
+  ttfbMs?: number;
+  attempts?: number;
+  promptTokens?: number;
+  completionTok?: number;
+  totalTokens?: number;
+  credit?: number;
+  hasCredit?: boolean;
+  cacheHitTok?: number;
+  cacheMissTok?: number;
+  keyName?: string;
+  slot?: string;
 }): Promise<void> {
   try {
     await prisma.requestLog.create({ data: r });
   } catch {
     // 同上。
   }
+}
+
+// ─── 低命中率告警信号（Go logging.go cacheMissSignal） ────────────────────
+// 同一模型此前观测到过命中、本次大前缀（≥1000 tok）整段未命中时打一条 WARN，
+// 每模型 10 分钟冷却。只报「本可命中却重算」的可行动信号——新模型/新会话的
+// 首请求天然全 miss，不在此列。
+const CACHE_MISS_WARN_EVERY_MS = 10 * 60_000;
+const cacheMissWarnState = globalThis as unknown as {
+  __wbCacheEverHit?: Set<string>;
+  __wbCacheWarnLast?: Map<string, number>;
+};
+const cacheEverHit = cacheMissWarnState.__wbCacheEverHit ?? (cacheMissWarnState.__wbCacheEverHit = new Set());
+const cacheWarnLast = cacheMissWarnState.__wbCacheWarnLast ?? (cacheMissWarnState.__wbCacheWarnLast = new Map());
+
+function noteCacheTokens(model: string, prompt: number, hit: number, miss: number): void {
+  if (!model) return;
+  if (hit > 0) {
+    cacheEverHit.add(model);
+    return;
+  }
+  // hit==0 才可能是整段重算。小前缀（<1000 tok）的 miss 无告警价值；上游未回
+  // miss 字段时按 prompt 全量视为未命中。
+  if (prompt < 1000) return;
+  const m = miss > 0 ? miss : prompt;
+  if (!cacheEverHit.has(model)) return;
+  const now = Date.now();
+  const last = cacheWarnLast.get(model) ?? 0;
+  if (now - last < CACHE_MISS_WARN_EVERY_MS) return;
+  cacheWarnLast.set(model, now);
+  runlog(
+    "WARN: cache miss: model=" + model +
+    " 本次大前缀未命中（prompt=" + prompt + " miss=" + m +
+    "，此前观测到过命中）；上游前缀缓存重算，费用会显著升高",
+  );
 }
 
 // ─── 主流程 ───────────────────────────────────────────────────────────────
@@ -215,6 +276,7 @@ export async function handleChat(opts: {
   inboundHeaders: Headers;
   ua: string;
   path: string;
+  req?: Request; // 原始请求（key 归属识别；Anthropic 翻译路径可缺省）
 }): Promise<Response> {
   const cfg = await getConfig();
   const started = Date.now();
@@ -223,6 +285,11 @@ export async function handleChat(opts: {
   const rawModel = typeof body["model"] === "string" ? (body["model"] as string) : "";
 
   let { realm, provider, bare } = resolveModel(rawModel);
+  // 使用者归属（Go keyNameFrom）：多 sk-key 模式下命中哪把 key 就记谁的名字；
+  // 单 key / 无鉴权 / 无原始请求时为空串。一次性取值，轮转全程复用。
+  const keyName = opts.req ? await identifyKeyName(opts.req) : "";
+  // 请求时生效积分倍率（Go handler.go:605）：目录成功刷新时缓存于 modelRates 桶。
+  const modelRate = currentModelRate(realm, bare);
   // 未注册的 provider 前缀回落 cn 裸名（bareModel 回填原串）。
   if (provider !== "") {
     const exists = await prisma.provider.findUnique({ where: { name: provider } });
@@ -234,7 +301,7 @@ export async function handleChat(opts: {
   }
   if (provider !== "") {
     const { providerChat } = await import("./provider");
-    return providerChat(provider, bare, JSON.stringify(body), stream);
+    return providerChat(provider, bare, JSON.stringify(body), stream, keyName);
   }
 
   // 会话键 / 轮级键 / 粘性解析。
@@ -316,7 +383,13 @@ export async function handleChat(opts: {
     }
   };
 
-  const finishLog = (status: number, uid: string, errKind: string) => {
+  let attemptCount = 0;
+  const finishLog = (
+    status: number,
+    uid: string,
+    errKind: string,
+    extra?: Partial<StreamStats>,
+  ) => {
     runlog(
       "chat " + (status < 400 ? "OK " : "ERR ") + status + " " + bare +
       (uid ? " uid=" + uid : "") + (errKind ? " kind=" + errKind : "") +
@@ -327,6 +400,16 @@ export async function handleChat(opts: {
       status, errKind, stream,
       durationMs: Date.now() - started,
       clientIp: clientIP, ua, path,
+      ttfbMs: extra?.ttfbMs ?? 0,
+      attempts: attemptCount,
+      promptTokens: extra?.promptTokens ?? 0,
+      completionTok: extra?.completionTokens ?? 0,
+      totalTokens: extra?.totalTokens ?? 0,
+      credit: extra?.hasCredit ? (extra?.credit ?? 0) : 0,
+      hasCredit: extra?.hasCredit === true,
+      cacheHitTok: extra?.hasCache ? (extra?.cacheHitTokens ?? 0) : 0,
+      cacheMissTok: extra?.hasCache ? (extra?.cacheMissTokens ?? 0) : 0,
+      keyName,
     });
   };
 
@@ -351,6 +434,7 @@ export async function handleChat(opts: {
       }
       const acct = entry.account;
       tried.add(acct.uid);
+      attemptCount++;
 
       if (!pool.acquire(entry, cfg)) {
         if (stickyUID && acct.uid === stickyUID) {
@@ -539,14 +623,23 @@ export async function handleChat(opts: {
               await recordAttempt({
                 uid: uidCaptured, model: bare, realm, provider: "",
                 ok: false, errKind: kind, stats,
+                latencyMs: Date.now() - attemptStarted, keyName, modelRate,
               });
             } else {
+              const latencyMs = Math.max(1, Date.now() - attemptStarted);
+              const tps = stats.hasUsage && stats.completionTokens >= 0
+                ? tokensPerSecond(stats.completionTokens, latencyMs, stats.ttfbMs)
+                : null;
+              if (stats.hasCache) {
+                noteCacheTokens(bare, stats.promptTokens, stats.cacheHitTokens, stats.cacheMissTokens);
+              }
               await pool.noteSuccess(uidCaptured);
               await pool.blockModelClear(uidCaptured, bare);
               if (sessKey && cfg.session_sticky) await bindSticky(sessKey, uidCaptured);
               await recordAttempt({
                 uid: uidCaptured, model: bare, realm, provider: "",
                 ok: true, errKind: "", stats,
+                latencyMs, tps, keyName, modelRate,
               });
               if (stats.hasCredit && stats.totalTokens > 0) {
                 await pool.noteModelCost(uidCaptured, bare, stats.credit, stats.totalTokens);
@@ -556,7 +649,9 @@ export async function handleChat(opts: {
             pool.release(uidCaptured);
           }
         });
-        finishLog(200, acct.uid, "");
+        // RequestLog 的 token/TTFB 维度与 Go 的 defer st.done() 同语义：流式
+        // 下等流真正结束、末帧 usage 可得时才落日志（响应本身已可先返回）。
+        void statsPromise.then((stats) => finishLog(200, uidCaptured, "", stats));
         return new Response(readable, {
           status: 200,
           headers: {
@@ -587,14 +682,22 @@ export async function handleChat(opts: {
       await pool.noteSuccess(acct.uid);
       await pool.blockModelClear(acct.uid, bare);
       if (sessKey && cfg.session_sticky) await bindSticky(sessKey, acct.uid);
+      const latencyMs = Math.max(1, Date.now() - attemptStarted);
+      const tps = agg.stats.hasUsage && agg.stats.completionTokens >= 0
+        ? tokensPerSecond(agg.stats.completionTokens, latencyMs, agg.stats.ttfbMs)
+        : null;
+      if (agg.stats.hasCache) {
+        noteCacheTokens(bare, agg.stats.promptTokens, agg.stats.cacheHitTokens, agg.stats.cacheMissTokens);
+      }
       await recordAttempt({
         uid: acct.uid, model: bare, realm, provider: "",
         ok: true, errKind: "", stats: agg.stats,
+        latencyMs, tps, keyName, modelRate,
       });
       if (agg.stats.hasCredit && agg.stats.totalTokens > 0) {
         await pool.noteModelCost(acct.uid, bare, agg.stats.credit, agg.stats.totalTokens);
       }
-      finishLog(200, acct.uid, "");
+      finishLog(200, acct.uid, "", agg.stats);
       // 非流式标记修复（Go handler.go:1148 同语义）：content 含原生标记且
       // 无结构化 tool_calls、finish_reason=stop 时，还原为 message.tool_calls。
       return Response.json(
