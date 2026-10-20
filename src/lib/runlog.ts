@@ -17,6 +17,7 @@ const ring: RingState = g.__wbRunlog ?? (g.__wbRunlog = { entries: [] });
 const TASK_PREFIXES = [
   "school ", "streak-bonus ", "travel ", "blackcat ", "lottery ",
   "checkin ", "activity ", "keepalive ", "balance ", "user-resource ",
+  "panel: 手动", // 对齐 Go ring.go taskPrefixes（批量任务触发行归任务频道）
   "[scheduler]", "[growth", "[task",
 ];
 

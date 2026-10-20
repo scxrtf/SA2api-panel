@@ -264,6 +264,11 @@ export function isAlreadyCheckin(err: unknown): boolean {
   return false;
 }
 
+// isSessionDead 报告 err 是否表示 session 失效（401+12153），对齐 Go ErrSessionDead 判定。
+export function isSessionDead(err: unknown): boolean {
+  return err instanceof UpstreamError && err.kind === "session_dead";
+}
+
 // ─── gateway_hint（移植 internal/upstream/hint.go） ────────────────────────
 // error.message 永远是上游 body 原文透传；gateway_hint 只做与 message 并列的
 // 网关视角补充说明，绝不替换/包装 message。未覆盖形态返回空串 → 调用方不带字段

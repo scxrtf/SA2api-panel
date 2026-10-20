@@ -1,7 +1,7 @@
 "use client";
 // 积分构成视图（对齐 Go view-packages）：按账号列出套餐包构成 + 到期分布。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, fmtNum, fmtTime, useAutoRefresh } from "../lib";
+import { req, fmtNum, fmtTime, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { PackageMixBar, ExpiryDistribution } from "../components/packageCharts";
 
@@ -17,15 +17,21 @@ export interface PkgAccount {
 
 export function PackagesView({ flash }: { flash: Flash }) {
   const [rows, setRows] = useState<PkgAccount[] | null>(null);
+  const [detailLimit, setDetailLimit] = useState(5);
   const [expandAll, setExpandAll] = useState(false);
 
   const load = useCallback(() => {
-    req<{ accounts: PkgAccount[] }>("packages")
-      .then((r) => setRows(r.accounts))
+    req<{ accounts: PkgAccount[]; detail_limit?: number }>("packages")
+      .then((r) => {
+        setRows(r.accounts);
+        const n = Number(r.detail_limit);
+        setDetailLimit(Number.isFinite(n) && n > 0 ? Math.floor(n) : 5);
+      })
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [flash]);
   useEffect(load, [load]);
   useAutoRefresh(load, 60_000);
+  usePanelRefresh(load);
 
   return (
     <Box title="积分构成" hint="按账号列出套餐包 · 上游按失效时刻先后自动优先扣减（FEFO）"
@@ -61,10 +67,11 @@ export function PackagesView({ flash }: { flash: Flash }) {
                 <table className="tbl">
                   <thead><tr><th>套餐</th><th>剩余 / 总量</th><th>已用</th><th>到期</th></tr></thead>
                   <tbody>
-                    {(expandAll ? a.packages : a.packages.slice(0, 4)).map((p, i) => {
+                    {(expandAll ? a.packages : a.packages.slice(0, detailLimit)).map((p, i, shown) => {
                       const dupName = (p.name || p.sub_product_name || "-");
                       // 同名相邻包折叠标记：与前一行同名时弱化名称列（避免刷屏）。
-                      const dup = i > 0 && dupName === ((expandAll ? a.packages : a.packages)[i - 1].name || (expandAll ? a.packages : a.packages)[i - 1].sub_product_name || "-");
+                      const prev = i > 0 ? shown[i - 1] : null;
+                      const dup = prev !== null && dupName === (prev.name || prev.sub_product_name || "-");
                       return (
                         <tr key={i}>
                           <td className={dup ? "dim" : ""}>
@@ -77,8 +84,8 @@ export function PackagesView({ flash }: { flash: Flash }) {
                         </tr>
                       );
                     })}
-                    {!expandAll && a.packages.length > 4 && (() => {
-                      const rest = a.packages.slice(4);
+                    {!expandAll && a.packages.length > detailLimit && (() => {
+                      const rest = a.packages.slice(detailLimit);
                       const restRemain = rest.reduce((n, p) => n + (p.remain || 0), 0);
                       const restSize = rest.reduce((n, p) => n + (p.size || 0), 0);
                       const restUsed = rest.reduce((n, p) => n + (p.used || 0), 0);
@@ -92,7 +99,7 @@ export function PackagesView({ flash }: { flash: Flash }) {
                         </tr>
                       );
                     })()}
-                    {expandAll && a.packages.length > 4 && (
+                    {expandAll && a.packages.length > detailLimit && (
                       <tr style={{ cursor: "pointer" }} onClick={() => setExpandAll(false)}>
                         <td className="dim" colSpan={4} style={{ textAlign: "center" }}>收起 ▲</td>
                       </tr>

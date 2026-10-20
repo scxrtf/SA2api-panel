@@ -1,10 +1,11 @@
 "use client";
 // 账号池视图（对齐 Go view-accounts）：统计条 + 批量操作 + 账号表 + 模型锁池。
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { req, fmtNum, fmtTime, fmtDur } from "../lib";
 import { Box, type StatusRow, type Overview, type Flash } from "../components/ui";
 import { CtrlMetric, CtrlAction, CtrlCard, CtrlHint } from "../components/ctrl";
 import { AddAccountModal } from "../components/addAccount";
+import { ModelScanPanel, useModelScan } from "../components/modelscan";
 
 // fmtAgo 相对时间（Go app.js ago 同口径）：42s / 5m / 3h / 2d。
 function fmtAgo(iso: string): string {
@@ -38,9 +39,55 @@ function acctTags(a: StatusRow) {
   return tags;
 }
 
+// useNow 客户端时钟：挂载前为 0，挂载后每 15s 更新一次。
+// 剩余时间必须在渲染期之外取时间（react-hooks/purity），同时保证首帧
+// 服务端/客户端渲染一致。
+function useNow(intervalMs = 15_000): number {
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    tick();
+    const t = setInterval(tick, intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs]);
+  return now;
+}
+
+// RateLimitRows 账号行内「哪些模型暂时不能用」（对齐 Go rateLimitRowsHtml）。
+// rate_limited_models 只含未过期条目；kind=model_unavailable 为 11102 模型不可用，
+// 其余为 6004 等上游限流。剩余时间由 useNow 定时刷新，不随 overview 轮询老化。
+function RateLimitRows({ rows, now }: { rows: StatusRow["rate_limited_models"]; now: number }) {
+  if (!rows || rows.length === 0) return null;
+  return (
+    <div className="rate-limits">
+      {rows.map((r) => {
+        const remain = now > 0 ? Math.max(0, Math.round((r.until - now) / 1000)) : null;
+        const unavailable = r.kind === "model_unavailable";
+        const detail = unavailable
+          ? (remain === null ? "模型不可用" : remain > 0 ? "不可用 · " + fmtDur(remain) + " 后重试" : "不可用 · 等待重新探测")
+          : (remain === null ? "限流中" : remain > 0 ? "限流 · " + fmtDur(remain) + " 后可重试" : "限流 · 即将恢复");
+        const title = [
+          r.model,
+          unavailable ? "模型当前不可用" : "上游限流",
+          "最早重试：" + fmtTime(r.until),
+          r.reason ? "原因：" + r.reason : "",
+        ].filter(Boolean).join("\n");
+        return (
+          <div key={r.model + "@" + r.until}
+            className={"rate-limit" + (unavailable ? " model-unavailable" : "")} title={title}>
+            <b>{r.model}</b><span>{detail}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AccountsView({ ov, flash, onRefresh }: {
   ov: Overview; flash: Flash; onRefresh: () => Promise<void>;
 }) {
+  const now = useNow();
+  const scan = useModelScan(flash, onRefresh);
   const [addOpen, setAddOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
@@ -114,9 +161,23 @@ export function AccountsView({ ov, flash, onRefresh }: {
           <CtrlAction code="ACT" text="活跃上报" pendingText="发起上报中…" secondary onClick={() => batch("activity_all", "活跃上报")} />
           <CtrlAction code="KEEP" text="全部保活" pendingText="发起保活中…" secondary onClick={() => batch("keepalive_all", "全部保活")} />
           <CtrlAction code="BAL" text="刷新余额" pendingText="刷新中…" secondary onClick={() => batch("balance_all", "刷新余额")} />
+          <CtrlAction code="SCAN" text="扫描模型限流" pendingText="启动中…" secondary
+            disabled={scan.scan?.running} onClick={async () => {
+              if (!window.confirm("扫描会向每个未禁用账号的每个模型发送一次最小请求，可能消耗少量积分并触发上游限流。确认开始？")) return;
+              await scan.start();
+            }} />
         </div>
-        <CtrlHint>批量操作异步执行，结果见「运行日志」页；添加账号支持浏览器授权与 JSON 导入两种方式。</CtrlHint>
+        <CtrlHint>
+          批量操作异步执行，结果见「运行日志」页；添加账号支持浏览器授权与 JSON 导入两种方式。
+          「扫描模型限流」会真实探测每个模型的 429 / 6004 / 11102 状态，已锁定的模型自动跳过。
+        </CtrlHint>
       </CtrlCard>
+
+      {scan.scan && (
+        <div style={{ marginBottom: 16 }}>
+          <ModelScanPanel scan={scan.scan} onCancel={scan.cancel} />
+        </div>
+      )}
 
       <Box title="账号池">
         <div className="pad" style={{ paddingBottom: 0, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -170,7 +231,13 @@ export function AccountsView({ ov, flash, onRefresh }: {
                       </div>
                     )}
                   </td>
-                  <td>{acctTags(a).map((t) => <span key={t.text} className={"tag " + t.cls}>{t.text}</span>)}</td>
+                  <td>
+                    {acctTags(a).map((t) => <span key={t.text} className={"tag " + t.cls}>{t.text}</span>)}
+                    {a.reason && (
+                      <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }} title={a.reason}>{a.reason}</div>
+                    )}
+                    <RateLimitRows rows={a.rate_limited_models} now={now} />
+                  </td>
                   <td className="mono">
                     {fmtNum(a.success_count ?? 0)} <span className="dim">/</span>{" "}
                     <span style={{ color: (a.err_total ?? 0) > 0 ? "var(--err)" : undefined }}>{fmtNum(a.err_total ?? 0)}</span>
@@ -210,8 +277,10 @@ export function AccountsView({ ov, flash, onRefresh }: {
       </Box>
 
       {/* 模型锁池（Go renderModelLocks 同口径）：服务端 model_locks 已按
-          整池不可用 → 没号可用 → 部分限流 排好序，这里只做展示。 */}
-      {ov.model_locks != null && ov.model_locks.length > 0 && (() => {
+          整池不可用 → 没号可用 → 部分限流 排好序，这里只做展示。
+          无锁时也保留区块并渲染空态，避免「看不到锁池」被误读为功能缺失。 */}
+      {(() => {
+        const locks = ov.model_locks ?? [];
         const STATE: Record<string, [string, string]> = {
           locked: ["err", "整池不可用"],
           starved: ["warn", "没号可用"],
@@ -219,14 +288,16 @@ export function AccountsView({ ov, flash, onRefresh }: {
         };
         const left = (iso: string) => {
           const ms = Date.parse(iso);
-          return Number.isFinite(ms) ? fmtDur(Math.max(0, Math.round((ms - Date.now()) / 1000))) : "—";
+          if (!Number.isFinite(ms)) return "—";
+          if (now <= 0) return fmtTime(ms);
+          return fmtDur(Math.max(0, Math.round((ms - now) / 1000)));
         };
-        const bad = ov.model_locks!.filter((r) => r.state === "locked" || r.state === "starved").length;
+        const bad = locks.filter((r) => r.state === "locked" || r.state === "starved").length;
         return (
           <Box title="模型锁池" hint="哪些模型不能用、还要锁多久"
-            extra={<span className="dim" style={{ fontSize: 12 }}>
-              {bad ? bad + " 个模型整池不可用" : ov.model_locks!.length + " 个模型部分限流"}
-            </span>}>
+            extra={locks.length > 0 ? <span className="dim" style={{ fontSize: 12 }}>
+              {bad ? bad + " 个模型整池不可用" : locks.length + " 个模型部分限流"}
+            </span> : undefined}>
             <div className="tbl-wrap">
               <table className="tbl">
                 <thead><tr>
@@ -234,7 +305,12 @@ export function AccountsView({ ov, flash, onRefresh }: {
                   <th>最早解锁</th><th>全部解锁</th><th>原因</th>
                 </tr></thead>
                 <tbody>
-                  {ov.model_locks!.map((r) => {
+                  {locks.length === 0 && (
+                    <tr><td colSpan={8} className="dim" style={{ textAlign: "center", padding: 30 }}>
+                      当前没有模型级限流 —— 所有模型均可选
+                    </td></tr>
+                  )}
+                  {locks.map((r) => {
                     const st = STATE[r.state] ?? ["dim", r.state];
                     return (
                       <tr key={r.realm + "/" + r.model}>

@@ -65,3 +65,21 @@ export function useAutoRefresh(loader: () => void, ms: number, enabled = true): 
     return () => clearInterval(t);
   }, [loader, ms, enabled]);
 }
+
+// PANEL_REFRESH_EVENT：顶栏「刷新」按钮广播的事件名。顶栏只刷 overview，
+// 各视图的数据在自己组件里，靠这个事件让当前视图也跑自己的 load——
+// 否则在用量/日志等 tab 点顶栏刷新只更新了侧边栏统计，主区纹丝不动。
+export const PANEL_REFRESH_EVENT = "wb2a:panel-refresh";
+
+export function emitPanelRefresh(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(PANEL_REFRESH_EVENT));
+}
+
+// usePanelRefresh：视图订阅顶栏刷新事件，触发自己的 loader。
+export function usePanelRefresh(loader: () => void): void {
+  useEffect(() => {
+    const h = () => loader();
+    window.addEventListener(PANEL_REFRESH_EVENT, h);
+    return () => window.removeEventListener(PANEL_REFRESH_EVENT, h);
+  }, [loader]);
+}

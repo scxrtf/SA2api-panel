@@ -2,6 +2,7 @@
 import { panelAuth, ok } from "@/lib/panel-auth";
 import * as pool from "@/lib/pool";
 import { runBalanceRefresh, syncNicknames } from "@/lib/cron";
+import { runlog } from "@/lib/runlog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,5 +14,6 @@ export async function POST(req: Request) {
   const r = await runBalanceRefresh();
   // 手动刷新触发昵称同步（Go balanceAll 内 syncNicknames；后台定时器不调）。
   await syncNicknames();
+  runlog("panel: 手动全量余额刷新完成");
   return ok({ ...r, accounts: await pool.statusList() });
 }

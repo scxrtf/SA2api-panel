@@ -1,7 +1,7 @@
 "use client";
 // 运行日志视图（对齐 Go view-logs）：请求日志 / 运行日志双模式 + 过滤。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, fmtNum, useAutoRefresh } from "../lib";
+import { req, fmtNum, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
 interface LogEntry { ts: number; ch: "task" | "chat" | "sys"; text: string }
@@ -80,6 +80,7 @@ export function LogsView({ flash }: { flash: Flash }) {
   }, [mode, filter, ch, ipFilter, flash]);
   useEffect(load, [load]);
   useAutoRefresh(load, 10_000);
+  usePanelRefresh(load);
 
   return (
     <Box title={mode === "requests" ? "请求日志" : "运行日志"} extra={<>

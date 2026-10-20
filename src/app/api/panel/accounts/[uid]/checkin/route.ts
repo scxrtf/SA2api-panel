@@ -3,7 +3,7 @@ import { panelAuth, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import * as pool from "@/lib/pool";
-import { dailyCheckin, userResource } from "@/lib/upstream/client";
+import { dailyCheckin, userResource, expiringSoonMs } from "@/lib/upstream/client";
 import { isAlreadyCheckin } from "@/lib/upstream/errors";
 import { authShapeOf } from "@/lib/login";
 
@@ -46,8 +46,11 @@ export async function POST(req: Request, ctx: Ctx) {
   if (enterprise) resp["enterprise"] = true;
   if (checkinMsg) resp["checkin_message"] = checkinMsg;
   try {
-    const r = await userResource(cfg, a);
-    await pool.setCreditsDetailed(uid, BigInt(r.remain), BigInt(r.total), 0n, 0n, 0n);
+    const r = await userResource(cfg, a, expiringSoonMs(cfg.expiring_soon_hours));
+    await pool.setCreditsDetailed(
+      uid, BigInt(r.remain), BigInt(r.total),
+      BigInt(r.expiring), BigInt(r.earliestAt), BigInt(r.earliestRemain),
+    );
     resp["credits"] = r.remain;
     resp["credits_total"] = r.total;
   } catch (e) {

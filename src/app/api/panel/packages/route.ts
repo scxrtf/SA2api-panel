@@ -55,5 +55,5 @@ export async function GET(req: Request) {
   await Promise.all([worker(), worker(), worker()]);
   // 余额降序：多的在前。
   out.sort((x, y) => y.remain - x.remain);
-  return ok({ accounts: out });
+  return ok({ accounts: out, detail_limit: cfg.package_detail_limit });
 }

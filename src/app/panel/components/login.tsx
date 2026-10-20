@@ -14,7 +14,7 @@ export function LoginScreen({ onSubmit, msg }: {
   return (
     <div className="login-wrap">
       <div className="card">
-        <div className="card-title">WORKBUDDY2API</div>
+        <div className="card-title">SAworkApi</div>
         <div className="form-row">
           <input className="input" type="password" value={keyInput}
             onChange={(e) => setKeyInput(e.target.value)}

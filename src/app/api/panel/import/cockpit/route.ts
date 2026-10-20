@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import * as pool from "@/lib/pool";
 import { validUID } from "@/lib/login";
-import { claimTrial, dailyCheckin, userResource } from "@/lib/upstream/client";
+import { claimTrial, dailyCheckin, userResource, expiringSoonMs } from "@/lib/upstream/client";
 import { globalCompleteRegistration } from "@/lib/upstream/global_register";
 
 export const runtime = "nodejs";
@@ -117,8 +117,11 @@ export async function POST(req: Request) {
       }
     }
     try {
-      const r = await userResource(cfg, shape);
-      await pool.setCreditsDetailed(uid, BigInt(r.remain), BigInt(r.total), 0n, 0n, 0n);
+      const r = await userResource(cfg, shape, expiringSoonMs(cfg.expiring_soon_hours));
+      await pool.setCreditsDetailed(
+        uid, BigInt(r.remain), BigInt(r.total),
+        BigInt(r.expiring), BigInt(r.earliestAt), BigInt(r.earliestRemain),
+      );
     } catch {
       // 余额失败不阻断。
     }

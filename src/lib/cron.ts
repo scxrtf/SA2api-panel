@@ -7,20 +7,27 @@ import * as pool from "./pool";
 import {
   dailyCheckin,
   refreshToken,
-  needsRefresh,
   userResource,
+  expiringSoonMs,
   fetchAccountProfile,
   type AuthShape,
 } from "./upstream/client";
-import { isAlreadyCheckin } from "./upstream/errors";
+import { isAlreadyCheckin, isSessionDead } from "./upstream/errors";
+import { SESSION_DEAD_THRESHOLD } from "./pool";
 import { reportChatActivity } from "./upstream/report";
 import {
   buddyInfo, buddyAgreement, buddyFirst, travelStatus, travelDepart, travelClaim,
-  growthStreakFull, growthRedeemTier, lotteryChances, lotteryDraw,
+  growthStreak, growthStreakFull, growthRedeemTier, lotteryChances, lotteryDraw,
   heatmapYesterdayMissed, useMakeupCard, claimGift, claimCompensation,
 } from "./upstream/tasks";
 import { listActiveAccounts, reportGapMs } from "./taskcenter";
 import { runlog } from "./runlog";
+import { label } from "./logfmt";
+
+// errMsg 提取错误消息（Error.message 优先，其余 String 化）。
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 function shapeOf(a: {
   uid: string; nickname: string; realm: string; accessToken: string;
@@ -35,45 +42,92 @@ function shapeOf(a: {
   };
 }
 
-// runCheckin 全量签到：仅 CN 非企业号；已签到幂等。09:00/21:00（Asia/Shanghai）由外部调度。
+// runCheckin 全量签到（对齐 Go RunCheckinNow）：逐账号签到 + 余额回写 + 解冻，
+// 末尾跑连登管家。global/企业号跳过签到但企业号仍刷余额；禁用账号默认跳过
+// （schedule_include_disabled_in_tasks 打开时一并执行）；已签到幂等。
+// 日志对齐 Go：逐号 `checkin 昵称(uid8): 签到成功/今天已签到（幂等）/…` +
+// `user-resource …` 失败行。
 export async function runCheckin(): Promise<{ done: number; already: number; failed: number }> {
   const cfg = await getConfig();
+  const includeDisabled = cfg.schedule_include_disabled_in_tasks;
   const accounts = await prisma.account.findMany({ include: { state: true } });
   let done = 0, already = 0, failed = 0;
   for (const a of accounts) {
-    if (a.state?.disabled || a.realm === "global" || a.enterpriseId !== "") continue;
-    try {
-      await dailyCheckin(cfg, shapeOf(a));
-      await pool.markCheckin(a.uid);
-      done++;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (isAlreadyCheckin(msg)) {
+    if ((a.state?.disabled ?? false) && !includeDisabled) continue;
+    if (!a.refreshToken) continue;
+    if (a.realm === "global") continue; // D4 门控：global 无 CN 任务体系
+    const lb = label(a.uid, a.nickname);
+    // 企业版无签到体系（daily-checkin 400 code 10001），但余额查询照常跑。
+    if (a.enterpriseId === "") {
+      try {
+        await dailyCheckin(cfg, shapeOf(a));
         await pool.markCheckin(a.uid);
-        already++;
-      } else {
-        failed++;
+        done++;
+        runlog("checkin " + lb + ": 签到成功");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (isAlreadyCheckin(msg)) {
+          await pool.markCheckin(a.uid);
+          already++;
+          runlog("checkin " + lb + ": 今天已签到（幂等）");
+        } else {
+          failed++;
+          runlog("checkin " + lb + ": " + msg);
+        }
+        // 其余业务错误也继续走余额查询
       }
     }
+    // 余额回写（对齐 Go UserResourceDetailedWithExpiry + ReenableIfCredits：
+    // setCreditsDetailed 内含余额恢复解冻语义）。
+    try {
+      const r = await userResource(cfg, shapeOf(a), expiringSoonMs(cfg.expiring_soon_hours));
+      await pool.setCreditsDetailed(
+        a.uid, BigInt(r.remain), BigInt(r.total),
+        BigInt(r.expiring), BigInt(r.earliestAt), BigInt(r.earliestRemain),
+      );
+    } catch (e) {
+      runlog("user-resource " + lb + ": " + (e instanceof Error ? e.message : String(e)));
+    }
   }
-  runlog("checkin 全量签到完成：done=" + done + " already=" + already + " failed=" + failed);
+  // 连登管家（对齐 Go RunCheckinNow 末尾的 RunStreakBonusNow）：逐号日志由
+  // streakBonusAccount 的 console.log 打（"streak-bonus " 前缀），无总结行（对齐 Go）。
+  await runStreakBonusNow();
   return { done, already, failed };
 }
 
-// runKeepalive 全量 token 保活：临近过期窗口内走 refreshToken（失败冷却记连败）。
+// runKeepalive 全量 token 保活（对齐 Go RunKeepaliveNow）：无条件刷新所有有
+// refreshToken 的账号（Go 无 needsRefresh 窗口，到点就全刷）；失败逐号记日志，
+// 12153 session dead 连续 3 次自动禁用（对齐 NoteSessionDead），刷新成功清误判计数。
+// 禁用账号默认跳过；schedule_include_disabled_in_tasks 打开时也续期（但已禁用的
+// 号不再重复计数 12153）。
 export async function runKeepalive(): Promise<{ refreshed: number; skipped: number; failed: number }> {
   const cfg = await getConfig();
+  const includeDisabled = cfg.schedule_include_disabled_in_tasks;
   const accounts = await prisma.account.findMany({ include: { state: true } });
   let refreshed = 0, skipped = 0, failed = 0;
   for (const a of accounts) {
-    if (a.state?.disabled || !a.refreshToken) continue;
-    const shape = shapeOf(a);
-    if (!needsRefresh(shape, cfg.refresh_skew_sec * 12)) {
-      skipped++;
+    if ((a.state?.disabled ?? false) && !includeDisabled) continue;
+    if (!a.refreshToken) { skipped++; continue; }
+    const lb = label(a.uid, a.nickname);
+    let patch: Awaited<ReturnType<typeof refreshToken>>;
+    try {
+      patch = await refreshToken(cfg, shapeOf(a));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      runlog("keepalive " + lb + ": " + msg);
+      // session dead（12153）走连续计数禁用；且不对已禁用的号重复计数（终态，再打
+      // 一行「— 禁用」只会误导）。其余失败只记日志，不动熔断（对齐 Go）。
+      if (isSessionDead(e) && !(a.state?.disabled ?? false)) {
+        if (await pool.noteSessionDead(a.uid)) {
+          runlog("keepalive " + lb + ": 连续 " + SESSION_DEAD_THRESHOLD + " 次 12153 session dead — 禁用");
+        }
+      }
+      failed++;
       continue;
     }
+    await pool.clearSessionDead(a.uid); // 刷新成功清误判计数
+    refreshed++;
     try {
-      const patch = await refreshToken(cfg, shape);
       await prisma.account.update({
         where: { uid: a.uid },
         data: {
@@ -83,32 +137,36 @@ export async function runKeepalive(): Promise<{ refreshed: number; skipped: numb
           domain: patch.domain ?? a.domain,
         },
       });
-      refreshed++;
-    } catch {
-      await pool.noteError(cfg, a.uid);
-      failed++;
+    } catch (e) {
+      // 对齐 Go RunKeepaliveNow：落盘失败单独记 save 行，不计入刷新失败。
+      runlog("keepalive " + lb + " save: " + (e instanceof Error ? e.message : String(e)));
     }
   }
-  runlog("keepalive 全量保活完成：refreshed=" + refreshed + " skipped=" + skipped + " failed=" + failed);
   return { refreshed, skipped, failed };
 }
 
 // runBalanceRefresh 全量余额刷新（写回 credits 快照，含解冻语义）。
 export async function runBalanceRefresh(): Promise<{ updated: number; failed: number }> {
   const cfg = await getConfig();
+  const includeDisabled = cfg.schedule_include_disabled_in_tasks;
   const accounts = await prisma.account.findMany({ include: { state: true } });
   let updated = 0, failed = 0;
   for (const a of accounts) {
-    if (a.state?.disabled || !a.accessToken) continue;
+    // 禁用只关选号：开关打开时禁用号也刷新余额（对齐 Go RunBalanceRefreshNow）。
+    if ((a.state?.disabled ?? false) && !includeDisabled) continue;
+    if (!a.accessToken) continue;
     try {
-      const r = await userResource(cfg, shapeOf(a));
-      await pool.setCreditsDetailed(a.uid, BigInt(r.remain), BigInt(r.total), 0n, 0n, 0n);
+      const r = await userResource(cfg, shapeOf(a), expiringSoonMs(cfg.expiring_soon_hours));
+      await pool.setCreditsDetailed(
+        a.uid, BigInt(r.remain), BigInt(r.total),
+        BigInt(r.expiring), BigInt(r.earliestAt), BigInt(r.earliestRemain),
+      );
       updated++;
-    } catch {
+    } catch (e) {
       failed++;
+      runlog("balance " + label(a.uid, a.nickname) + ": " + errMsg(e));
     }
   }
-  runlog("balance 全量余额刷新完成：updated=" + updated + " failed=" + failed);
   return { updated, failed };
 }
 
@@ -152,6 +210,9 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // travelAccountDelayMs 账号间限速（对齐 scheduler travelAccountDelay，保守 2s）。
 const travelAccountDelayMs = 2000;
+// TRAVEL_LOCATION_ID 派出发地点固定 4（古镇客栈）：4 个地点收益/时长完全相同
+// （对齐 Go travelLocationID）；上游要求显式携带 location_id。
+const TRAVEL_LOCATION_ID = 4;
 
 // adoptTried 记录各账号当日「领养门槛未达」判定（每日零点自然失效）。
 const adoptTried = new Map<string, string>();
@@ -159,8 +220,10 @@ const travelDay = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia
 
 // runTravelNow 立即对池内所有可用账号执行一趟旅行巡检（对齐 RunTravelNow）。
 // 禁用账号跳过；global/企业门控（无 CN 成长体系，不发起上游调用）；401/查询失败只跳过。
+// 日志对齐 Go：逐号 `travel 昵称(uid8): depart ok / claim ok / adopt ok / skip (…)`。
 export async function runTravelNow(): Promise<{ adopted: number; departed: number; claimed: number; skipped: number }> {
   const cfg = await getConfig();
+  // 旅行与 Go RunTravelNow 同口径：禁用账号始终跳过（该开关不覆盖旅行）。
   const rows = await listActiveAccounts();
   let adopted = 0, departed = 0, claimed = 0, skipped = 0;
   let first = true;
@@ -169,64 +232,98 @@ export async function runTravelNow(): Promise<{ adopted: number; departed: numbe
     if (row.realm === "global" || row.enterpriseId !== "") continue;
     if (!first) await sleep(travelAccountDelayMs);
     first = false;
-    const r = await travelOne(cfg, row.auth);
+    const r = await travelOne(cfg, row.auth, row.nickname);
     if (r === "adopted") adopted++;
     else if (r === "departed") departed++;
     else if (r === "claimed") claimed++;
     else skipped++;
   }
-  runlog("travel 旅行巡检完成：adopted=" + adopted + " departed=" + departed + " claimed=" + claimed + " skipped=" + skipped);
   return { adopted, departed, claimed, skipped };
 }
 
 // travelOne 单账号单趟状态机：查有无猫 + 查状态 + 最多一个动作，不轮询不等待。
-async function travelOne(cfg: AppConfig, a: AuthShape): Promise<"adopted" | "departed" | "claimed" | "skipped"> {
+async function travelOne(cfg: AppConfig, a: AuthShape, nickname: string): Promise<"adopted" | "departed" | "claimed" | "skipped"> {
+  const lb = label(a.uid, nickname);
   let buddy: { id: number; name: string } | null = null;
-  try { buddy = await buddyInfo(cfg, a); } catch { return "skipped"; }
+  try { buddy = await buddyInfo(cfg, a); }
+  catch (e) { runlog("travel " + lb + ": buddy-info: " + errMsg(e)); return "skipped"; }
   if (buddy == null) {
-    await travelAdopt(cfg, a);
-    return "skipped";
+    const ok = await travelAdopt(cfg, a, lb);
+    return ok ? "adopted" : "skipped";
   }
   let ts;
-  try { ts = await travelStatus(cfg, a); } catch { return "skipped"; }
+  try { ts = await travelStatus(cfg, a); }
+  catch (e) { runlog("travel " + lb + ": status: " + errMsg(e)); return "skipped"; }
   switch (ts.state) {
     case "arrived":
       if (ts.record_id && ts.record_id > 0) {
-        try { await travelClaim(cfg, a, ts.record_id); return "claimed"; } catch { return "skipped"; }
+        try {
+          const reward = await travelClaim(cfg, a, ts.record_id);
+          runlog("travel " + lb + ": claim ok record=" + ts.record_id + " reward=" + (reward ?? 0));
+          return "claimed";
+        } catch (e) {
+          runlog("travel " + lb + ": claim record=" + ts.record_id + ": " + errMsg(e));
+          return "skipped";
+        }
       }
+      runlog("travel " + lb + ": claim skipped (arrived but no record_id)");
       return "skipped";
     case "idle":
-      if (ts.daily_limit_reached) return "skipped";
-      try { await travelDepart(cfg, a); return "departed"; } catch { return "skipped"; }
+      if (ts.daily_limit_reached) { runlog("travel " + lb + ": skip (daily limit reached)"); return "skipped"; }
+      try {
+        await travelDepart(cfg, a, TRAVEL_LOCATION_ID);
+        runlog("travel " + lb + ": depart ok location=" + TRAVEL_LOCATION_ID);
+        return "departed";
+      } catch (e) {
+        runlog("travel " + lb + ": depart: " + errMsg(e));
+        return "skipped";
+      }
+    case "traveling":
+      runlog("travel " + lb + ": skip (traveling record=" + (ts.record_id ?? 0) + ")");
+      return "skipped";
     default:
+      runlog("travel " + lb + ": skip (unknown state " + JSON.stringify(ts.state ?? "") + ")");
       return "skipped";
   }
 }
 
 // travelAdopt 无猫时领养：report（解锁前置）→ agreement → buddy/first。
 // 门槛未达（当日无活跃）当日不再重试。
-async function travelAdopt(cfg: AppConfig, a: AuthShape): Promise<void> {
-  if (adoptTried.get(a.uid) === travelDay()) return;
+async function travelAdopt(cfg: AppConfig, a: AuthShape, lb: string): Promise<boolean> {
+  if (adoptTried.get(a.uid) === travelDay()) return false;
   try {
     await reportChatActivity(cfg, a, "wb2api-adopt-" + Date.now(), "");
     await sleep(reportGapMs);
-  } catch { /* 前置上报失败不阻塞，让 buddy/first 按既有错误路径暴露 */ }
-  try { await buddyAgreement(cfg, a); } catch { return; }
+  } catch (e) {
+    // 前置上报失败不阻塞，让 buddy/first 按既有错误路径暴露。
+    runlog("travel " + lb + ": adopt preflight report: " + errMsg(e));
+  }
+  try { await buddyAgreement(cfg, a); }
+  catch (e) { runlog("travel " + lb + ": agreement: " + errMsg(e)); return false; }
   try {
     await buddyFirst(cfg, a);
+    runlog("travel " + lb + ": adopt ok (+300 credits)");
+    return true;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errMsg(e);
     if (/first_buddy|task not completed|incomplete/i.test(msg)) {
       adoptTried.set(a.uid, travelDay());
+      runlog("travel " + lb + ": adopt skipped (conversation threshold not reached, retry tomorrow)");
+    } else {
+      runlog("travel " + lb + ": adopt: " + msg);
     }
+    return false;
   }
 }
 
 // runActivityNow 立即对池内所有可用账号执行一次对话活跃上报（对齐 runActivity）。
 // 禁用账号跳过；企业版跳过（零收益）；global 也上报（国际版 /v2/report 可用）。
+// 上报成功后续跑 streak 自检（对齐 Go checkActivityStreak）：回读连登天数，发现
+// 「上报 200 但 streak 没涨」的静默丢弃。日志对齐 Go：逐号
+// `activity 昵称(uid8): … / streak days=N`。
 export async function runActivityNow(): Promise<{ reported: number; failed: number; skipped: number }> {
   const cfg = await getConfig();
-  const rows = await listActiveAccounts();
+  const rows = await listActiveAccounts(cfg.schedule_include_disabled_in_tasks);
   let reported = 0, failed = 0, skipped = 0;
   let first = true;
   for (const row of rows) {
@@ -234,15 +331,33 @@ export async function runActivityNow(): Promise<{ reported: number; failed: numb
     if (row.enterpriseId !== "") { skipped++; continue; }
     if (!first) await sleep(travelAccountDelayMs);
     first = false;
+    const lb = label(row.uid, row.nickname);
     try {
-    await reportChatActivity(cfg, row.auth, "wb2api-" + Date.now(), "");
-    reported++;
-  } catch {
-    failed++;
+      await reportChatActivity(cfg, row.auth, "wb2api-" + Date.now(), "");
+      reported++;
+      await checkActivityStreak(cfg, row.auth, lb); // 上报成功 → 回读 streak 自检
+    } catch (e) {
+      failed++;
+      runlog("activity " + lb + ": " + errMsg(e));
+    }
   }
-  }
-  runlog("activity 活跃上报完成：reported=" + reported + " failed=" + failed + " skipped=" + skipped);
   return { reported, failed, skipped };
+}
+
+// checkActivityStreak 上报成功后回读连登天数（只读 oracle，对齐 Go checkActivityStreak）。
+async function checkActivityStreak(cfg: AppConfig, a: AuthShape, lb: string): Promise<void> {
+  let days: number;
+  try {
+    days = await growthStreak(cfg, a);
+  } catch (e) {
+    runlog("activity " + lb + ": streak check failed (report OK): " + errMsg(e));
+    return;
+  }
+  if (days === 0) {
+    runlog("activity " + lb + ": report OK but streak.days=0 (silent drop?)");
+    return;
+  }
+  runlog("activity " + lb + ": streak days=" + days);
 }
 
 // ─── 连登管家（移植 internal/scheduler/streak.go RunStreakBonusNow）────────
@@ -250,7 +365,7 @@ export async function runActivityNow(): Promise<{ reported: number; failed: numb
 // 幂等：locked/无次数自动跳过；由签到排程末尾调用，也可面板手动触发。
 export async function runStreakBonusNow(): Promise<{ redeemed: number; drawn: number; skipped: number }> {
   const cfg = await getConfig();
-  const rows = await listActiveAccounts();
+  const rows = await listActiveAccounts(); // 禁用跳过（对齐 Go RunStreakBonusNow）
   let redeemed = 0, drawn = 0, skipped = 0;
   for (const row of rows) {
     if (!row.auth.accessToken) { skipped++; continue; }
@@ -269,14 +384,15 @@ export async function runStreakBonusNow(): Promise<{ redeemed: number; drawn: nu
 
 async function streakBonusAccount(cfg: AppConfig, a: AuthShape): Promise<{ redeemed: number; drawn: number }> {
   let redeemed = 0, drawn = 0;
+  const lb = label(a.uid, a.nickname);
   // 0. 补签保连登：昨日漏签且有补签卡则补上（连续天数一断就要重攒 7 天）。
-  await makeupYesterday(cfg, a).catch(() => {});
+  await makeupYesterday(cfg, a, lb).catch(() => {});
   // 0.5 礼包/补偿（每号一次，无则业务错误静默跳过）。
   await claimGift(cfg, a).then((c) => {
-    if (c > 0) console.log("[streak-bonus] " + a.uid + ": 新手礼包 +" + c + "c");
+    if (c > 0) runlog("streak-bonus " + lb + ": 新手礼包 +" + c + "c");
   }).catch(() => {});
   await claimCompensation(cfg, a).then((c) => {
-    if (c > 0) console.log("[streak-bonus] " + a.uid + ": 补偿领取 +" + c + "c");
+    if (c > 0) runlog("streak-bonus " + lb + ": 补偿领取 +" + c + "c");
   }).catch(() => {});
   // 1. 兑换所有已解锁档位。
   const full = await growthStreakFull(cfg, a);
@@ -291,11 +407,11 @@ async function streakBonusAccount(cfg: AppConfig, a: AuthShape): Promise<{ redee
     try {
       await growthRedeemTier(cfg, a, tier.tier);
       redeemed++;
-      console.log("[streak-bonus] " + a.uid + ": 兑换 " + tier.tier + " 档（+" + (tier.credit ?? 0) + "c +" + (tier.energy ?? 0) + "e 卡×" + (tier.cards ?? 0) + " 抽奖×" + (tier.chances ?? 0) + "）");
+      runlog("streak-bonus " + lb + ": 兑换 " + tier.tier + " 档（+" + (tier.credit ?? 0) + "c +" + (tier.energy ?? 0) + "e 卡×" + (tier.cards ?? 0) + " 抽奖×" + (tier.chances ?? 0) + "）");
     } catch (e) {
       // 未解锁（403）属预期，静默；其余记日志。
-      const msg = e instanceof Error ? e.message : String(e);
-      if (!/403/.test(msg)) console.log("[streak-bonus] " + a.uid + ": redeem " + tier.tier + ": " + msg);
+      const msg = errMsg(e);
+      if (!/403/.test(msg)) runlog("streak-bonus " + lb + ": redeem " + tier.tier + ": " + msg);
     }
   }
   // 2. 抽奖：按当前 chances 全抽完（兑换刚发的次数已在服务端累加）。
@@ -303,7 +419,7 @@ async function streakBonusAccount(cfg: AppConfig, a: AuthShape): Promise<{ redee
   try {
     chances = await lotteryChances(cfg, a);
   } catch (e) {
-    console.log("[streak-bonus] " + a.uid + ": lottery summary: " + (e instanceof Error ? e.message : String(e)));
+    runlog("streak-bonus " + lb + ": lottery summary: " + errMsg(e));
     return { redeemed, drawn };
   }
   for (let i = 0; i < chances; i++) {
@@ -311,16 +427,16 @@ async function streakBonusAccount(cfg: AppConfig, a: AuthShape): Promise<{ redee
       await lotteryDraw(cfg, a);
       drawn++;
     } catch (e) {
-      console.log("[streak-bonus] " + a.uid + ": draw: " + (e instanceof Error ? e.message : String(e)));
+      runlog("streak-bonus " + lb + ": draw: " + errMsg(e));
       break;
     }
   }
-  if (chances > 0) console.log("[streak-bonus] " + a.uid + ": 抽奖完成 " + chances + " 次");
+  if (chances > 0) runlog("streak-bonus " + lb + ": 抽奖完成 " + chances + " 次");
   return { redeemed, drawn };
 }
 
 // makeupYesterday 昨日漏签且有补签卡时自动补签（保住连登连续天数）。
-async function makeupYesterday(cfg: AppConfig, a: AuthShape): Promise<void> {
+async function makeupYesterday(cfg: AppConfig, a: AuthShape, lb: string): Promise<void> {
   const missed = await heatmapYesterdayMissed(cfg, a);
   if (!missed) return;
   const full = await growthStreakFull(cfg, a);
@@ -328,5 +444,5 @@ async function makeupYesterday(cfg: AppConfig, a: AuthShape): Promise<void> {
   const yesterday = new Date(Date.now() - 24 * 3600_000)
     .toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
   await useMakeupCard(cfg, a, yesterday);
-  console.log("[streak-bonus] " + a.uid + ": 已用补签卡补签 " + yesterday + "（保连登）");
+  runlog("streak-bonus " + lb + ": 已用补签卡补签 " + yesterday + "（保连登）");
 }

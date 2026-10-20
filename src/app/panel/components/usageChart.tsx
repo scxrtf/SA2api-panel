@@ -55,8 +55,8 @@ export function UsageChart({ series }: { series: SeriesPoint[] }) {
       <svg viewBox={"0 0 " + W + " " + H} role="img" preserveAspectRatio="xMidYMid meet">
         <defs>
           <linearGradient id="usGradP" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" style={{ stopColor: "var(--accent)", stopOpacity: 1 }} />
-            <stop offset="1" style={{ stopColor: "var(--accent)", stopOpacity: 0.6 }} />
+            <stop offset="0" style={{ stopColor: "var(--us-prompt)", stopOpacity: 1 }} />
+            <stop offset="1" style={{ stopColor: "var(--us-prompt)", stopOpacity: 0.6 }} />
           </linearGradient>
           <linearGradient id="usGradC" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" style={{ stopColor: "var(--ok)", stopOpacity: 1 }} />

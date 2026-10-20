@@ -11,19 +11,31 @@ import { Rack, RackBase } from "./rack";
 export function Shell({ view, onSelect, ov, syncAt, onRefresh, msg, children }: {
   view: View; onSelect: (v: View) => void;
   ov: Overview | null; syncAt: number | null;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
   msg: { kind: "ok" | "err"; text: string } | null;
   children: React.ReactNode;
 }) {
   const [navOpen, setNavOpen] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const idx = NAV.findIndex((n) => n.id === view);
   const t = NAV[idx];
+
+  // 顶栏刷新：onRefresh 返回 Promise 时进入加载态（转圈 + 「刷新中…」），
+  // 与扫描待办等 CtrlAction 的反馈一致；落定后复位。
+  const handleRefresh = () => {
+    if (refreshing) return;
+    const p = onRefresh();
+    if (p && typeof (p as Promise<void>).then === "function") {
+      setRefreshing(true);
+      (p as Promise<void>).catch(() => {}).finally(() => setRefreshing(false));
+    }
+  };
 
   return (
     <div className={"shell" + (navOpen ? "" : " nav-off")}>
       <nav className="sidenav">
         <div className="brand">
-          <div className="name">WorkBuddy2API</div>
+          <div className="name">SAworkApi</div>
           <div className="sub">WB2A · CONSOLE</div>
         </div>
         <ul>
@@ -66,7 +78,10 @@ export function Shell({ view, onSelect, ov, syncAt, onRefresh, msg, children }: 
             <span className="grow"></span>
             {ov && <span className="meta">运行 {fmtDur(ov.uptime_sec)}</span>}
             <span className="meta">上次同步 {syncAt ? new Date(syncAt).toLocaleTimeString("zh-CN", { hour12: false }) : "—"}</span>
-            <button className="btn ghost xs" onClick={onRefresh}>刷新</button>
+            <button className="btn ghost xs" onClick={handleRefresh} disabled={refreshing}>
+              {refreshing && <span className="spin" style={{ marginRight: 5 }} />}
+              {refreshing ? "刷新中…" : "刷新"}
+            </button>
             <button className="sidenav-toggle" title="收起/展开导航" onClick={() => setNavOpen(!navOpen)}>☰</button>
           </div>
           <h2 className="tb-title">{t.title}</h2>
@@ -75,7 +90,7 @@ export function Shell({ view, onSelect, ov, syncAt, onRefresh, msg, children }: 
 
         {msg && <div className={"msg " + msg.kind}>{msg.text}</div>}
 
-        <div key={view} className="view-anim">{children}</div>
+        <div className="view-host">{children}</div>
       </div>
     </div>
   );

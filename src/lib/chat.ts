@@ -705,9 +705,11 @@ export async function handleChat(opts: {
       finishLog(200, acct.uid, "", agg.stats);
       // 非流式标记修复（Go handler.go:1148 同语义）：content 含原生标记且
       // 无结构化 tool_calls、finish_reason=stop 时，还原为 message.tool_calls。
-      return Response.json(
-        repairAggregatedResponse(agg.resp as Obj, declaredTools, true),
-      );
+      // 注意：repairAggregatedResponse 原地修改 resp 并返回状态机本身，
+      // 这里必须序列化 resp，不能把返回值当响应体（否则客户端只拿到
+      // {allowed, allowUnknown, hold, inBlock, …} 这类内部字段）。
+      repairAggregatedResponse(agg.resp as Obj, declaredTools, true);
+      return Response.json(agg.resp);
     }
   } finally {
     releaseHeld();

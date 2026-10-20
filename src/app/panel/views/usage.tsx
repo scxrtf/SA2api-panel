@@ -3,7 +3,7 @@
 // totals 六 KPI 卡（含 prompt/completion 构成条）+ 五维度切换明细表 +
 // 积分双维表 + 时序图。口径与 /api/panel/usage（Go Snapshot 同构 JSON）一一对应。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { req, useAutoRefresh } from "../lib";
+import { req, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { UsageChart, type SeriesPoint } from "../components/usageChart";
 
@@ -215,6 +215,8 @@ export function UsageView({ flash }: { flash: Flash }) {
   }, [hours, flash]);
   useEffect(load, [load]);
   useAutoRefresh(load, 30_000);
+  // 顶栏「刷新」按钮广播的事件：否则在该 tab 点刷新只更新了侧边栏统计。
+  usePanelRefresh(load);
 
   const rows = useMemo(() => {
     if (!u) return [] as KeyedRow[];
@@ -272,10 +274,10 @@ export function UsageView({ flash }: { flash: Flash }) {
             <Kpi value={fmtTok(total)} label="总 token" color="var(--accent)"
               sub={"prompt " + usPct(pt, total) + " · completion " + usPct(ct, total)}
               bar={<div className="kbar">
-                <i style={{ width: pctWidth(pt, total), background: "var(--accent)" }}></i>
+                <i style={{ width: pctWidth(pt, total), background: "var(--us-prompt)" }}></i>
                 <i style={{ width: pctWidth(ct, total), background: "var(--ok)" }}></i>
               </div>} />
-            <Kpi value={fmtTok(pt)} label="prompt" sub={"占比 " + usPct(pt, total)} />
+            <Kpi value={fmtTok(pt)} label="prompt" color="var(--us-prompt)" sub={"占比 " + usPct(pt, total)} />
             <Kpi value={fmtTok(ct)} label="completion" color="var(--ok)" sub={"占比 " + usPct(ct, total)} />
             <Kpi value={String(errs)} label="失败尝试" color={errs ? "var(--warn)" : undefined}
               sub={okRate == null ? "—" : errs ? "成功率 " + okRate.toFixed(1) + "%" : "成功率 100%"} />
@@ -293,24 +295,6 @@ export function UsageView({ flash }: { flash: Flash }) {
         extra={<span className="note">峰值 {u.series.length > 0 ? fmtTok(Math.max(...u.series.map((p) => p.total_tokens))) : "—"}</span>}>
         <div className="uschart-body">
           <UsageChart series={u.series} />
-        </div>
-      </Box>
-
-      <Box title="积分扣除" hint="仅统计与积分同时观测到的 Token">
-        <div className="pad">
-          <div className="kpi-grid">
-            <Kpi value={fmtCredit(t.credits)} label="扣除积分" color="var(--accent)" sub="按上游 usage.credit 累计" />
-            <Kpi value={fmtTok(t.credit_tokens)} label="匹配 Token" sub="与积分同时观测到的 Token" />
-            <Kpi value={fmtCreditRatio(t.credits_per_1m_tokens, t.credit_samples, t.credit_tokens)}
-              label="平均积分 / 1M Token" color="var(--ok)" sub="越低越划算" />
-            <Kpi value={String(t.credit_samples)} label="有效积分样本" sub="缺字段的历史不参与折算" />
-            <Kpi value={cacheRateText(t.cache_hit_tokens, t.cache_miss_tokens)} label="缓存命中率"
-              color={cacheRateColor(t.cache_hit_tokens, t.cache_miss_tokens)}
-              sub="上游前缀缓存命中 / (命中+未命中)" />
-          </div>
-          <div className="note">
-            {(u.credit_by_account ?? []).length} 个账号 · {(u.credit_by_model ?? []).length} 个模型倍率分组
-          </div>
         </div>
       </Box>
 
@@ -391,6 +375,24 @@ export function UsageView({ flash }: { flash: Flash }) {
             {dim === "provider"
               ? rows.length + " 个供应商 · " + (u.by_provider_model ?? []).length + " 个模型 · 请求数含失败尝试"
               : rows.length + " 行 · 请求数含失败尝试"}
+          </div>
+        </div>
+      </Box>
+
+      <Box title="积分扣除" hint="仅统计与积分同时观测到的 Token">
+        <div className="pad">
+          <div className="kpi-grid">
+            <Kpi value={fmtCredit(t.credits)} label="扣除积分" color="var(--accent)" sub="按上游 usage.credit 累计" />
+            <Kpi value={fmtTok(t.credit_tokens)} label="匹配 Token" sub="与积分同时观测到的 Token" />
+            <Kpi value={fmtCreditRatio(t.credits_per_1m_tokens, t.credit_samples, t.credit_tokens)}
+              label="平均积分 / 1M Token" color="var(--ok)" sub="越低越划算" />
+            <Kpi value={String(t.credit_samples)} label="有效积分样本" sub="缺字段的历史不参与折算" />
+            <Kpi value={cacheRateText(t.cache_hit_tokens, t.cache_miss_tokens)} label="缓存命中率"
+              color={cacheRateColor(t.cache_hit_tokens, t.cache_miss_tokens)}
+              sub="上游前缀缓存命中 / (命中+未命中)" />
+          </div>
+          <div className="note">
+            {(u.credit_by_account ?? []).length} 个账号 · {(u.credit_by_model ?? []).length} 个模型倍率分组
           </div>
         </div>
       </Box>

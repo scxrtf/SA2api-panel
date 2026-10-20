@@ -661,7 +661,7 @@ export async function noteError(cfg: AppConfig, uid: string): Promise<void> {
 }
 
 // noteSessionDead 12153 连续计数，达 3 次禁用（Go NoteSessionDead 阈值）。
-const SESSION_DEAD_THRESHOLD = 3;
+export const SESSION_DEAD_THRESHOLD = 3;
 
 export async function noteSessionDead(uid: string): Promise<boolean> {
   const s = await getState(uid);
@@ -673,6 +673,13 @@ export async function noteSessionDead(uid: string): Promise<boolean> {
   }
   await patchState(uid, { sessionStrikes: strikes, sessionDead: false });
   return false;
+}
+
+// clearSessionDead 刷新成功清误判计数（Go ClearSessionDead 同语义）。
+export async function clearSessionDead(uid: string): Promise<void> {
+  const s = await getState(uid);
+  if (!s || s.sessionStrikes === 0) return;
+  await patchState(uid, { sessionStrikes: 0, sessionDead: false });
 }
 
 // noteSuccess 成功迁移：清 fails/retryCount/breakerUntil/softStreak/sessionStrikes/

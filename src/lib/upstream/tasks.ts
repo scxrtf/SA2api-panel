@@ -173,11 +173,13 @@ export interface TravelState {
 export async function travelStatus(cfg: AppConfig, a: AuthShape): Promise<TravelState> {
   return (await growthJSON(cfg, a, "GET", "/activity/growth/buddy/travel/status", null)) as TravelState;
 }
-export async function travelDepart(cfg: AppConfig, a: AuthShape): Promise<unknown> {
-  return growthJSON(cfg, a, "POST", "/activity/growth/buddy/travel/depart", {});
+export async function travelDepart(cfg: AppConfig, a: AuthShape, locationId: number): Promise<unknown> {
+  return growthJSON(cfg, a, "POST", "/activity/growth/buddy/travel/depart", { location_id: locationId });
 }
-export async function travelClaim(cfg: AppConfig, a: AuthShape, recordId: number): Promise<unknown> {
-  return growthJSON(cfg, a, "POST", "/activity/growth/buddy/travel/claim", { record_id: recordId });
+export async function travelClaim(cfg: AppConfig, a: AuthShape, recordId: number): Promise<number> {
+  const d = (await growthJSON(cfg, a, "POST", "/activity/growth/buddy/travel/claim", { record_id: recordId })) as
+    { reward_credit?: number } | null;
+  return d?.reward_credit ?? 0; // 奖励字段缺失不视为失败（对齐 Go TravelClaim）
 }
 export async function buddyInfo(cfg: AppConfig, a: AuthShape): Promise<{ id: number; name: string } | null> {
   const d = (await growthJSON(cfg, a, "GET", "/activity/growth/buddy/info", null)) as
@@ -213,6 +215,12 @@ export interface StreakFull {
 
 export async function growthStreakFull(cfg: AppConfig, a: AuthShape): Promise<StreakFull> {
   return (await growthJSON(cfg, a, "GET", "/activity/growth/streak", null)) as StreakFull;
+}
+
+// growthStreak 返回当前连登天数（对齐 Go Upstream.GrowthStreak：只取 streak.days）。
+export async function growthStreak(cfg: AppConfig, a: AuthShape): Promise<number> {
+  const d = await growthStreakFull(cfg, a);
+  return d.streak?.days ?? 0;
 }
 
 // growthRedeemTier 兑换连登档位（tier: "7d"|"14d"|"28d"；未解锁 403 跳过）。

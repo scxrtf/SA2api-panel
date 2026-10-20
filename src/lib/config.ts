@@ -7,7 +7,6 @@ export interface AppConfig {
   refresh_skew_sec: number; // token 提前刷新窗口（秒）
   soft_cooldown_ms: number; // 软限流冷却基数
   soft_rate_max_ms: number; // 软限流冷却封顶（默认 2h）
-  hard_cooldown_ms: number; // 硬冷却（未用次日 04:00 语义的兜底）
   breaker_threshold: number; // 熔断连败阈值
   breaker_cooldown_ms: number;
   breaker_cooldown_max_ms: number;
@@ -52,7 +51,7 @@ export interface AppConfig {
   // 快过期积分窗口（小时）：签到/余额刷新时把到期 ≤ now+window 的批次标记为快过期。
   // <=0 = 禁用路由门槛（展示仍用完整逐包数据）。
   expiring_soon_hours: number;
-  // 积分构成页每账号展开的明细包数量（0=全部展开），对齐 Go package_detail_limit。
+  // 积分构成页每账号默认展示的明细包数量；<=0 回落 5，对齐 Go package_detail_limit。
   package_detail_limit: number;
 }
 
@@ -62,7 +61,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   refresh_skew_sec: 300,
   soft_cooldown_ms: 60_000,
   soft_rate_max_ms: 2 * 3600_000,
-  hard_cooldown_ms: 3600_000,
   breaker_threshold: 3,
   breaker_cooldown_ms: 30_000,
   breaker_cooldown_max_ms: 10 * 60_000,
@@ -82,7 +80,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   device_token: "",
   prompt_mode: "passthrough",
   prompt_text: "",
-  header_timeout_ms: 600_000,
+  header_timeout_ms: 120_000, // 对齐 Go upstream.header_timeout_seconds 缺省 120s
   stream_idle_ms: 120_000,
   schedule_checkin_hours: [9, 21],
   schedule_travel_hours: [9, 21],
@@ -122,6 +120,10 @@ export async function getConfig(force = false): Promise<AppConfig> {
   const cfg: AppConfig = { ...DEFAULT_CONFIG, ...stored };
   // 环境变量覆盖主密钥（Railway 部署首选方式；面板里的密钥仍走 Setting）。
   if (process.env.WB2A_API_KEY) cfg.api_key = process.env.WB2A_API_KEY;
+  // 对齐 Go normalize：<=0 回落 5（不是「全部展开」）。
+  if (!Number.isFinite(cfg.package_detail_limit) || cfg.package_detail_limit <= 0) {
+    cfg.package_detail_limit = 5;
+  }
   cache = { cfg, at: Date.now() };
   return cfg;
 }
@@ -166,6 +168,10 @@ export async function saveConfig(raw: unknown): Promise<AppConfig> {
   }
   if (next.schedule_balance_refresh_enabled && next.schedule_balance_refresh_minutes <= 0) {
     next.schedule_balance_refresh_minutes = 5;
+  }
+  // 与 getConfig 同一归一化：保存 0/负值后内存配置也必须是 5，不能等 5s 缓存过期。
+  if (!Number.isFinite(next.package_detail_limit) || next.package_detail_limit <= 0) {
+    next.package_detail_limit = 5;
   }
   await prisma.setting.upsert({
     where: { key: "config" },

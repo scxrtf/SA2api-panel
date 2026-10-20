@@ -3,7 +3,7 @@ import { panelAuth, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import * as pool from "@/lib/pool";
-import { userResource } from "@/lib/upstream/client";
+import { userResource, expiringSoonMs } from "@/lib/upstream/client";
 import { authShapeOf } from "@/lib/login";
 
 export const runtime = "nodejs";
@@ -19,8 +19,11 @@ export async function POST(req: Request, ctx: Ctx) {
   if (!row) return fail(404, "account not found");
   const cfg = await getConfig();
   try {
-    const r = await userResource(cfg, authShapeOf(row));
-    await pool.setCreditsDetailed(uid, BigInt(r.remain), BigInt(r.total), 0n, 0n, 0n);
+    const r = await userResource(cfg, authShapeOf(row), expiringSoonMs(cfg.expiring_soon_hours));
+    await pool.setCreditsDetailed(
+      uid, BigInt(r.remain), BigInt(r.total),
+      BigInt(r.expiring), BigInt(r.earliestAt), BigInt(r.earliestRemain),
+    );
     return ok({ credits: r.remain, credits_total: r.total });
   } catch (e) {
     return fail(502, "user resource: " + (e instanceof Error ? e.message : String(e)));

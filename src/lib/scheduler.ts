@@ -6,11 +6,8 @@
 // 等待：分段 setTimeout（段长 60s）+ 每段墙钟重判（对齐 waitSlot 防容器休眠冻结
 // 单调时钟导致错过时点）；迟到唤醒先等 wakeupGrace 网络宽限再派发。
 import { getConfig } from "./config";
-import { prisma } from "./db";
 import * as cron from "./cron";
-import * as pool from "./pool";
 import { startGrowthQueue, listActiveAccounts } from "./taskcenter";
-import { isAlreadyCheckin } from "./upstream/errors";
 
 type TaskKind = "checkin" | "travel" | "activity" | "keepalive" | "blackcat" | "growth";
 
@@ -102,70 +99,22 @@ function inNightWindow(): boolean {
 
 // ─── 各任务执行体 ────────────────────────────────────────────────────────────
 
-// 签到：仅 CN 非企业号；含余额回写（签到成功的解冻语义在 pool.setCreditsDetailed 内）。
-// 对齐 Go RunCheckinNow：签到 + UserResourceDetailedWithExpiry + ReenableIfCredits。
+// 签到：直接复用 cron.runCheckin（与面板手动触发同一条链路、同一套 Go 对齐日志）：
+// 仅 CN 非企业号签到 + 余额回写 + 解冻，末尾跑连登管家。
 async function execCheckin(): Promise<void> {
-  const cfg = await getConfig();
-  const includeDisabled = cfg.schedule_include_disabled_in_tasks;
-  const accounts = await prisma.account.findMany({ include: { state: true } });
-  for (const a of accounts) {
-    if ((a.state?.disabled ?? false) && !includeDisabled) continue;
-    if (!a.refreshToken) continue;
-    if (a.realm === "global") continue; // D4 门控：global 无 CN 任务体系
-    const shape = {
-      uid: a.uid, nickname: a.nickname, realm: a.realm,
-      accessToken: a.accessToken, refreshToken: a.refreshToken,
-      expiresAt: Number(a.expiresAt), domain: a.domain,
-      enterpriseId: a.enterpriseId, deviceToken: a.deviceToken,
-    };
-    // 企业版无签到体系（daily-checkin 400 code 10001），但余额查询照常跑。
-    if (a.enterpriseId === "") {
-      try {
-        const { dailyCheckin } = await import("./upstream/client");
-        await dailyCheckin(cfg, shape);
-        await pool.markCheckin(a.uid);
-        console.log("[scheduler] checkin " + a.uid + ": 签到成功");
-      } catch (e) {
-        if (isAlreadyCheckin(e)) {
-          await pool.markCheckin(a.uid);
-          console.log("[scheduler] checkin " + a.uid + ": 今天已签到（幂等）");
-        } else {
-          console.log("[scheduler] checkin " + a.uid + ": " + (e instanceof Error ? e.message : String(e)));
-        }
-      }
-    }
-    // 余额回写（含快过期窗口；earliest 明细待 P4 userResourceDetailedWithExpiry 实装）。
-    try {
-      const { userResource } = await import("./upstream/client");
-      const r = await userResource(cfg, shape);
-      await pool.setCreditsDetailed(a.uid, BigInt(r.remain), BigInt(r.total), 0n, 0n, 0n);
-    } catch (e) {
-      console.log("[scheduler] user-resource " + a.uid + ": " + (e instanceof Error ? e.message : String(e)));
-    }
-  }
-  // 连登管家（对齐 Go RunCheckinNow 末尾的 RunStreakBonusNow）：
-  // 可兑换档位自动兑换 + 抽奖次数抽完 + 昨日漏签补签保连登。
-  try {
-    const r = await cron.runStreakBonusNow();
-    console.log("[scheduler] streak-bonus: redeemed=" + r.redeemed + " drawn=" + r.drawn + " skipped=" + r.skipped);
-  } catch (e) {
-    console.log("[scheduler] streak-bonus error: " + (e instanceof Error ? e.message : String(e)));
-  }
+  await cron.runCheckin();
 }
 
 async function execTravel(): Promise<void> {
-  const r = await cron.runTravelNow();
-  console.log("[scheduler] travel: adopted=" + r.adopted + " departed=" + r.departed + " claimed=" + r.claimed + " skipped=" + r.skipped);
+  await cron.runTravelNow();
 }
 
 async function execActivity(): Promise<void> {
-  const r = await cron.runActivityNow();
-  console.log("[scheduler] activity: reported=" + r.reported + " failed=" + r.failed + " skipped=" + r.skipped);
+  await cron.runActivityNow();
 }
 
 async function execKeepalive(): Promise<void> {
-  const r = await cron.runKeepalive();
-  console.log("[scheduler] keepalive: refreshed=" + r.refreshed + " skipped=" + r.skipped + " failed=" + r.failed);
+  await cron.runKeepalive();
 }
 
 // 夜猫子：23:00–08:00 窗口内对池内账号补足 glm-5.2 真实对话并上报事件链。
@@ -294,8 +243,7 @@ async function balanceLoop(): Promise<void> {
     if (st.stop) return;
     if (waited < intervalMs) continue; // 被 rearm 打断：重算间隔
     try {
-      const r = await cron.runBalanceRefresh();
-      console.log("[scheduler] balance: updated=" + r.updated + " failed=" + r.failed);
+      await cron.runBalanceRefresh();
     } catch (e) {
       console.log("[scheduler] balance error: " + (e instanceof Error ? e.message : String(e)));
     }

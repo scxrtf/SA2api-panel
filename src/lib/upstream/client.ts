@@ -391,12 +391,26 @@ export async function chatStream(
   signal?: AbortSignal,
 ): Promise<ChatStreamResult> {
   const prepared = prepareBody(body, a.realm, a.uid, meta.conversationID);
-  const resp = await fetch(chatBase(a) + CHAT_PATH, {
-    method: "POST",
-    headers: chatHeaders(cfg, a, clientIP, meta),
-    body: prepared,
-    signal,
-  });
+  // 首字节（响应头）超时：对齐 Go chat 会话的 transport.ResponseHeaderTimeout
+  // （main.go 按 upstream.header_timeout_seconds 注入）。只约束响应头到达前的时长，
+  // 头到手就清定时器——SSE 长流的流中静默交给 stream_idle_ms 看门狗，不误杀。
+  const headerMs = cfg.header_timeout_ms > 0 ? cfg.header_timeout_ms : 0;
+  const headerCtrl = new AbortController();
+  const headerTimer = headerMs > 0
+    ? setTimeout(() => headerCtrl.abort(new DOMException("upstream header timeout", "TimeoutError")), headerMs)
+    : null;
+  const sig = signal ? AbortSignal.any([signal, headerCtrl.signal]) : headerCtrl.signal;
+  let resp: Response;
+  try {
+    resp = await fetch(chatBase(a) + CHAT_PATH, {
+      method: "POST",
+      headers: chatHeaders(cfg, a, clientIP, meta),
+      body: prepared,
+      signal: sig,
+    });
+  } finally {
+    if (headerTimer) clearTimeout(headerTimer);
+  }
   if (resp.status >= 400) {
     const raw = await resp.text();
     const kind = classify(resp.status, raw);
@@ -458,6 +472,7 @@ interface RespAccount {
   CycleCapacityRemain?: number;
   CycleCapacityUsed?: number;
   CycleCapacitySize?: number;
+  CycleEndTime?: string;
 }
 
 // packageRemainUsed 聚合单套餐 remain/used/size（Cycle 期优先，口径与 Go 一致）。
@@ -486,10 +501,93 @@ function packageRemainUsed(a: RespAccount): { remain: number; used: number; size
 export interface UserResourceResult {
   remain: number;
   total: number;
+  // expiring 是 remain 中在 expiring_soon 窗口内到期的部分（窗口 <=0 时恒 0）。
+  expiring: number;
+  // earliestAt / earliestRemain：最早未来到期批次的到期时刻（unix 毫秒）与剩余量。
+  // 0 表示没有可用的未来到期批次。
+  earliestAt: number;
+  earliestRemain: number;
 }
 
-// userResource 查询账号积分余额与总额度（所有套餐聚合）。
-export async function userResource(cfg: AppConfig, a: AuthShape): Promise<UserResourceResult> {
+// expiringSoonMs 把配置的小时窗口转毫秒；<=0 = 禁用快过期分桶（对齐 Go ExpiringSoonDur）。
+export function expiringSoonMs(hours: number): number {
+  return hours > 0 ? hours * 3_600_000 : 0;
+}
+
+// parsePackageEndTime 解析上游套餐到期墙钟时间（UTC+8，格式 "YYYY-MM-DD HH:mm:ss"）。
+// 空值/格式异常返回 0——调用方保守地不把该包计入快过期或最早到期（对齐 Go
+// parsePackageEndTime）。不能直接 Date.parse 原串：无时区会被按服务器本地时区解释。
+function parsePackageEndTime(raw: string | undefined): number {
+  if (!raw) return 0;
+  const m = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})$/.exec(raw.trim());
+  if (!m) return 0;
+  const ms = Date.parse(m[1] + "T" + m[2] + "+08:00");
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+const ENTERPRISE_USAGE_PATH = "/v2/billing/meter/get-enterprise-user-usage";
+// 企业版「不限量」（上游 limitNum == -1）在池内的等价表示，对齐 Go 常量。
+const ENTERPRISE_UNLIMITED_REMAIN = 1 << 40;
+const ENTERPRISE_UNLIMITED_TOTAL = -1;
+
+// enterpriseResource 企业版额度（个人资源包体系对 enterpriseId 非空账号恒返回空）。
+async function enterpriseResource(
+  cfg: AppConfig,
+  a: AuthShape,
+  soonMs: number,
+): Promise<UserResourceResult> {
+  const data = (await doJSON({
+    url: billingBase(a) + ENTERPRISE_USAGE_PATH,
+    method: "POST",
+    headers: billingHeaders(cfg, a),
+    body: "{}",
+  })) as {
+    credit?: number;
+    limitNum?: number;
+    limit_num?: number;
+    used_num?: number;
+    cycleEndTime?: string;
+    cycleResetTime?: string;
+  } | null;
+  let limit = data?.limitNum ?? 0;
+  if (limit === 0 && data?.limit_num) limit = data.limit_num;
+  let used = data?.credit ?? 0;
+  if (used === 0 && data?.used_num) used = data.used_num;
+  if (limit < 0) {
+    return {
+      remain: ENTERPRISE_UNLIMITED_REMAIN,
+      total: ENTERPRISE_UNLIMITED_TOTAL,
+      expiring: 0,
+      earliestAt: 0,
+      earliestRemain: 0,
+    };
+  }
+  let remain = limit - Math.round(used); // credit 是浮点，池内是整数：四舍五入
+  if (remain < 0) remain = 0;
+  const now = Date.now();
+  let end = parsePackageEndTime(data?.cycleEndTime);
+  if (end === 0) end = parsePackageEndTime(data?.cycleResetTime);
+  if (remain > 0 && end > now) {
+    return {
+      remain,
+      total: limit,
+      expiring: soonMs > 0 && end <= now + soonMs ? remain : 0,
+      earliestAt: end,
+      earliestRemain: remain,
+    };
+  }
+  return { remain, total: limit, expiring: 0, earliestAt: 0, earliestRemain: 0 };
+}
+
+// userResource 查询账号积分余额、总额度与到期分布（所有套餐聚合）。
+// 对齐 Go UserResourceDetailedWithExpiry：expiring/earliest 供 prefer_expiring 路由。
+export async function userResource(
+  cfg: AppConfig,
+  a: AuthShape,
+  soonMs = 0,
+): Promise<UserResourceResult> {
+  // 企业版额度不在个人资源包体系内：get-user-resource 对企业号恒返回空 Accounts。
+  if (a.enterpriseId) return enterpriseResource(cfg, a, soonMs);
   const now = new Date();
   const end = new Date(now.getTime() + 365 * 101 * 24 * 3600_000);
   const fmt = (d: Date) =>
@@ -505,6 +603,10 @@ export async function userResource(cfg: AppConfig, a: AuthShape): Promise<UserRe
   const accounts = data?.Response?.Data?.Accounts ?? [];
   let remain = 0;
   let total = 0;
+  let expiring = 0;
+  let earliestAt = 0;
+  let earliestRemain = 0;
+  const nowMs = Date.now();
   for (const acct of accounts) {
     const p = packageRemainUsed(acct);
     let r = p.remain;
@@ -513,8 +615,19 @@ export async function userResource(cfg: AppConfig, a: AuthShape): Promise<UserRe
     if (size < r) size = r;
     remain += r;
     total += size;
+    if (r <= 0) continue;
+    const endMs = parsePackageEndTime(acct.CycleEndTime);
+    // 缺失/无法解析/已过期的包不参与最早批次，也不计入快过期（对齐 Go）。
+    if (endMs === 0 || endMs <= nowMs) continue;
+    if (earliestAt === 0 || endMs < earliestAt) {
+      earliestAt = endMs;
+      earliestRemain = r;
+    } else if (endMs === earliestAt) {
+      earliestRemain += r;
+    }
+    if (soonMs > 0 && endMs <= nowMs + soonMs) expiring += r;
   }
-  return { remain, total };
+  return { remain, total, expiring, earliestAt, earliestRemain };
 }
 
 export interface CreditPackage {

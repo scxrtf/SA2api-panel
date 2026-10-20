@@ -1,7 +1,7 @@
 "use client";
 // 模型与档位视图（对齐 Go view-models）：实时模型目录 + 连通性实测（池/供应商双通道）。
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { req, useAutoRefresh } from "../lib";
+import { req, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
 interface ModelRow {
@@ -133,6 +133,7 @@ export function ModelsView({ flash }: { flash: Flash }) {
   }, [flash]);
   useEffect(load, [load]);
   useAutoRefresh(load, 120_000);
+  usePanelRefresh(load);
 
   const test = useCallback(async (m: ModelRow) => {
     const id = m.id;
