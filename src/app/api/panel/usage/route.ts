@@ -1,8 +1,10 @@
 // GET /api/panel/usage — 用量聚合（对齐 Go usage.SnapshotWindow 的同构输出）。
 // 口径：hours 滚动窗口（默认 72）/ from-to 显式区间 / 全部历史（hours=0）。
 // 聚合维度：totals / by_realm / by_account / by_model / by_key / by_provider /
-// by_provider_model / series / credit_by_account / credit_by_model。
+// by_provider_model / series / series_group / credit_by_account / credit_by_model。
 // 另含 credit_by_key：按 API Key 归属的积分扣除明细。
+// series_group 仅在请求带 group=key|model|account|provider|realm 时返回，
+// 供面板把「用量时序」拆成可选维度的堆叠图；不传 group 时保持轻量旧响应。
 import { panelAuth, ok } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { currentModelRate } from "@/lib/upstream/modelCatalog";
@@ -92,6 +94,16 @@ interface UsageRow {
 
 interface KeyedAgg { key: string; realm?: string; extra?: string; agg: Agg }
 
+type SeriesDim = "key" | "model" | "account" | "provider" | "realm";
+const SERIES_DIMS = new Set<string>(["key", "model", "account", "provider", "realm"]);
+
+interface GroupSeries {
+  key: string;
+  label: string;
+  realm?: string;
+  buckets: Map<string, AggAcc>;
+}
+
 function keyedFinish(m: Map<string, AggAcc>, label: (k: string) => { realm?: string; extra?: string }): KeyedAgg[] {
   const out: KeyedAgg[] = [];
   for (const [k, acc] of m) {
@@ -180,6 +192,8 @@ export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const q = new URL(req.url).searchParams;
+  const groupRaw = (q.get("group") ?? "").trim();
+  const groupDim = (SERIES_DIMS.has(groupRaw) ? groupRaw : "") as SeriesDim | "";
   const from = parseTime(q.get("from"));
   const to = parseTime(q.get("to"));
   let since: Date | null = from;
@@ -223,6 +237,7 @@ export async function GET(req: Request) {
   const creditAcctAgg = new Map<string, CreditAcc>();
   const creditModelAgg = new Map<string, CreditAcc>();
   const creditKeyAgg = new Map<string, CreditAcc>();
+  const groupSeries = new Map<string, GroupSeries>();
   const rateCache = new Map<string, string>();
   // 窗口 > 7 天按日分桶，否则按小时（旧版前端同口径）。
   const dayScope = since !== null && (Date.now() - since.getTime()) > 7 * 86_400_000;
@@ -246,6 +261,7 @@ export async function GET(req: Request) {
     // 供应商维度：realm 形如 "provider:名字"；第二层按供应商×裸模型名。
     // 兜底：旧记录 realm 未带前缀但 provider 列非空时也归入供应商桶（防明细缺失）。
     const prov = providerNameFromRealm(realm) || (e.provider ?? "");
+    const provKey = prov || "内置池";
     if (prov) {
       if (!providerAgg.has(prov)) providerAgg.set(prov, new AggAcc());
       providerAgg.get(prov)!.add(e);
@@ -258,6 +274,29 @@ export async function GET(req: Request) {
     const scopeMap = dayScope ? daySeries : hourSeries;
     if (!scopeMap.has(scopeKey)) scopeMap.set(scopeKey, new AggAcc());
     scopeMap.get(scopeKey)!.add(e);
+    if (groupDim) {
+      // 分组时序：同一时间桶里按所选维度拆成多个堆叠段。
+      let gk: string, glabel: string, grealm: string | undefined;
+      if (groupDim === "key") {
+        gk = kn; glabel = kn; grealm = realm;
+      } else if (groupDim === "model") {
+        gk = model; glabel = model;
+      } else if (groupDim === "account") {
+        gk = e.uid; glabel = nicks.get(e.uid) || e.uid.slice(0, 8) || "(未知)";
+        grealm = realm;
+      } else if (groupDim === "provider") {
+        gk = provKey; glabel = provKey;
+      } else {
+        gk = realm; glabel = realm;
+      }
+      let g = groupSeries.get(gk);
+      if (!g) {
+        g = { key: gk, label: glabel, realm: grealm, buckets: new Map() };
+        groupSeries.set(gk, g);
+      }
+      if (!g.buckets.has(scopeKey)) g.buckets.set(scopeKey, new AggAcc());
+      g.buckets.get(scopeKey)!.add(e);
+    }
     // 积分维度只统计 hasCredit 样本；模型维度按 (裸模型, 生效倍率) 分组，
     // 旧记录缺倍率时用当前目录倍率回填（不伪造未知价格）。
     if (e.hasCredit) {
@@ -313,6 +352,50 @@ export async function GET(req: Request) {
   const creditByAccount = creditFinish(creditAcctAgg);
   for (const r of creditByAccount) r.nickname = nicks.get(r.key) ?? "";
 
+  // 维度时序：每个分组保持稀疏点集，由前端按主轴桶对齐并堆叠。
+  // 排序按窗口内合计 Token 降序，前端只展示 Top N，其余自动归入「其它」。
+  const seriesGroup = groupDim ? {
+    dim: groupDim,
+    scope: dayScope ? "day" : "hour",
+    groups: [...groupSeries.values()]
+      .map((g) => {
+        let prompt = 0, completion = 0, total = 0, requests = 0;
+        const points = [...g.buckets.entries()]
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([t, acc]) => {
+            const agg = acc.finish();
+            prompt += agg.prompt_tokens;
+            completion += agg.completion_tokens;
+            total += agg.total_tokens;
+            requests += agg.requests;
+            const ts = dayScope
+              ? Date.parse(t + "T00:00:00+08:00")
+              : Date.parse(t + ":00:00+08:00");
+            return {
+              t: ts,
+              scope: dayScope ? "day" : "hour",
+              label: t.slice(5),
+              ...agg,
+            };
+          });
+        return {
+          key: g.key,
+          label: g.label,
+          realm: g.realm,
+          prompt_tokens: prompt,
+          completion_tokens: completion,
+          total_tokens: total,
+          requests,
+          points,
+        };
+      })
+      .sort((a, b) =>
+        b.total_tokens - a.total_tokens ||
+        b.requests - a.requests ||
+        a.label.localeCompare(b.label),
+      ),
+  } : null;
+
   const sinceRow = events.length > 0 ? events[0].at : null;
   return ok({
     totals: total.finish(),
@@ -326,6 +409,7 @@ export async function GET(req: Request) {
     credit_by_model: creditFinish(creditModelAgg),
     credit_by_key: creditFinish(creditKeyAgg),
     series,
+    series_group: seriesGroup,
     buckets: events.length,
     since: sinceRow ? new Date(sinceRow).toISOString() : "",
     window_from: explicit && from ? from.toISOString() : "",

@@ -936,6 +936,151 @@ body {
   .rack-units { grid-template-columns: repeat(3, 1fr); gap: 6px; }
 }
 
+/* ═══ 移动端适配 ═══════════════════════════════════════════════ */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body { overscroll-behavior-y: contain; }
+img, svg, canvas { max-width: 100%; }
+button, a, input, select, textarea {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 侧栏遮罩：仅移动端抽屉打开时出现 */
+.nav-scrim { display: none; }
+
+@media (max-width: 900px) {
+  .shell { min-height: 100vh; min-height: 100dvh; }
+
+  /* 侧栏改为左侧抽屉；覆盖桌面的 nav-off 规则 */
+  .sidenav {
+    position: fixed; left: 0; top: 0; bottom: 0;
+    z-index: 46; width: min(300px, 84vw); height: 100vh; height: 100dvh;
+    margin-left: 0; opacity: 1; pointer-events: none; visibility: hidden;
+    transform: translateX(-100%);
+    transition: transform .28s cubic-bezier(.4, 0, .2, 1), visibility .28s;
+    box-shadow: 8px 0 32px rgba(52, 54, 59, .16);
+    padding: 18px 12px calc(20px + env(safe-area-inset-bottom));
+  }
+  .shell.nav-off .sidenav { margin-left: 0; opacity: 1; }
+  .shell.mnav-open .sidenav {
+    transform: none; visibility: visible; pointer-events: auto;
+  }
+  .shell.mnav-open .nav-scrim {
+    display: block; position: fixed; inset: 0; z-index: 45;
+    background: rgba(0, 0, 0, .36); backdrop-filter: blur(2px);
+    animation: fadeIn .18s ease;
+  }
+
+  .main {
+    padding-top: env(safe-area-inset-top);
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+    padding-bottom: calc(48px + env(safe-area-inset-bottom));
+  }
+
+  .topbar { top: env(safe-area-inset-top); padding: 10px 0; gap: 4px; }
+  .tb-title { font-size: 19px; }
+  .tb-dots { display: none; }
+  .tb-meta { gap: 8px; font-size: 9.5px; }
+  .tb-sub { font-size: 10.5px; }
+  .sidenav-toggle { width: 40px; height: 40px; font-size: 16px; }
+
+  .rack { padding-top: 14px; }
+  .rack-units { gap: 6px; }
+  .rack-unit { padding: 8px 6px 6px; }
+
+  /* iOS 聚焦不缩放；触控目标不小于 40px */
+  input, select, textarea,
+  .input, .select, .textarea, .model-picker-trigger { font-size: 16px !important; }
+  .btn { min-height: 40px; }
+  .btn.small, .btn.xs { min-height: 36px; padding: 6px 10px; }
+  .sidenav a { min-height: 44px; padding: 10px; }
+  .ustabs button { min-height: 34px; }
+  .tb-dot { width: 32px; height: 32px; }
+  .model-picker-item { min-height: 40px; }
+
+  .tbl-wrap {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  .logview { max-height: 60vh; max-height: 60dvh; }
+  .model-picker-pop { max-width: calc(100vw - 16px); }
+}
+
+@media (max-width: 640px) {
+  .card { padding: 14px; }
+  .box > header { padding: 12px 14px; }
+  .box .pad { padding: 13px 14px; }
+  .box > header > .input,
+  .box > header > .select,
+  .btn-row > .input,
+  .btn-row > .select {
+    flex: 1 1 130px; width: auto !important; min-width: 0; max-width: 100%;
+  }
+  .form-row > .input,
+  .form-row > .select { width: 100% !important; max-width: 100%; }
+  .box .pad > .input { flex: 1 1 100%; width: 100% !important; max-width: 100%; }
+  .box .pad > .select { flex: 1 1 130px; width: auto !important; min-width: 0; max-width: 100%; }
+
+  .stat-grid, .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .form-grid { grid-template-columns: 1fr; }
+  .md-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scan-current { max-width: 100%; margin-left: 0; }
+
+  /* 行展开详情：从四列改为 label/value 两列 */
+  .kv-grid { grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; }
+
+  /* 积分构成：名称/数值/余率一行，色比条独占一行 */
+  .pk-srcrow {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "name num pct" "track track track";
+    gap: 4px 10px;
+  }
+  .pk-srcname { grid-area: name; }
+  .pk-srctrack { grid-area: track; }
+  .pk-srcnum { grid-area: num; }
+  .pk-srcpct { grid-area: pct; }
+
+  .pk-expiry-hdr,
+  .pk-expiry-row { grid-template-columns: 64px minmax(0, 1fr) 64px; gap: 6px; font-size: 11px; }
+  .pk-expiry-row { font-size: 12px; }
+  .pk-expiry-chart { padding: 0 8px 8px; }
+  .pk-expiry-foot, .pk-expiry-legend { padding-left: 8px; padding-right: 8px; }
+
+  /* 弹窗改为底部抽屉 */
+  .modal-mask { align-items: flex-end; }
+  .modal {
+    width: 100%; max-width: none;
+    max-height: calc(100dvh - 24px);
+    border-radius: 16px 16px 0 0;
+    padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
+    animation: sheetIn .22s ease;
+  }
+  @keyframes sheetIn {
+    from { opacity: 0; transform: translateY(24px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .savebar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+
+  .tbl th, .tbl td { padding: 8px 9px; font-size: 12.5px; }
+  .tbl td.mono, .tbl .mono { word-break: break-word; }
+
+  .dist-chart { height: 200px; }
+  .dist-chart-foot { gap: 8px 12px; font-size: 10.5px; }
+
+  .connect-step pre, .connect-card pre { font-size: 11px; }
+  .connect-catalog-head { align-items: flex-start; flex-wrap: wrap; }
+  .connect-catalog-head .input { flex: 1 1 100%; max-width: none; margin-left: 0; }
+  .model-pick { flex-wrap: wrap; }
+  .model-pick .input { flex: 1 1 100%; }
+
+  .login-wrap { margin: 8vh auto; padding: 0 14px; }
+  .login-wrap .card { padding: 20px; }
+}
+
 /* 减少动效偏好 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

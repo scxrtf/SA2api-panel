@@ -253,11 +253,13 @@ export function classify(status: number, body: string): ErrKind {
   return "none";
 }
 
-// isAlreadyCheckin 报告 err 是否表示「今天已签到」（只对分类错误判定）。
+// isAlreadyCheckin 报告 err 是否表示「今天已签到」。调用方既有传 UpstreamError
+// 的、也有传 e.message 字符串的（cron/单号签到路由），两种形态都接受。
 export function isAlreadyCheckin(err: unknown): boolean {
-  if (!(err instanceof UpstreamError)) return false;
+  const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  if (msg === "") return false;
   for (const m of alreadyCheckinMarkers) {
-    if (err.message.includes(m) || err.message.toLowerCase().includes(m.toLowerCase())) {
+    if (msg.includes(m) || msg.toLowerCase().includes(m.toLowerCase())) {
       return true;
     }
   }

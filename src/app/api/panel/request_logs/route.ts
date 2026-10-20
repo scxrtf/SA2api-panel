@@ -25,6 +25,8 @@ export async function GET(req: Request) {
   const outcome = q.get("outcome") ?? "";
   if (outcome === "ok") where["status"] = { lt: 400 };
   else if (outcome === "error") where["status"] = { gte: 400 };
+  const key = q.get("key") ?? "";
+  if (key) where["keyName"] = { contains: key };
 
   const from = parseTime(q.get("from"));
   const to = parseTime(q.get("to"));

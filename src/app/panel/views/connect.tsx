@@ -64,17 +64,17 @@ function CopyRow({ label, value, tip, copied, onCopy }: {
   copied: string; onCopy: (v: string) => void;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0", flexWrap: "wrap" }}>
       <span style={{ minWidth: 104, fontSize: 12, color: "var(--fg-dim)" }}>{label}</span>
       <code
         style={{
-          flex: 1, minWidth: 0, background: "var(--bg-soft)", padding: "5px 8px",
+          flex: "1 1 180px", minWidth: 0, background: "var(--bg-soft)", padding: "5px 8px",
           borderRadius: 6, fontSize: 12, fontFamily: "var(--mono)",
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}
         title={value}
       >{value}</code>
-      {tip && <span style={{ fontSize: 11, color: "var(--fg-dim)", minWidth: 96 }}>{tip}</span>}
+      {tip && <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{tip}</span>}
       <button className="btn xs" onClick={() => onCopy(value)}>
         {copied === value ? "已复制" : "复制"}
       </button>

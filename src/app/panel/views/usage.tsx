@@ -26,6 +26,21 @@ interface CreditRow {
   cache_hit_tokens: number; cache_miss_tokens: number; cache_hit_rate: number;
 }
 
+type SeriesDim = "key" | "model" | "account" | "provider" | "realm";
+type ChartDim = "total" | SeriesDim;
+
+interface SeriesGroup {
+  key: string; label: string; realm?: string;
+  prompt_tokens: number; completion_tokens: number; total_tokens: number; requests: number;
+  points: SeriesPoint[];
+}
+
+interface SeriesGroupResp {
+  dim: SeriesDim;
+  scope: "hour" | "day";
+  groups: SeriesGroup[];
+}
+
 interface UsageResp {
   totals: Agg;
   by_realm: KeyedRow[];
@@ -38,12 +53,22 @@ interface UsageResp {
   credit_by_model: CreditRow[];
   credit_by_key: CreditRow[];
   series: SeriesPoint[];
+  series_group?: SeriesGroupResp | null;
   buckets: number;
   since: string;
   window_from: string;
   window_to: string;
   generated: string;
 }
+
+const CHART_DIMS: [ChartDim, string][] = [
+  ["total", "总量"],
+  ["key", "按 Key"],
+  ["model", "按模型"],
+  ["account", "按账号"],
+  ["provider", "按供应商"],
+  ["realm", "按域"],
+];
 
 /* ── 展示工具（Go app.js 同名函数同语义） ──────────────────────── */
 function fmtTok(n: number | null | undefined): string {

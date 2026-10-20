@@ -60,7 +60,7 @@ export function LogsView({ flash }: { flash: Flash }) {
   const [ch, setCh] = useState<"all" | "task" | "chat" | "sys">("all");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [reqs, setReqs] = useState<ReqLog[]>([]);
-  const [filter, setFilter] = useState({ account: "", model: "", outcome: "" });
+  const [filter, setFilter] = useState({ account: "", model: "", outcome: "", key: "" });
   const [ipFilter, setIpFilter] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -73,6 +73,7 @@ export function LogsView({ flash }: { flash: Flash }) {
       if (filter.account) q.set("account", filter.account);
       if (filter.model) q.set("model", filter.model);
       if (filter.outcome) q.set("outcome", filter.outcome);
+      if (filter.key) q.set("key", filter.key);
       if (ipFilter) q.set("client_ip", ipFilter);
       req<{ entries: ReqLog[] }>("request_logs?" + q.toString()).then((r) => setReqs(r.entries))
         .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
@@ -97,6 +98,8 @@ export function LogsView({ flash }: { flash: Flash }) {
         </select>
         <input className="input" style={{ width: 110 }} placeholder="IP 过滤" value={ipFilter}
           onChange={(e) => setIpFilter(e.target.value)} />
+        <input className="input" style={{ width: 110 }} placeholder="Key 过滤" value={filter.key}
+          onChange={(e) => setFilter({ ...filter, key: e.target.value })} />
       </>}
       <button className="btn xs" onClick={load}>刷新</button>
       {mode === "runtime" && <>
