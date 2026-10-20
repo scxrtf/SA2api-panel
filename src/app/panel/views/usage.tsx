@@ -289,6 +289,13 @@ export function UsageView({ flash }: { flash: Flash }) {
         </div>
       </Box>
 
+      <Box title="用量时序" hint="蓝=prompt · 绿=completion；横轴为真实时间"
+        extra={<span className="note">峰值 {u.series.length > 0 ? fmtTok(Math.max(...u.series.map((p) => p.total_tokens))) : "—"}</span>}>
+        <div className="uschart-body">
+          <UsageChart series={u.series} />
+        </div>
+      </Box>
+
       <Box title="积分扣除" hint="仅统计与积分同时观测到的 Token">
         <div className="pad">
           <div className="kpi-grid">
@@ -439,12 +446,6 @@ export function UsageView({ flash }: { flash: Flash }) {
         </div>
       </Box>
 
-      <Box title="用量时序" hint="蓝=prompt · 绿=completion；横轴为真实时间"
-        extra={<span className="note">峰值 {u.series.length > 0 ? fmtTok(Math.max(...u.series.map((p) => p.total_tokens))) : "—"}</span>}>
-        <div className="uschart-body">
-          <UsageChart series={u.series} />
-        </div>
-      </Box>
     </>
   );
 }
