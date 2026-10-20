@@ -4,7 +4,7 @@
 // context_length / max_output_tokens 四级查找链：
 //   1. 上游动态值（ModelInfo.contextWindow/maxTokens）——权威，永远优先；
 //   2. 静态种子表（CONTEXT_CAP_FALLBACK，编译期兜底，CN/global 共用）；
-//   3. 进程内缓存（Go 版为 model.json 落盘；本版进程内存 + 运行时补充）；
+//   3. model.json 本地缓存（数据目录，落盘持久化；损坏降级种子 + WARN 不崩溃）；
 //   4. models.dev 按需拉取（异步不阻塞；负缓存 24h；context_length 兜底 1M
 //      宁可高估不低估，max_output_tokens 未知 → 省略不编造）。
 //
@@ -175,36 +175,135 @@ const CONTEXT_CAP_FALLBACK: Record<string, ContextCap> = {
   "auto": { context: 168000, maxOutput: 0 },
 };
 
-// ---------- 第 3 级：进程内缓存（Go 版为 model.json 落盘，本版纯内存 + 种子初值） ----------
+// ---------- 第 3 级：model.json 落盘缓存（移植 model_catalog.go） ----------
+//
+// 数据目录 model.json 原子落盘（tmp+rename，与 Go saveLocked 同模式）；启动惰性加载，
+// 损坏整体降级种子 + WARN 不崩溃，条目级非法剔除；source 字段区分 seed/modelsdev/manual。
+// 单进程内所有读写同步（Node 单线程 + sync fs 调用，无并发竞争，等价 Go 的全程持锁）。
+
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 interface ModelCapEntry {
   contextLength: number;
   maxOutputTokens: number; // 0 = 未知 → 省略字段
+  fetchedAt?: string; // RFC3339；seed 条目为空
+  source: string; // seed / modelsdev / manual（手动维护条目保留原 source 字符串）
 }
 
-const catalogEntries = new Map<string, ModelCapEntry>();
+// model.json 落盘路径：WB2API_DATA_DIR 环境变量指定数据目录（与 Go 数据目录同风格），
+// 默认 <cwd>/data/model.json；置空字符串（WB2API_DATA_DIR="" 不作禁用语义——用
+// WB2API_MODEL_JSON_DISABLE=1 显式禁用持久化，退化为纯内存 + 种子，测试用）。
+const catalogPath = process.env.WB2API_MODEL_JSON_DISABLE === "1"
+  ? ""
+  : join(process.env.WB2API_DATA_DIR || join(process.cwd(), "data"), "model.json");
 
-// 种子初值：进程首次 miss 时灌入（等价 Go loadSeedLocked）。
-let catalogSeeded = false;
-function ensureCatalogSeeded(): void {
-  if (catalogSeeded) return;
-  catalogSeeded = true;
+const catalogEntries = new Map<string, ModelCapEntry>();
+let catalogLoaded = false;
+
+function validCapEntry(e: ModelCapEntry): boolean {
+  return e.contextLength > 0 && e.maxOutputTokens >= 0;
+}
+
+// loadSeedLocked 等价物：静态种子表灌入 entries（Go 为 embed model.json，
+// 本版种子直接来自 CONTEXT_CAP_FALLBACK——同一批值，少一次文件中转）。
+function loadCatalogSeed(): void {
   for (const [id, cap] of Object.entries(CONTEXT_CAP_FALLBACK)) {
-    catalogEntries.set(id, { contextLength: cap.context, maxOutputTokens: cap.maxOutput });
+    catalogEntries.set(id, {
+      contextLength: cap.context, maxOutputTokens: cap.maxOutput, source: "seed",
+    });
+  }
+}
+
+// initLocked 等价物：惰性首次加载。文件不存在/不可读 → 种子；整体损坏 → 种子 + WARN；
+// 条目非法 → 剔除 + WARN。
+function ensureCatalogLoaded(): void {
+  if (catalogLoaded) return;
+  catalogLoaded = true;
+  if (catalogPath === "") {
+    loadCatalogSeed();
+    return;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(catalogPath, "utf8");
+  } catch {
+    loadCatalogSeed();
+    return;
+  }
+  let file: Record<string, unknown>;
+  try {
+    file = JSON.parse(raw) as Record<string, unknown>;
+  } catch (e) {
+    console.warn(
+      "WARN: [upstream] model.json 损坏（降级内置种子表）: path=" + catalogPath +
+      " err=" + (e instanceof Error ? e.message : String(e)),
+    );
+    loadCatalogSeed();
+    return;
+  }
+  for (const [id, v] of Object.entries(file)) {
+    if (!v || typeof v !== "object") continue;
+    const o = v as Record<string, unknown>;
+    const entry: ModelCapEntry = {
+      contextLength: typeof o["context_length"] === "number" ? o["context_length"] : 0,
+      maxOutputTokens: typeof o["max_output_tokens"] === "number" ? o["max_output_tokens"] : 0,
+      fetchedAt: typeof o["fetched_at"] === "string" ? o["fetched_at"] : undefined,
+      source: typeof o["source"] === "string" && o["source"] !== "" ? (o["source"] as string) : "manual",
+    };
+    if (!validCapEntry(entry)) {
+      console.warn("WARN: [upstream] model.json 条目非法剔除: model=" + id);
+      continue;
+    }
+    catalogEntries.set(id, entry);
+  }
+}
+
+// saveLocked 等价物：原子落盘（tmp + rename）。不可写静默（内存缓存仍生效）。
+function saveCatalog(): void {
+  if (catalogPath === "") return;
+  const out: Record<string, unknown> = {};
+  for (const [id, e] of [...catalogEntries.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const o: Record<string, unknown> = {
+      context_length: e.contextLength,
+      source: e.source,
+    };
+    if (e.maxOutputTokens > 0) o["max_output_tokens"] = e.maxOutputTokens;
+    if (e.fetchedAt) o["fetched_at"] = e.fetchedAt;
+    out[id] = o;
+  }
+  try {
+    mkdirSync(dirname(catalogPath), { recursive: true });
+    const tmp = catalogPath + ".tmp";
+    writeFileSync(tmp, JSON.stringify(out, null, 2), { mode: 0o600 });
+    renameSync(tmp, catalogPath);
+  } catch (e) {
+    console.warn(
+      "WARN: [upstream] model.json 落盘失败（内存缓存仍生效）: path=" + catalogPath +
+      " err=" + (e instanceof Error ? e.message : String(e)),
+    );
   }
 }
 
 function modelCatalogGet(model: string): ModelCapEntry | undefined {
-  ensureCatalogSeeded();
+  ensureCatalogLoaded();
   const e = catalogEntries.get(model);
-  if (!e || e.contextLength <= 0 || e.maxOutputTokens < 0) return undefined;
+  if (!e || !validCapEntry(e)) return undefined;
   return e;
 }
 
+// put：运行时拉取值采信 models.dev 官方源优先口径，覆盖已有条目（含手编——
+// 若不希望覆盖，删掉 model.json 里对应条目即可）。
 function modelCatalogPut(model: string, context: number, maxOutput: number): void {
   if (!model || context <= 0 || maxOutput < 0) return;
-  ensureCatalogSeeded();
-  catalogEntries.set(model, { contextLength: context, maxOutputTokens: maxOutput });
+  ensureCatalogLoaded();
+  catalogEntries.set(model, {
+    contextLength: context,
+    maxOutputTokens: maxOutput,
+    fetchedAt: new Date().toISOString(),
+    source: "modelsdev",
+  });
+  saveCatalog();
 }
 
 // ---------- 第 4 级：models.dev 按需拉取（异步不阻塞；负缓存 24h） ----------
