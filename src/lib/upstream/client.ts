@@ -3,6 +3,7 @@
 import { createHash, randomBytes } from "crypto";
 import { getConfig, type AppConfig } from "../config";
 import { classify, parseRetryAfter, UpstreamError } from "./errors";
+import { prepareBodyOpt, ensureConsoleSystem, globalEffortMap, realmKey } from "./payload";
 
 // 端点常量（realm 感知）
 export const CHAT_BASE_CN = "https://copilot.tencent.com";
@@ -289,18 +290,80 @@ export async function refreshToken(
   return out;
 }
 
-// prepareBody：注入 prompt_cache_key（按账号稳定，P0 费用优化：命中上游前缀缓存）。
-export function prepareBody(body: string, uid: string, conversationID: string): string {
+// ---------- 出站请求体组装（对齐 Go client.go prepareBody + cache_key.go） ----------
+
+// efforts 能力缓存（按 realm 分桶）：fetchModels 解析的 supportedEfforts/defaultEffort。
+// 对齐 Go Client.efforts/defaultEfforts——本网关暂无远端探测桶，global 域走
+// globalEffortMap 静态兜底合成（issue #84：国际版不发 supportedEfforts 也必须降级）。
+type EffortMaps = {
+  efforts: Record<string, string[]> | null;
+  defs: Record<string, string> | null;
+};
+
+// effortsSnapshot 取指定 realm 的 effort 能力表。当前实现：
+//   - global → 产品静态兜底表（对齐 Go globalEffortMap(nil, nil) 的结果）
+//   - cn     → null（未知，透传不降级；thinking.ts 缺档回退硬编码 high）
+function effortsSnapshot(realm: string): EffortMaps {
+  if (realmKey(realm) === "global") {
+    const m = globalEffortMap(null, null);
+    return { efforts: m.efforts, defs: m.defs };
+  }
+  return { efforts: null, defs: null };
+}
+
+// sanitizeFingerprints 脱敏开关（对齐 Go Client.SanitizeFingerprints，默认 true）。
+// 可用环境变量 WB2A_SANITIZE_FINGERPRINTS=false 关闭（排障用）。
+function sanitizeFingerprints(): boolean {
+  return process.env.WB2A_SANITIZE_FINGERPRINTS !== "false";
+}
+
+// buildCacheKey 生成 `wb2a-<uid8>-<convHex>` 格式的稳定 cache key（对齐 Go buildCacheKey）：
+// uid8 账号隔离段（跨账号绝不碰撞）；convHex = sha256(uid|conversation) 前 16 字节 hex。
+function buildCacheKey(uid: string, conversation: string): string {
+  let uid8 = uid.length > 8 ? uid.slice(0, 8) : uid;
+  if (uid8 === "") uid8 = "-";
+  const convHex = createHash("sha256").update(uid + "|" + conversation, "utf8").digest("hex").slice(0, 32);
+  return `wb2a-${uid8}-${convHex}`;
+}
+
+// injectPromptCacheKey 在已改写的出站 body 上注入 prompt_cache_key（P0 费用优化，
+// 对齐 Go InjectPromptCacheKey）。优先级：
+//   1. body 已带 prompt_cache_key → 原值保留（客户端自知复用哪个键）
+//   2. body 已带 conversation_id / conversationId → 用它做会话哈希源
+//   3. 都没有 → 用入站 conversationID 参数（X-Conversation-ID 头解析值）
+function injectPromptCacheKey(body: string, uid: string, conversationID: string): string {
+  if (!body) return body;
   let obj: Record<string, unknown>;
   try {
     obj = JSON.parse(body);
   } catch {
     return body;
   }
-  if (obj["prompt_cache_key"]) return body; // 客户端已显式提供，不覆盖
-  const seed = conversationID ? `${uid}:${conversationID}` : uid;
-  obj["prompt_cache_key"] = createHash("sha256").update("wb2a-cache:" + seed, "utf8").digest("hex").slice(0, 32);
-  return JSON.stringify(obj);
+  const existing = obj.prompt_cache_key;
+  if (typeof existing === "string" && existing !== "") return body; // 客户端显式带 key，不覆盖
+  let conv = conversationID;
+  const cid = obj.conversation_id ?? obj.conversationId;
+  if (typeof cid === "string" && cid.trim() !== "") conv = cid.trim();
+  obj.prompt_cache_key = buildCacheKey(uid, conv);
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return body;
+  }
+}
+
+// prepareBody 组装出站请求体（对齐 Go client.go:788 prepareBody）：
+//   完整改写管线（payload.ts，含 sanitize 开关 + effort 降级 + thinking 注入）
+//   → prompt_cache_key 注入
+//   → global 域 ensureConsoleSystem 兜底（首条非 system 补 fallback system）。
+export function prepareBody(body: string, realm: string, uid: string, conversationID: string): string {
+  const { efforts, defs } = effortsSnapshot(realm);
+  let out = prepareBodyOpt(body, sanitizeFingerprints(), efforts, defs);
+  out = injectPromptCacheKey(out, uid, conversationID);
+  if (realmKey(realm) === "global") {
+    out = ensureConsoleSystem(out);
+  }
+  return out;
 }
 
 export interface ChatStreamResult {
@@ -320,7 +383,7 @@ export async function chatStream(
   meta: ChatMeta,
   signal?: AbortSignal,
 ): Promise<ChatStreamResult> {
-  const prepared = prepareBody(body, a.uid, meta.conversationID);
+  const prepared = prepareBody(body, a.realm, a.uid, meta.conversationID);
   const resp = await fetch(chatBase(a) + CHAT_PATH, {
     method: "POST",
     headers: chatHeaders(cfg, a, clientIP, meta),
