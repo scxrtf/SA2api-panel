@@ -855,7 +855,18 @@ interface GlobalModelsCache {
   lastFail: number;
 }
 
-const globalModelsCache: GlobalModelsCache = { names: null, infos: null, fetched: 0, lastFail: 0 };
+// globalModelsCaches 按账号 uid 分桶（对齐 Go 版缓存挂在 *Client 实例上的语义：
+// 不同 global 账号各自探测各自缓存，互不串号）。空 uid（不应出现）回落共享桶。
+const globalModelsCaches = new Map<string, GlobalModelsCache>();
+function globalModelsCacheFor(uid: string): GlobalModelsCache {
+  const key = uid || "";
+  let c = globalModelsCaches.get(key);
+  if (!c) {
+    c = { names: null, infos: null, fetched: 0, lastFail: 0 };
+    globalModelsCaches.set(key, c);
+  }
+  return c;
+}
 
 // resolveGlobalModelsArray 从 payload 定位模型数组：payload 本身是数组直接用；
 // 是 map 则依次尝试 models/items/list/data/result 键（递归下钻）。
@@ -1178,11 +1189,12 @@ async function fetchGlobalModelInfosOnce(
   cfg: AppConfig,
   a: AuthShape,
 ): Promise<{ names: string[]; infos: ModelInfoFull[] | null }> {
+  const cache = globalModelsCacheFor(a.uid ?? "");
   const now = Date.now();
-  if (globalModelsCache.names && now - globalModelsCache.fetched < GLOBAL_MODELS_TTL_MS) {
-    return { names: globalModelsCache.names, infos: globalModelsCache.infos };
+  if (cache.names && now - cache.fetched < GLOBAL_MODELS_TTL_MS) {
+    return { names: cache.names, infos: cache.infos };
   }
-  if (globalModelsCache.lastFail > 0 && now - globalModelsCache.lastFail < GLOBAL_MODELS_FAIL_COOLDOWN_MS) {
+  if (cache.lastFail > 0 && now - cache.lastFail < GLOBAL_MODELS_FAIL_COOLDOWN_MS) {
     return { names: [], infos: null };
   }
   try {
@@ -1200,15 +1212,15 @@ async function fetchGlobalModelInfosOnce(
       seen.add(id);
       merged.push(id);
     }
-    globalModelsCache.names = merged;
-    globalModelsCache.infos = infos;
-    globalModelsCache.fetched = Date.now();
-    globalModelsCache.lastFail = 0;
+    cache.names = merged;
+    cache.infos = infos;
+    cache.fetched = Date.now();
+    cache.lastFail = 0;
     return { names: merged, infos };
   } catch {
-    globalModelsCache.lastFail = Date.now();
-    globalModelsCache.names = null;
-    globalModelsCache.infos = null;
+    cache.lastFail = Date.now();
+    cache.names = null;
+    cache.infos = null;
     return { names: [], infos: null };
   }
 }
