@@ -17,6 +17,7 @@ export interface PkgAccount {
 
 export function PackagesView({ flash }: { flash: Flash }) {
   const [rows, setRows] = useState<PkgAccount[] | null>(null);
+  const [expandAll, setExpandAll] = useState(false);
 
   const load = useCallback(() => {
     req<{ accounts: PkgAccount[] }>("packages")
@@ -60,17 +61,42 @@ export function PackagesView({ flash }: { flash: Flash }) {
                 <table className="tbl">
                   <thead><tr><th>套餐</th><th>剩余 / 总量</th><th>已用</th><th>到期</th></tr></thead>
                   <tbody>
-                    {a.packages.map((p, i) => (
-                      <tr key={i}>
-                        <td>
-                          {p.name || p.sub_product_name || "-"}
-                          {p.cycle && <span className="tag info" style={{ marginLeft: 6 }}>周期</span>}
-                        </td>
-                        <td>{fmtNum(p.remain)} / {fmtNum(p.size)}</td>
-                        <td className="dim">{fmtNum(p.used)}</td>
-                        <td className="dim">{p.expires_at ? fmtTime(p.expires_at) : (p.end_time ?? "-")}</td>
+                    {(expandAll ? a.packages : a.packages.slice(0, 4)).map((p, i) => {
+                      const dupName = (p.name || p.sub_product_name || "-");
+                      // 同名相邻包折叠标记：与前一行同名时弱化名称列（避免刷屏）。
+                      const dup = i > 0 && dupName === ((expandAll ? a.packages : a.packages)[i - 1].name || (expandAll ? a.packages : a.packages)[i - 1].sub_product_name || "-");
+                      return (
+                        <tr key={i}>
+                          <td className={dup ? "dim" : ""}>
+                            {dupName}
+                            {p.cycle && <span className="tag info" style={{ marginLeft: 6 }}>周期</span>}
+                          </td>
+                          <td>{fmtNum(p.remain)} / {fmtNum(p.size)}</td>
+                          <td className="dim">{fmtNum(p.used)}</td>
+                          <td className="dim">{p.expires_at ? fmtTime(p.expires_at) : (p.end_time ?? "-")}</td>
+                        </tr>
+                      );
+                    })}
+                    {!expandAll && a.packages.length > 4 && (() => {
+                      const rest = a.packages.slice(4);
+                      const restRemain = rest.reduce((n, p) => n + (p.remain || 0), 0);
+                      const restSize = rest.reduce((n, p) => n + (p.size || 0), 0);
+                      const restUsed = rest.reduce((n, p) => n + (p.used || 0), 0);
+                      const nextExpiry = rest.map((p) => p.expires_at || 0).filter((t) => t > 0).sort((x, y) => x - y)[0];
+                      return (
+                        <tr style={{ cursor: "pointer" }} onClick={() => setExpandAll(true)} title="点击展开全部套餐">
+                          <td className="dim" colSpan={4} style={{ textAlign: "center" }}>
+                            …还有 {rest.length} 个套餐（剩余 {fmtNum(restRemain)} / 总量 {fmtNum(restSize)} · 已用 {fmtNum(restUsed)}
+                            {nextExpiry ? " · 最近到期 " + fmtTime(nextExpiry) : ""}）— 点击展开
+                          </td>
+                        </tr>
+                      );
+                    })()}
+                    {expandAll && a.packages.length > 4 && (
+                      <tr style={{ cursor: "pointer" }} onClick={() => setExpandAll(false)}>
+                        <td className="dim" colSpan={4} style={{ textAlign: "center" }}>收起 ▲</td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
