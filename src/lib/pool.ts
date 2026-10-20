@@ -868,12 +868,59 @@ export interface StatusRow {
   degrade_until: number;
   rate_limited_models: { model: string; kind: string; until: number; reason: string }[];
   model_costs: { model: string; cost_per_1k: number; last_seen: number }[];
+  // Go overview 账号行的观测维度（app.js renderAccounts 同口径）：
+  // 累计成功/失败计数、最近一次成功时间、token 用量汇总（来源 UsageEvent 台账）。
+  success_count: number;
+  err_total: number;
+  last_success: string; // ISO；空 = 无成功记录
+  token_usage: {
+    request_count: number;
+    total_tokens: number;
+    last_latency_ms: number;
+    last_tokens_per_second: number;
+  };
 }
 
 export async function statusList(): Promise<StatusRow[]> {
   const now = Date.now();
   const all = await loadEntries();
   const today = todayShanghai();
+  // 用量台账一次性按 uid 聚合（Go 从进程内 metrics 取，这里从 UsageEvent 表取——
+  // 语义等价：都是「该账号历史请求观测累计」）。失败时降级为空聚合，不拖垮 overview。
+  type UsageAgg = { uid: string; ok: boolean; _count: { _all: number }; _sum: { totalTokens: number | null; latencyMs: number | null }; _max: { at: Date | null }; _avg: { tps: number | null } };
+  let aggs: UsageAgg[] = [];
+  try {
+    aggs = await prisma.usageEvent.groupBy({
+      by: ["uid", "ok"],
+      _count: { _all: true },
+      _sum: { totalTokens: true, latencyMs: true },
+      _max: { at: true },
+      _avg: { tps: true },
+    }) as unknown as UsageAgg[];
+  } catch { /* 台账缺失时观测列置零 */ }
+  const usageByUID = new Map<string, {
+    requests: number; errors: number; tokens: number;
+    lastAt: Date | null; latencyMs: number; tps: number;
+  }>();
+  for (const g of aggs) {
+    const cur = usageByUID.get(g.uid) ?? { requests: 0, errors: 0, tokens: 0, lastAt: null, latencyMs: 0, tps: 0 };
+    const n = g._count._all;
+    if (g.ok) {
+      cur.requests += n;
+      cur.tokens += g._sum.totalTokens ?? 0;
+      // 最近一次成功时间/延迟/速率取 ok 行的末次观测（_max.at / _sum.latencyMs 为聚合近似：
+      // 延迟用成功行合计平均、速率用 tps 均值，与 Go 的 last_* 语义略有出入——Go 存的是
+      // 末次单次值。台账按事件行存，末次单值需额外查一次 last row，成本不值，这里取聚合近似。
+      if (g._max.at && (!cur.lastAt || g._max.at > cur.lastAt)) {
+        cur.lastAt = g._max.at;
+        cur.latencyMs = n > 0 ? Math.round((g._sum.latencyMs ?? 0) / n) : 0;
+        cur.tps = g._avg.tps ?? 0;
+      }
+    } else {
+      cur.errors += n;
+    }
+    usageByUID.set(g.uid, cur);
+  }
   const rows: StatusRow[] = all.map((e) => {
     const s = e.state;
     const cooling = Number(s.cooldownUntil) > now || Number(s.breakerUntil) > now;
@@ -931,6 +978,15 @@ export async function statusList(): Promise<StatusRow[]> {
       degrade_until: Number(s.degradeUntil),
       rate_limited_models: rateLimited,
       model_costs: modelCosts,
+      success_count: usageByUID.get(e.account.uid)?.requests ?? 0,
+      err_total: usageByUID.get(e.account.uid)?.errors ?? 0,
+      last_success: usageByUID.get(e.account.uid)?.lastAt?.toISOString() ?? "",
+      token_usage: {
+        request_count: usageByUID.get(e.account.uid)?.requests ?? 0,
+        total_tokens: usageByUID.get(e.account.uid)?.tokens ?? 0,
+        last_latency_ms: usageByUID.get(e.account.uid)?.latencyMs ?? 0,
+        last_tokens_per_second: usageByUID.get(e.account.uid)?.tps ?? 0,
+      },
     };
   });
   rows.sort((a, b) => (a.uid < b.uid ? -1 : 1));

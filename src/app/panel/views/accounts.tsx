@@ -6,6 +6,17 @@ import { Box, type StatusRow, type Overview, type Flash } from "../components/ui
 import { CtrlMetric, CtrlAction, CtrlCard, CtrlHint } from "../components/ctrl";
 import { AddAccountModal } from "../components/addAccount";
 
+// fmtAgo 相对时间（Go app.js ago 同口径）：42s / 5m / 3h / 2d。
+function fmtAgo(iso: string): string {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + "s 前";
+  if (s < 3600) return Math.floor(s / 60) + "m 前";
+  if (s < 86400) return Math.floor(s / 3600) + "h 前";
+  return Math.floor(s / 86400) + "d 前";
+}
+
 function acctTags(a: StatusRow) {
   const tags: { text: string; cls: string }[] = [];
   if (a.disabled) tags.push({ text: "禁用" + (a.disabled_reason ? ":" + a.disabled_reason : ""), cls: "err" });
@@ -123,11 +134,14 @@ export function AccountsView({ ov, flash, onRefresh }: {
         <div className="tbl-wrap">
           <table className="tbl">
             <thead><tr>
-              <th>账号</th><th>域</th><th>积分</th><th>状态</th><th style={{ width: 1 }}></th>
+              <th>账号</th><th>域</th><th>积分</th><th>状态</th>
+              <th className="num">成功 / 失败</th><th className="num">在途</th>
+              <th className="num">用量</th><th className="num">最近成功</th>
+              <th style={{ width: 1 }}></th>
             </tr></thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={5} className="dim" style={{ textAlign: "center", padding: 30 }}>
+                <tr><td colSpan={9} className="dim" style={{ textAlign: "center", padding: 30 }}>
                   {ov.accounts.length === 0 ? "暂无账号，点「添加账号」开始设备授权登录。" : "无匹配账号，调整筛选条件。"}
                 </td></tr>
               )}
@@ -148,6 +162,17 @@ export function AccountsView({ ov, flash, onRefresh }: {
                     )}
                   </td>
                   <td>{acctTags(a).map((t) => <span key={t.text} className={"tag " + t.cls}>{t.text}</span>)}</td>
+                  <td className="mono">
+                    {fmtNum(a.success_count ?? 0)} <span className="dim">/</span>{" "}
+                    <span style={{ color: (a.err_total ?? 0) > 0 ? "var(--err)" : undefined }}>{fmtNum(a.err_total ?? 0)}</span>
+                  </td>
+                  <td className="mono">{a.in_flight > 0 ? a.in_flight : <span className="dim">0</span>}</td>
+                  <td className="mono" title={`累计 ${a.token_usage?.request_count ?? 0} 次 / ${fmtNum(a.token_usage?.total_tokens ?? 0)} tok · 均延迟 ${a.token_usage?.last_latency_ms ? a.token_usage.last_latency_ms + "ms" : "—"} · 均速率 ${a.token_usage?.last_tokens_per_second ? a.token_usage.last_tokens_per_second.toFixed(1) + " tok/s" : "—"}`}>
+                    {(a.token_usage?.request_count ?? 0) > 0
+                      ? <>{a.token_usage!.request_count}<span className="dim"> 次 / </span>{fmtNum(a.token_usage!.total_tokens)}<span className="dim"> tok</span></>
+                      : <span className="dim">—</span>}
+                  </td>
+                  <td className="mono dim">{a.last_success ? fmtAgo(a.last_success) : "—"}</td>
                   <td>
                     <div className="btn-row" style={{ flexWrap: "nowrap" }}>
                       <button className="btn small" disabled={busy} onClick={() => op(a.uid, "checkin")}>签到</button>

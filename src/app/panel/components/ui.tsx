@@ -12,6 +12,13 @@ export interface StatusRow {
   breaker_until: number; degrade_until: number;
   rate_limited_models: { model: string; kind: string; until: number; reason: string }[];
   model_costs: { model: string; cost_per_1k: number; last_seen: number }[];
+  success_count: number;
+  err_total: number;
+  last_success: string;
+  token_usage: {
+    request_count: number; total_tokens: number;
+    last_latency_ms: number; last_tokens_per_second: number;
+  };
 }
 export interface Overview {
   version: string; uptime_sec: number; auth_required: boolean;
