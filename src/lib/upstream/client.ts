@@ -3,6 +3,7 @@
 import { createHash, randomBytes } from "crypto";
 import { getConfig, type AppConfig } from "../config";
 import { classify, parseRetryAfter, UpstreamError } from "./errors";
+import { idleMonitorBody } from "./idle";
 import { prepareBodyOpt, ensureConsoleSystem, globalEffortMap, realmKey } from "./payload";
 import { effortsSnapshot as catalogEffortsSnapshot } from "./modelCatalog";
 
@@ -410,7 +411,9 @@ export async function chatStream(
     };
   }
   if (!resp.body) return { ok: false, status: resp.status, respBody: "empty body" };
-  return { ok: true, status: resp.status, body: resp.body };
+  // 空闲看门狗（对齐 Go client.go:1079 monitorBody）：静默超 stream_idle_ms 掐流，
+  // 防止僵死 SSE 连接占住账号租约；0=禁用。首字节前由 fetch 超时管，这里只管流中。
+  return { ok: true, status: resp.status, body: idleMonitorBody(resp.body, cfg.stream_idle_ms) };
 }
 
 // billing 域
@@ -599,6 +602,58 @@ export async function creditPackages(
 // isAlreadyCheckin 区分）。
 export async function dailyCheckin(cfg: AppConfig, a: AuthShape): Promise<void> {
   await billingMeterJSON(cfg, a, checkinPaths(a), {});
+}
+
+// ─── 账号资料昵称同步（移植 internal/upstream/profile.go） ────────────────
+// GET {webBase}/console/account，Bearer + x-client-platform: web（与 tasks 同一
+// 鉴权形态）。隐私边界：响应含手机号等敏感字段，本函数只解析 nickname 与
+// uid（uid 仅一致性核对），其余字段一概不解析不落日志不透传。
+// 只在面板手动「刷新」路径调用，后台余额定时刷新不触发。
+export async function fetchAccountProfile(cfg: AppConfig, a: AuthShape): Promise<string> {
+  const h: Record<string, string> = {
+    Authorization: "Bearer " + a.accessToken,
+    Accept: "application/json, text/plain, */*",
+    "x-client-platform": "web",
+    Origin: "https://www.workbuddy.cn",
+    Referer: "https://www.workbuddy.cn/profile/account-settings",
+    "User-Agent": userAgent(cfg, a),
+  };
+  const data = (await doJSON({
+    url: webBaseOf(a) + "/console/account",
+    method: "GET",
+    headers: h,
+  })) as { uid?: string; nickname?: string };
+  const respUid = data?.uid ?? "";
+  if (respUid && a.uid && respUid !== a.uid) {
+    throw new Error(`profile uid mismatch: resp=${respUid} auth=${a.uid}`);
+  }
+  return data?.nickname ?? "";
+}
+
+// ─── global trial 加油包（移植 internal/upstream/trial.go） ────────────────
+// 仅 global 账号适用（CN 无此端点）；幂等码 14051 = 已领过（视为正常，非错误）。
+// 这是 global 唯一天然的积分增益动作（无签到/任务中心）。
+const TRIAL_PATH = "/billing/ide/trial";
+const trialAlreadyMarkers = ["code=14051", '"code":14051'];
+
+// claimTrial 领取一次性 trial 加油包。仅 global 可调（非 global 直接报错）。
+// 返回 claimed：true=成功新领；false=已领过（幂等，不算失败）。
+export async function claimTrial(cfg: AppConfig, a: AuthShape): Promise<boolean> {
+  if (!isGlobal(a)) throw new Error("claim trial: only global accounts");
+  try {
+    await doJSON({
+      url: billingBase(a) + TRIAL_PATH,
+      method: "POST",
+      headers: billingHeaders(cfg, a),
+      body: JSON.stringify({}),
+    });
+    return true;
+  } catch (e) {
+    if (e instanceof UpstreamError && trialAlreadyMarkers.some((m) => e.message.includes(m))) {
+      return false; // 已领过：幂等成功，非错误
+    }
+    throw e;
+  }
 }
 
 // 模型目录

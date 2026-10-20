@@ -195,11 +195,6 @@ export function parseRetryAfter(h: Headers): number {
   return 0;
 }
 
-function codeMarker(lowerBody: string, code: string): boolean {
-  const re = new RegExp(`"code"\\s*:\\s*"?${code}"?`);
-  return re.test(lowerBody);
-}
-
 // classify 按 HTTP 状态码 + body 判定错误类别（规则序与 Go Classify 一致）。
 export function classify(status: number, body: string): ErrKind {
   // 0. 11102「该后端无此模型」最先判（只认 400/404）。
@@ -267,4 +262,114 @@ export function isAlreadyCheckin(err: unknown): boolean {
     }
   }
   return false;
+}
+
+// ─── gateway_hint（移植 internal/upstream/hint.go） ────────────────────────
+// error.message 永远是上游 body 原文透传；gateway_hint 只做与 message 并列的
+// 网关视角补充说明，绝不替换/包装 message。未覆盖形态返回空串 → 调用方不带字段
+//（不编造）。措辞英文（错误响应面向客户端工具链，英文是通用口径）。
+
+export interface HintContext {
+  model?: string; // 请求裸模型名（可空）
+  hasImage?: boolean; // 请求体是否携带 image_url part
+  modelSupportsImages?: boolean; // 目录 supports_images 声明（仅 inCatalog 时有意义）
+  modelInCatalog?: boolean; // 目录是否收录该模型（「不支持」判定的前提）
+}
+
+// codeMarker JSON code 字段命中（`"code":N` 各空格/引号形态，与 isModelBlocked 同容差）。
+function codeMarker(lower: string, code: string): boolean {
+  const forms = [
+    `"code":${code}`, `"code": ${code}`, `"code":"${code}"`,
+    `"code": "${code}"`, `"code":" ${code}"`, `"code": '${code}'`,
+  ];
+  return forms.some((v) => lower.includes(v));
+}
+
+// isModelParamInvalid 上游 11133 body 判定（宁宽勿漏：hint 是补充说明非权威分类）。
+function isModelParamInvalid(body: string): boolean {
+  const lower = body.toLowerCase();
+  return (
+    codeMarker(lower, "11133") ||
+    lower.includes("model_param_invalid") ||
+    lower.includes("invalid request parameters") ||
+    lower.includes("request parameters do not meet the current model requirements")
+  );
+}
+
+// isInvalidImageData 上游 11135 body 判定（invalid_image_data / "replace the image" 家族）。
+function isInvalidImageData(body: string): boolean {
+  const lower = body.toLowerCase();
+  return (
+    codeMarker(lower, "11135") ||
+    lower.includes("invalid_image_data") ||
+    lower.includes("replace the image")
+  );
+}
+
+// gatewayHint 按错误形态返回网关视角补充说明（error.gateway_hint 字段值）。
+// 判定次序：11133/11135 上游业务码先于 Kind 表（两族归 client/bad_params 皆有可能，
+// hint 层自带判定）；其余走 Kind 一对一映射。返回空串 = 未覆盖形态，不带字段。
+export function gatewayHint(kind: ErrKind, msg: string, ctx: HintContext): string {
+  // 11133 model_param_invalid 家族：只有请求确实带图、且目录能对该模型做出
+  // 「不支持图片」的判定时才给「换模型」指向，否则退中性参数形态。
+  if (isModelParamInvalid(msg)) {
+    if (ctx.hasImage && ctx.modelInCatalog && !ctx.modelSupportsImages) {
+      return "model " + (ctx.model ?? "") +
+        " does not support images; pick one with supports_images=true from /v1/models";
+    }
+    return "request parameters were rejected by the model provider; check message format and model capabilities";
+  }
+  // 11135 invalid_image_data 家族。
+  if (isInvalidImageData(msg)) {
+    return "image data rejected by upstream; use a real/valid image, may need a new conversation";
+  }
+  switch (kind) {
+    case "prompt_too_long":
+      return "request context exceeds the model's limit; reduce history/message size";
+    case "image_invalid":
+      return "image request was rejected by upstream; check image_url format and image data";
+    case "waf_block":
+      // 账号级 WAF 403 与 IP 级 fail-fast 同 hint：对客户端动作一致（等窗口过去再试）。
+      return "upstream WAF blocked the gateway; retry after the block window";
+    case "soft_rate":
+      return "rate limited by upstream; retry after reset";
+    case "account_fault":
+      return "account-level fault at upstream (auth/quota state); the gateway will rotate or disable this account";
+    case "session_dead":
+      return "account session expired at upstream; the account is disabled until re-login";
+    case "hard_credit":
+      return "account credits exhausted at upstream; waiting for daily check-in to restore";
+    case "model_blocked":
+      return "upstream has no such model on this backend; switch model or retry on another account";
+    case "content_blocked":
+      // 措辞不含 "upstream"：content_blocked 响应有不含上游字样的既有口径。
+      return "request content was rejected by content policy; adjust the prompt and retry";
+    default:
+      // none/not_found/server/bad_params/client 等未覆盖形态：无 hint。
+      return "";
+  }
+}
+
+// NO_HEALTHY_HINT 本地调度类错误（无健康号可用，无上游原文可透传）的固定 hint。
+const NO_HEALTHY_HINT = "no healthy account available in pool; check /status or retry later";
+export const noHealthyAccountHint = (): string => NO_HEALTHY_HINT;
+
+// frameKind 从 SSE error 帧 payload 判定 ErrKind：6004 模型级限流的流式形态优先；
+// 其余取帧内 error.message 走 classify（请求级 400 口径）。判不出 → "none"（无 hint）。
+export function frameKind(payload: string): ErrKind {
+  if (isModelRateLimit(payload)) return "soft_rate";
+  try {
+    const f = JSON.parse(payload) as { error?: { message?: string } };
+    const m = f?.error?.message;
+    if (!m) return "none";
+    return classify(400, m);
+  } catch {
+    return "none";
+  }
+}
+
+// frameHint SSE error 帧的 gateway_hint（payload 原文 + 惰性求值的请求上下文）。
+export function frameHint(payload: string, ctxFn: () => HintContext): string {
+  if (payload === "" || payload === "[DONE]") return "";
+  return gatewayHint(frameKind(payload), payload, ctxFn());
 }

@@ -6,7 +6,8 @@ import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import * as pool from "@/lib/pool";
 import { validUID } from "@/lib/login";
-import { dailyCheckin, userResource } from "@/lib/upstream/client";
+import { claimTrial, dailyCheckin, userResource } from "@/lib/upstream/client";
+import { globalCompleteRegistration } from "@/lib/upstream/global_register";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,14 +90,25 @@ export async function POST(req: Request) {
     });
     await pool.revive(uid);
 
-    // 顺带签到/余额（幂等；失败不阻断导入）。
+    // 顺带签到/激活/余额（幂等；失败不阻断导入，对齐 Go import.go）。
     const shape = {
       uid, nickname, realm,
       accessToken: at, refreshToken: rt,
       expiresAt: expiresAtSec, domain: acc.domain ?? "",
       enterpriseId: "", deviceToken: "",
     };
-    if (realm !== "global") {
+    if (realm === "global") {
+      try {
+        await globalCompleteRegistration(shape);
+      } catch {
+        // 注册激活失败静默。
+      }
+      try {
+        await claimTrial(cfg, shape);
+      } catch {
+        // trial 领取失败静默。
+      }
+    } else {
       try {
         await dailyCheckin(cfg, shape);
         await pool.markCheckin(uid);

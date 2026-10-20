@@ -3,6 +3,8 @@
 // 转发到供应商 baseUrl。
 import { prisma } from "./db";
 import { openAIError } from "./chat";
+import { getConfig } from "./config";
+import { idleMonitorBody } from "./upstream/idle";
 
 // providerChat 通用 OpenAI 直连：body 中模型名重写为 bare 后原样转发。
 export async function providerChat(
@@ -39,7 +41,11 @@ export async function providerChat(
     );
   }
   if (stream && resp.ok && resp.body) {
-    return new Response(resp.body, {
+    // 空闲看门狗（对齐 Go provider.go:381 MonitorBodyFor）：默认 300s，
+    // 配置了 stream_idle_ms>0 时以配置为准；0 表示沿用默认而非禁用（与 Go 一致）。
+    const cfgIdle = (await getConfig()).stream_idle_ms;
+    const idle = cfgIdle > 0 ? cfgIdle : 300_000;
+    return new Response(idleMonitorBody(resp.body, idle), {
       status: 200,
       headers: {
         "Content-Type": "text/event-stream; charset=utf-8",

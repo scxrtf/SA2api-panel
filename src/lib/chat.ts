@@ -23,12 +23,18 @@ import {
 import {
   classify,
   UpstreamError,
+  gatewayHint,
+  noHealthyAccountHint,
+  frameHint,
+  type HintContext,
   type ErrKind,
 } from "./upstream/errors";
+import { catalogSupportsImages } from "./upstream/modelCatalog";
 import { streamPassthrough, aggregate, type StreamStats } from "./upstream/sse";
 import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
 import * as wafip from "./wafip";
+import { backoffAfter, sleep } from "./backoff";
 
 type Obj = Record<string, unknown>;
 
@@ -111,6 +117,22 @@ function rewriteModel(bodyStr: string, bare: string): string {
   } catch {
     return bodyStr;
   }
+}
+
+// hasImagePart 请求体是否携带 image_url part（11133「模型不支持图片」指向的前提）。
+// 在提示词/模型名改写之前取（改写不动 messages[].content 子树）。
+function hasImagePart(body: Obj): boolean {
+  const msgs = body["messages"];
+  if (!Array.isArray(msgs)) return false;
+  for (const m of msgs) {
+    if (!m || typeof m !== "object") continue;
+    const content = (m as Obj)["content"];
+    if (!Array.isArray(content)) continue;
+    for (const p of content) {
+      if (p && typeof p === "object" && (p as Obj)["type"] === "image_url") return true;
+    }
+  }
+  return false;
 }
 
 // ─── 错误响应（OpenAI 兼容口径） ──────────────────────────────────────────
@@ -247,6 +269,28 @@ export async function handleChat(opts: {
   let degradedApplied = degradeActive() && (cfg.prompt_mode === "passthrough" || cfg.prompt_mode === "append");
   if (bare !== rawModel) outBody = rewriteModel(outBody, bare);
 
+  // gateway_hint 判定所需的请求形态（image_url part）：在改写前取（与 Go 同理）。
+  const reqHasImage = hasImagePart(body);
+
+  // hintContext 组装 gateway_hint 判定上下文：裸模型名 + 是否带图 + 目录
+  // supports_images 声明。目录查询只读静态表（catalogSupportsImages），绝不触发
+  // 上游拉取——错误路径加一次网络调用既拖慢错误响应又放大请求量（与 WAF IP
+  // fail-fast「不放大请求量」哲学相悖）；表内未收录 → modelInCatalog=false，
+  // 11133 退中性 hint（宁缺勿滥，不编造能力事实）。
+  const hintContext = (): HintContext => {
+    const ctx: HintContext = { model: bare, hasImage: reqHasImage };
+    const si = catalogSupportsImages(bare);
+    if (si !== undefined) {
+      ctx.modelInCatalog = true;
+      ctx.modelSupportsImages = si;
+    }
+    return ctx;
+  };
+  // hintOf 末端错误透传的统一 hint 入口：kind + 上游原文 + 请求上下文 →
+  // gateway_hint 文案（gatewayHint 单一事实来源）。
+  const hintOf = (kind: ErrKind, msg: string): string =>
+    gatewayHint(kind, msg, hintContext());
+
   // 工具名名单（Go handler.go:591 同语义）：上游在没有 tools 的请求里会把工具调用
   // 吐成原生标记文本（见 upstream/dsml.ts），修复层用它做严格判定。名单来自本请求
   // 声明的 tools 与会话历史里出现过的工具名两个来源——tools 声明会在中转环节丢失，
@@ -313,7 +357,9 @@ export async function handleChat(opts: {
           void unbindSticky(sessKey);
           stickyUID = "";
         }
-        continue; // 名额被并发抢走 → 换号
+        // 名额被并发抢走 → 换号；先退避（Go rotateBackoff 同位，打散并发重试相位）。
+        await sleep(backoffAfter(i));
+        continue;
       }
       heldUID = acct.uid;
 
@@ -364,6 +410,7 @@ export async function handleChat(opts: {
             ok: false, errKind: kind,
           });
           fail(acct.uid);
+          await sleep(backoffAfter(i)); // refresh 失败换号退避
           continue;
         }
       }
@@ -397,6 +444,7 @@ export async function handleChat(opts: {
           msg: e instanceof Error ? e.message : String(e),
           retryAfterMs: 0,
         };
+        await sleep(backoffAfter(i)); // 传输层错误换号退避
         continue;
       }
 
@@ -431,6 +479,7 @@ export async function handleChat(opts: {
           return openAIError(
             400, "content_blocked",
             respBody.trim() || "content blocked by upstream content firewall",
+            hintOf(kind, respBody),
           );
         }
         // 请求级确定性错误：透传原文 400，不罚不轮转。
@@ -444,6 +493,7 @@ export async function handleChat(opts: {
           return openAIError(
             400, kind,
             respBody.trim() || `upstream rejected request (${kind})`,
+            hintOf(kind, respBody),
           );
         }
         // 其余分类错误：落账号处置 + 换号。
@@ -464,6 +514,7 @@ export async function handleChat(opts: {
             "rotation stopped; retry after the block window expires",
           );
         }
+        await sleep(backoffAfter(i)); // 分类错误换号退避（WAF fail-fast 优先于退避）
         continue;
       }
 
@@ -476,6 +527,7 @@ export async function handleChat(opts: {
         // （tools 声明链路丢失是实测最常见的泄漏成因，只做严格判定等于不设防）。
         const statsPromise = streamPassthrough(
           res.body, writable, new MarkupRepair(declaredTools, true),
+          (payload) => frameHint(payload, hintContext),
         );
         const uidCaptured = acct.uid;
         void statsPromise.then(async (stats) => {
@@ -557,10 +609,13 @@ export async function handleChat(opts: {
   let status = 503;
   let code = "no_healthy_account";
   let msg = "all accounts are temporarily unavailable, please retry later";
-  let hint = "no_healthy_account: add more accounts or wait for cooldown";
+  // gateway_hint：本地调度类错误（无上游原文）固定 no_healthy hint；有上游原文
+  // 时按 Kind + 原文 + 请求形态判定（hintOf 统一入口，与 Go 同口径）。
+  let hint = noHealthyAccountHint();
   let upstreamMsgPassed = false;
 
   if (lastErr) {
+    hint = hintOf(lastErr.kind, lastErr.msg);
     switch (lastErr.kind) {
       case "waf_block":
         if (wafip.active()) {
@@ -595,11 +650,14 @@ export async function handleChat(opts: {
     if (!upstreamMsgPassed) {
       msg = "model is unavailable on every account (per-model cooldown), try another model";
     }
-    hint = `model_blocked: ${modelBlock.count} account(s) cooling down this model`;
+    // 池级锁定的运营信息并入 gateway_hint（保留既有明细 + 统一 kind 提示）。
+    const kindHint = hintOf("model_blocked", lastErr?.msg ?? "");
+    let lockDetail = `model_blocked: ${modelBlock.count} account(s) cooling down this model`;
     if (modelBlock.until > 0) {
-      hint += "; earliest unblock at " + new Date(modelBlock.until).toISOString();
+      lockDetail += "; earliest unblock at " + new Date(modelBlock.until).toISOString();
     }
-    if (modelBlock.reason.trim()) hint += "; upstream: " + modelBlock.reason;
+    if (modelBlock.reason.trim()) lockDetail += "; upstream: " + modelBlock.reason;
+    hint = kindHint ? kindHint + "; " + lockDetail : lockDetail;
   }
   finishLog(status, "", lastErr?.kind ?? "");
   return openAIError(status, code, msg, hint);

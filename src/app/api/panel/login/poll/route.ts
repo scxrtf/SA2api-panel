@@ -4,7 +4,8 @@ import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import * as pool from "@/lib/pool";
 import { loginEndpoints, loginDoJSON, validUID } from "@/lib/login";
-import { dailyCheckin, userResource } from "@/lib/upstream/client";
+import { claimTrial, dailyCheckin, userResource } from "@/lib/upstream/client";
+import { globalCompleteRegistration } from "@/lib/upstream/global_register";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,7 +85,21 @@ export async function GET(req: Request) {
   let checkinMsg = "";
   let remain = -1;
   let total = 0;
-  if (sess.realm !== "global" && !shape.enterpriseId) {
+  if (sess.realm === "global") {
+    // global 无签到：改注册激活（幂等，region required 时自动补 HK 后重新激活）
+    // + trial 加油包（幂等码 14051=已领过）。失败不阻断登录，只体现在消息里。
+    const joinMsg = (cur: string, add: string) => (cur ? cur + "; " + add : add);
+    try {
+      await globalCompleteRegistration(shape);
+    } catch (e) {
+      checkinMsg = joinMsg(checkinMsg, "注册激活失败: " + (e instanceof Error ? e.message : String(e)));
+    }
+    try {
+      await claimTrial(cfg, shape);
+    } catch (e) {
+      checkinMsg = joinMsg(checkinMsg, "trial 领取失败: " + (e instanceof Error ? e.message : String(e)));
+    }
+  } else if (!shape.enterpriseId) {
     try {
       await dailyCheckin(cfg, shape);
       await pool.markCheckin(acct.uid);

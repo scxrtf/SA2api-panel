@@ -9,6 +9,7 @@ import {
   refreshToken,
   needsRefresh,
   userResource,
+  fetchAccountProfile,
   type AuthShape,
 } from "./upstream/client";
 import { isAlreadyCheckin } from "./upstream/errors";
@@ -108,6 +109,37 @@ export async function runBalanceRefresh(): Promise<{ updated: number; failed: nu
     }
   }
   runlog("balance 全量余额刷新完成：updated=" + updated + " failed=" + failed);
+  return { updated, failed };
+}
+
+// syncNicknames 手动刷新时的昵称同步（issue #94：上游改名免重登，移植
+// panel.go syncNicknames）。只在面板手动「刷新」路径调用——后台余额定时器
+// 不触发。逐号拉 /console/account，只取 nickname（手机号等敏感字段在
+// fetchAccountProfile 内即被丢弃）；单号失败静默跳过，不打断余额刷新结果。
+export async function syncNicknames(): Promise<{ updated: number; failed: number }> {
+  const cfg = await getConfig();
+  const accounts = await prisma.account.findMany({ include: { state: true } });
+  const jobs = accounts.filter((a) => !a.state?.disabled && a.accessToken);
+  let updated = 0;
+  let failed = 0;
+  const CONCURRENCY = 3; // 与 Go 同并发上限
+  const queue = [...jobs];
+  const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+    for (;;) {
+      const a = queue.shift();
+      if (!a) return;
+      try {
+        const nick = await fetchAccountProfile(cfg, shapeOf(a));
+        if (nick && nick !== a.nickname) {
+          await prisma.account.update({ where: { uid: a.uid }, data: { nickname: nick } });
+          updated++;
+        }
+      } catch {
+        failed++;
+      }
+    }
+  });
+  await Promise.all(workers);
   return { updated, failed };
 }
 

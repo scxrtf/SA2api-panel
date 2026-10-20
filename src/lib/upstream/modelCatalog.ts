@@ -201,6 +201,39 @@ const catalogPath = process.env.WB2API_MODEL_JSON_DISABLE === "1"
 const catalogEntries = new Map<string, ModelCapEntry>();
 let catalogLoaded = false;
 
+// CATALOG_IMAGES_SEED 模型 supports_images 的静态知识表（Go 侧无种子表——hint
+// 判定走 cachedModelsSnapshot 动态缓存；Next 侧进程内无等价动态目录快照，以
+// 种子兜底保持「宁缺勿滥」纪律：只在表内确切知道支持时返回 true，其余一律
+// undefined（不编造能力事实，11133 退中性 hint）。视觉模型家族按官方公开能力
+// 收录；纯文本/未确认模型不入表。
+const CATALOG_IMAGES_SEED: Record<string, boolean> = {
+  // GLM 视觉家族（z-ai 官方：glm-4v/4.5v/5v 系列支持图片输入）
+  "glm-5v-turbo": true,
+  // Kimi 视觉家族（moonshot 官方 vision 模型支持图片输入）
+  "kimi-k2.5": true,
+  "kimi-k2.6": true,
+  "kimi-k2.7": true,
+  "kimi-k3": true,
+  // OpenAI / Google 多模态家族（global 域）
+  "gpt-6-astra": true,
+  "gpt-5.6-sol": true,
+  "gpt-5.6-terra": true,
+  "gpt-5.6-luna": true,
+  "gpt-5.5": true,
+  "gpt-5.4": true,
+  "gpt-5.3-codex": true,
+  "gemini-3.5-flash": true,
+};
+
+// catalogSupportsImages hint 判定的只读能力查询（对齐 Go hintContext 的
+// cachedModelsSnapshot 语义）：只查既有静态表，绝不触发上游拉取（错误路径不加
+// 网络调用，防错误风暴放大请求量）。未收录 → undefined（ModelInCatalog=false，
+// 11133 不做「不支持」判定，退中性 hint——宁缺勿滥）。
+export function catalogSupportsImages(model: string): boolean | undefined {
+  if (!model) return undefined;
+  return CATALOG_IMAGES_SEED[model];
+}
+
 function validCapEntry(e: ModelCapEntry): boolean {
   return e.contextLength > 0 && e.maxOutputTokens >= 0;
 }

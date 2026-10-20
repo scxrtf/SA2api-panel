@@ -152,6 +152,7 @@ export async function streamPassthrough(
   upstream: ReadableStream<Uint8Array>,
   out: WritableStream<Uint8Array>,
   repair?: MarkupRepair | null,
+  hintFn?: (payload: string) => string,
 ): Promise<StreamStats> {
   const stats: StreamStats = {
     validFrames: 0, errorFrame: "",
@@ -263,8 +264,20 @@ export async function streamPassthrough(
             obj = null;
           }
           if (obj && obj["error"]) {
-            // error 帧：原样透传 + 旁路采集（供账号处置分类）。
+            // error 帧：原样透传 + 旁路采集（供账号处置分类）；gateway_hint 附加
+            // 网关视角补充说明（hintFn 惰性求值——仅 error 帧才调用，正常流零开销）。
             stats.errorFrame = payload;
+            if (hintFn) {
+              const hint = hintFn(payload);
+              if (hint) {
+                const eo = { ...obj };
+                const eobj = { ...(obj["error"] as Obj), gateway_hint: hint };
+                eo["error"] = eobj;
+                await write(JSON.stringify(eo));
+                stats.validFrames++;
+                continue;
+              }
+            }
             await write(payload);
             stats.validFrames++;
             continue;
@@ -334,6 +347,36 @@ export async function streamPassthrough(
 
 // ─── 非流式聚合 ─────────────────────────────────────────────────────────────
 
+// ─── 工具调用残缺参数丢弃（移植 internal/upstream/truncation.go） ────────────
+// SSE 流被截断（连接中断 / finish_reason==length）时，工具调用的 arguments 会只剩
+// 半截 JSON。把脏参数原样交给客户端会被解析成非法 JSON 卡死会话——丢弃残缺调用，
+// 而非补成 {} 伪造合法外观。
+
+// isTruncatedArguments 判定工具参数字符串是否因分片丢失而残缺（区别于「该工具
+// 本就无参数」）：空串/纯空白 → false（合法无参工具）；非空但 JSON 解析失败 →
+// true（截断）；能解析（含 null/标量/数组等任何合法 JSON）→ false。
+export function isTruncatedArguments(raw: unknown): boolean {
+  if (typeof raw !== "string") return false;
+  const trimmed = raw.trim();
+  if (trimmed === "") return false;
+  try {
+    JSON.parse(trimmed);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+// dropTruncatedToolCalls 过滤出 arguments 完整的 tool_call（返回新数组）。
+// 只依据 isTruncatedArguments 判定，不改动任何保留的调用（正例零改动）。
+export function dropTruncatedToolCalls(calls: Obj[]): Obj[] {
+  return calls.filter((call) => {
+    const fn = call["function"];
+    if (!fn || typeof fn !== "object") return true;
+    return !isTruncatedArguments((fn as Obj)["arguments"]);
+  });
+}
+
 function mergeToolCallDelta(merged: Obj, delta: Obj): void {
   for (const k of ["id", "type"]) {
     const v = delta[k];
@@ -370,6 +413,7 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
   let reasoning = "";
   let role = "";
   let finishReason = "";
+  let sawDone = false;
   const toolCalls: Obj[] = [];
 
   const mergeChunk = (obj: Obj) => {
@@ -415,7 +459,10 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
     while ((idx = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, idx).replace(/\r$/, "");
       buf = buf.slice(idx + 1);
-      if (line.startsWith("data: [DONE]")) break;
+      if (line.startsWith("data: [DONE]")) {
+        sawDone = true;
+        break;
+      }
       if (!line.startsWith("data: ")) continue;
       const payload = line.slice(6);
       let obj: Obj;
@@ -438,9 +485,15 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
   if (stats.errorFrame) {
     throw new Error("upstream error frame: " + stats.errorFrame.slice(0, 200));
   }
+  // 截断丢弃（对齐 Go sse.go：finish_reason==length 或未见 [DONE] 说明流被掐断，
+  // 此时末尾 tool_call 的 arguments 很可能残缺，直接丢弃防止客户端执行半残调用）。
+  let finalToolCalls = toolCalls;
+  if (toolCalls.length > 0 && (finishReason === "length" || !sawDone)) {
+    finalToolCalls = dropTruncatedToolCalls(toolCalls);
+  }
   const message: Obj = { role: role || "assistant", content };
   if (reasoning) message["reasoning_content"] = reasoning;
-  if (toolCalls.length > 0) message["tool_calls"] = toolCalls;
+  if (finalToolCalls.length > 0) message["tool_calls"] = finalToolCalls;
   out["object"] = "chat.completion";
   out["choices"] = [{ index: 0, message, finish_reason: finishReason || "stop" }];
   out["usage"] = stats.hasUsage
