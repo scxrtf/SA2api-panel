@@ -4,7 +4,20 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { req, useAutoRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
-interface ModelRow { id: string; name: string; credits?: number | string; vendor?: string; provider?: boolean }
+interface ModelRow {
+  id: string; name: string; credits?: number | string; vendor?: string; provider?: boolean;
+  // 上游目录全字段透出（对齐 Go 面板 mdRowHtml 徽标与档位/窗口列，缺失不显示）
+  is_default?: boolean;
+  supports_tool_call?: boolean;
+  supports_images?: boolean;
+  supports_reasoning?: boolean;
+  can_disable_thinking?: boolean;
+  default_effort?: string;
+  supported_efforts?: string[];
+  context_length?: number;
+  max_output_tokens?: number;
+  description?: string;
+}
 interface TestResult {
   model: string; first_token_ms: number; total_ms: number;
   output_tokens: number; tokens_per_sec: number;
@@ -62,6 +75,38 @@ function gradeOf(r: TestResult): { cls: string; text: string } {
   if (tps >= 30 && r.first_token_ms <= 1500) return { cls: "ok", text: "优秀" };
   if (tps >= 15 && r.first_token_ms <= 3000) return { cls: "info", text: "良好" };
   return { cls: "warn", text: "偏慢" };
+}
+
+// CapBadges 能力徽标：默认模型 / 供应商 / 工具调用 / 视觉 / 思考常开（对齐
+// Go 面板 mdRowHtml：上游目录全字段透出，缺失不显示）。
+function CapBadges({ m }: { m: ModelRow }) {
+  const caps: React.ReactNode[] = [];
+  if (m.is_default) caps.push(<span key="d" className="tag ok">默认</span>);
+  if (m.provider) caps.push(<span key="p" className="tag ok">供应商</span>);
+  if (m.supports_tool_call) caps.push(<span key="t" className="tag warn">工具</span>);
+  if (m.supports_images) caps.push(<span key="v" className="tag warn">视觉</span>);
+  if (m.supports_reasoning && !m.can_disable_thinking) caps.push(<span key="r" className="tag warn">思考常开</span>);
+  if (caps.length === 0) return null;
+  return <div style={{ marginTop: 3, display: "flex", gap: 4, flexWrap: "wrap" }}>{caps}</div>;
+}
+
+// EffortCell 支持的思考档位（对齐 Go：可关思考补 "off（可关）"；无档位列表时
+// 退化为「固定档 · 默认 X / 不支持思考」文案）。
+function EffortCell({ m }: { m: ModelRow }) {
+  const eff = (m.supported_efforts ?? []).slice();
+  if (m.can_disable_thinking && eff.length && !eff.includes("off")) eff.push("off（可关）");
+  if (eff.length === 0) {
+    return (
+      <span className="dim" style={{ fontSize: 12.5 }}>
+        {m.supports_reasoning ? "固定档 · 默认 " + (m.default_effort || "?") : "不支持思考"}
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+      {eff.map((e) => <span key={e} className="tag warn">{e}</span>)}
+    </span>
+  );
 }
 
 export function ModelsView({ flash }: { flash: Flash }) {
@@ -154,9 +199,9 @@ export function ModelsView({ flash }: { flash: Flash }) {
       ) : (
         <div className="tbl-wrap">
           <table className="tbl">
-            <thead><tr><th>模型 ID</th><th>名称</th><th>来源</th><th>积分/1k</th><th>实测上限</th><th>实测</th><th style={{ width: 1 }}></th></tr></thead>
+            <thead><tr><th>模型 ID</th><th>名称</th><th>来源</th><th>积分/1k</th><th>默认档</th><th>支持的思考档位</th><th>上下文长度</th><th>最大输出</th><th>实测上限</th><th>实测</th><th style={{ width: 1 }}></th></tr></thead>
             <tbody>
-              {filtered.length === 0 && <tr><td colSpan={7} className="dim" style={{ textAlign: "center", padding: 24 }}>无匹配模型</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={11} className="dim" style={{ textAlign: "center", padding: 24 }}>无匹配模型</td></tr>}
               {filtered.map((m) => {
                 const r = results[m.id];
                 const open = expanded === m.id;
@@ -164,10 +209,14 @@ export function ModelsView({ flash }: { flash: Flash }) {
                 return (
                   <React.Fragment key={m.id}>
                     <tr style={open ? { background: "var(--bg-soft)" } : undefined}>
-                      <td className="mono">{m.id}</td>
-                      <td>{m.name}</td>
+                      <td className="mono">{m.id}<CapBadges m={m} /></td>
+                      <td title={m.description}>{m.name}</td>
                       <td>{m.provider ? <span className="tag info">{m.vendor}</span> : <span className="tag">池</span>}</td>
                       <td className="dim">{m.credits === "" || m.credits === undefined ? "-" : m.credits}</td>
+                      <td>{m.default_effort ? <span className="tag ok">{m.default_effort}</span> : <span className="dim">—</span>}</td>
+                      <td style={{ whiteSpace: "normal" }}><EffortCell m={m} /></td>
+                      <td className="mono dim">{m.context_length ? fmtK(m.context_length) : "—"}</td>
+                      <td className="mono dim">{m.max_output_tokens ? fmtK(m.max_output_tokens) : "—"}</td>
                       <td className="mono" style={{ fontSize: 12 }}><ProbeCell pr={pr} /></td>
                       <td>
                         {r === undefined && <span className="dim">-</span>}
@@ -201,7 +250,7 @@ export function ModelsView({ flash }: { flash: Flash }) {
                     </tr>
                     {open && (
                       <tr>
-                        <td colSpan={7} style={{ background: "var(--bg-soft)", padding: "10px 16px" }}>
+                        <td colSpan={11} style={{ background: "var(--bg-soft)", padding: "10px 16px" }}>
                           {typeof r === "object" ? <TestDetail r={r} /> : (
                             <span className="tag err">{String(r)}</span>
                           )}
