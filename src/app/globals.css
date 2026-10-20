@@ -354,7 +354,10 @@ body {
 .baseline-save-line .input { flex: 1; min-width: 180px; max-width: 360px; }
 .baseline-save .form-hint { margin-top: 7px; }
 
-.msg { padding: 9px 13px; border-radius: var(--radius-sm); margin-bottom: 10px; font-size: 13px; }
+.msg {
+  padding: 9px 13px; border-radius: var(--radius-sm); margin-bottom: 10px; font-size: 13px;
+  overflow-wrap: anywhere;
+}
 .msg.err { background: #fef2f2; border: 1px solid #fecaca; color: var(--err); }
 .msg.ok { background: #f0fdf4; border: 1px solid #bbf7d0; color: var(--ok); }
 
@@ -694,6 +697,29 @@ body {
 
 /* 模型测试进度 */
 .md-prog { font-size: 12px; color: var(--accent); font-family: var(--mono); }
+/* 实测失败：单元格内截断成单行，完整错误放到展开详情里换行滚动，
+   避免长上游报文把模型表撑宽、挤压其它列。 */
+.tbl-models .md-test-err {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.md-err-detail {
+  font-size: 12px; line-height: 1.5; color: var(--err);
+  background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
+  padding: 9px 12px; max-height: 220px; overflow: auto;
+}
+.md-err-detail .hd {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .8px;
+  text-transform: uppercase; color: var(--err); opacity: .8; margin-bottom: 5px;
+}
+.md-err-detail .bd {
+  font-family: var(--mono); font-size: 11.5px;
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+}
 /* 模型实测细分面板 */
 .md-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .md-timeline {

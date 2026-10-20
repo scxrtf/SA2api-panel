@@ -33,6 +33,18 @@ export function PackagesView({ flash }: { flash: Flash }) {
   useAutoRefresh(load, 60_000);
   usePanelRefresh(load);
 
+  // 域分组汇总：cn（国内）与 global（国际）各自加总剩余/总量。
+  const realmSummary = (rows ?? []).reduce(
+    (acc, a) => {
+      const k = a.realm === "global" ? "global" : "cn";
+      acc[k].remain += a.remain || 0;
+      acc[k].size += a.size || 0;
+      acc[k].count += 1;
+      return acc;
+    },
+    { cn: { remain: 0, size: 0, count: 0 }, global: { remain: 0, size: 0, count: 0 } },
+  );
+
   return (
     <Box title="积分构成" hint="按账号列出套餐包 · 上游按失效时刻先后自动优先扣减（FEFO）"
       extra={<button className="btn xs" onClick={load}>刷新</button>}>
@@ -43,6 +55,18 @@ export function PackagesView({ flash }: { flash: Flash }) {
       ) : (
         <>
         <div className="pad">
+          <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+            {realmSummary.cn.count > 0 && (
+              <span className="tag info" title="国内域账号积分合计">
+                CN · {realmSummary.cn.count} 账号 · 剩余 {fmtNum(realmSummary.cn.remain)} / 总量 {fmtNum(realmSummary.cn.size)}
+              </span>
+            )}
+            {realmSummary.global.count > 0 && (
+              <span className="tag ok" title="国际域账号积分合计">
+                国际 · {realmSummary.global.count} 账号 · 剩余 {fmtNum(realmSummary.global.remain)} / 总量 {fmtNum(realmSummary.global.size)}
+              </span>
+            )}
+          </div>
           <ExpiryDistribution accounts={rows} />
         </div>
         {rows.map((a) => (
@@ -50,7 +74,9 @@ export function PackagesView({ flash }: { flash: Flash }) {
             <h4>
               {a.nickname || a.uid}
               <span className="dim mono" style={{ marginLeft: 8 }}>{a.uid}</span>
-              <span className="tag info" style={{ marginLeft: 8 }}>{a.realm}</span>
+              <span className={"tag " + (a.realm === "global" ? "ok" : "info")} style={{ marginLeft: 8 }}>
+                {a.realm === "global" ? "国际" : "CN"}
+              </span>
               <span style={{ marginLeft: 8 }} className="dim">
                 剩余 {fmtNum(a.remain)} / 总量 {fmtNum(a.size)}
               </span>

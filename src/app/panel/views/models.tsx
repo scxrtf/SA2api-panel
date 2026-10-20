@@ -213,6 +213,7 @@ export function ModelsView({ flash }: { flash: Flash }) {
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [q, setQ] = useState("");
   const [src, setSrc] = useState<"" | "pool" | "provider">("");
+  const [realm, setRealm] = useState<"" | "cn" | "global">("");
   const [capFilters, setCapFilters] = useState<string[]>([]);
   const [results, setResults] = useState<Record<string, TestResult | "running" | string>>({});
   const [probes, setProbes] = useState<Record<string, ProbeRec>>({});
@@ -276,6 +277,8 @@ export function ModelsView({ flash }: { flash: Flash }) {
   const filtered = (models ?? []).filter((m) => {
     if (src === "pool" && m.provider) return false;
     if (src === "provider" && !m.provider) return false;
+    if (realm === "cn" && !m.id.startsWith("cn:")) return false;
+    if (realm === "global" && !m.id.startsWith("global:")) return false;
     for (const k of capFilters) {
       const f = CAP_FILTERS.find((x) => x.key === k);
       if (f && !f.test(m)) return false;
@@ -296,6 +299,11 @@ export function ModelsView({ flash }: { flash: Flash }) {
         <div className="btn-row" style={{ gap: 4 }}>
           {([["", "全部"], ["pool", "池"], ["provider", "供应商"]] as const).map(([v, label]) => (
             <button key={v} className={"btn xs" + (src === v ? " primary" : "")} onClick={() => setSrc(v)}>{label}</button>
+          ))}
+        </div>
+        <div className="btn-row" style={{ gap: 4 }}>
+          {([["", "全部域"], ["cn", "CN"], ["global", "全球"]] as const).map(([v, label]) => (
+            <button key={v} className={"btn xs" + (realm === v ? " primary" : "")} onClick={() => setRealm(v)}>{label}</button>
           ))}
         </div>
         <button className="btn xs" onClick={load} disabled={loading}>
@@ -346,7 +354,10 @@ export function ModelsView({ flash }: { flash: Flash }) {
                       <td>
                         {r === undefined && <span className="dim">-</span>}
                         {r === "running" && <span className="md-prog">测试中…</span>}
-                        {typeof r === "string" && r !== "running" && <span className="tag err">{r}</span>}
+                        {typeof r === "string" && r !== "running" && (
+                          // 错误串可能很长（上游 JSON / 堆栈），单元格内截断，完整内容放 title 与详情行。
+                          <span className="tag err md-test-err" title={r}>{r}</span>
+                        )}
                         {typeof r === "object" && (
                           <>
                             <span className={"tag " + gradeOf(r).cls}>{gradeOf(r).text}</span>{" "}
@@ -379,7 +390,10 @@ export function ModelsView({ flash }: { flash: Flash }) {
                       <tr>
                         <td colSpan={11} style={{ background: "var(--bg-soft)", padding: "10px 16px" }}>
                           {typeof r === "object" ? <TestDetail r={r} /> : (
-                            <span className="tag err">{String(r)}</span>
+                            <div className="md-err-detail" role="alert">
+                              <div className="hd">实测失败</div>
+                              <div className="bd">{String(r)}</div>
+                            </div>
                           )}
                         </td>
                       </tr>
