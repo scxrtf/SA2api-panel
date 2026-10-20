@@ -2,6 +2,7 @@
 // 口径：hours 滚动窗口（默认 72）/ from-to 显式区间 / 全部历史（hours=0）。
 // 聚合维度：totals / by_realm / by_account / by_model / by_key / by_provider /
 // by_provider_model / series / credit_by_account / credit_by_model。
+// 另含 credit_by_key：按 API Key 归属的积分扣除明细。
 import { panelAuth, ok } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { currentModelRate } from "@/lib/upstream/modelCatalog";
@@ -79,6 +80,7 @@ class AggAcc {
 
 interface UsageRow {
   uid: string; model: string; realm: string;
+  provider?: string;
   promptTokens: number; completionTok: number; totalTokens: number;
   credit: number; hasCredit: boolean;
   cacheHitTok: number; cacheMissTok: number;
@@ -213,12 +215,14 @@ export async function GET(req: Request) {
   const acctRealm = new Map<string, string>();
   const modelAgg = new Map<string, AggAcc>();
   const keyAgg = new Map<string, AggAcc>();
+  const keyRealm = new Map<string, string>();
   const providerAgg = new Map<string, AggAcc>();
   const providerModelAgg = new Map<string, AggAcc>();
   const hourSeries = new Map<string, AggAcc>();
   const daySeries = new Map<string, AggAcc>();
   const creditAcctAgg = new Map<string, CreditAcc>();
   const creditModelAgg = new Map<string, CreditAcc>();
+  const creditKeyAgg = new Map<string, CreditAcc>();
   const rateCache = new Map<string, string>();
   // 窗口 > 7 天按日分桶，否则按小时（旧版前端同口径）。
   const dayScope = since !== null && (Date.now() - since.getTime()) > 7 * 86_400_000;
@@ -238,8 +242,10 @@ export async function GET(req: Request) {
     const kn = e.keyName || "(未知)";
     if (!keyAgg.has(kn)) keyAgg.set(kn, new AggAcc());
     keyAgg.get(kn)!.add(e);
+    if (!keyRealm.has(kn)) keyRealm.set(kn, realm);
     // 供应商维度：realm 形如 "provider:名字"；第二层按供应商×裸模型名。
-    const prov = providerNameFromRealm(realm);
+    // 兜底：旧记录 realm 未带前缀但 provider 列非空时也归入供应商桶（防明细缺失）。
+    const prov = providerNameFromRealm(realm) || (e.provider ?? "");
     if (prov) {
       if (!providerAgg.has(prov)) providerAgg.set(prov, new AggAcc());
       providerAgg.get(prov)!.add(e);
@@ -257,6 +263,9 @@ export async function GET(req: Request) {
     if (e.hasCredit) {
       if (!creditAcctAgg.has(e.uid)) creditAcctAgg.set(e.uid, new CreditAcc());
       creditAcctAgg.get(e.uid)!.add(e);
+      const ckn = e.keyName || "(未知)";
+      if (!creditKeyAgg.has(ckn)) creditKeyAgg.set(ckn, new CreditAcc());
+      creditKeyAgg.get(ckn)!.add(e);
       const cm = canonicalUsageModel(model);
       let rate = e.modelRate;
       if (!rate) {
@@ -310,11 +319,12 @@ export async function GET(req: Request) {
     by_realm: keyedFinish(realmAgg, () => ({})),
     by_account: byAccount,
     by_model: keyedFinish(modelAgg, () => ({})),
-    by_key: keyedFinish(keyAgg, () => ({})),
+    by_key: keyedFinish(keyAgg, (k) => ({ realm: keyRealm.get(k) ?? "" })),
     by_provider: keyedFinish(providerAgg, () => ({})),
     by_provider_model: byProviderModel,
     credit_by_account: creditByAccount,
     credit_by_model: creditFinish(creditModelAgg),
+    credit_by_key: creditFinish(creditKeyAgg),
     series,
     buckets: events.length,
     since: sinceRow ? new Date(sinceRow).toISOString() : "",

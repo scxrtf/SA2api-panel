@@ -35,6 +35,17 @@ export function parseBaselineIndex(data: unknown): BaselineListItem[] {
 // loadOfficialBaselines 通过站点自身 HTTP 读取静态快照，
 // 兼容 serverless / 只读文件系统等无法直接读 public 的场景。
 export async function loadOfficialBaselines(reqURL: string): Promise<BaselineListItem[]> {
+  // 优先直接读容器内文件：Railway 等平台上服务端对自身公网域名发 fetch
+  // 常因回环/出站限制报 "fetch failed"，而 public/ 已随镜像 COPY 进容器。
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const raw = await readFile(join(process.cwd(), "public", "aichecker", "baselines", "index.json"), "utf8");
+    const models = parseBaselineIndex(JSON.parse(raw));
+    if (models.length > 0) return models;
+  } catch {
+    // 文件不可读（如纯 serverless 部署）时退回 HTTP 自取。
+  }
   const res = await fetch(new URL("/aichecker/baselines/index.json", reqURL), { cache: "no-store" });
   if (!res.ok) throw new Error("index.json http " + res.status);
   const models = parseBaselineIndex(await res.json());

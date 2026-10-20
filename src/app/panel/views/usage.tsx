@@ -36,6 +36,7 @@ interface UsageResp {
   by_provider_model: KeyedRow[];
   credit_by_account: CreditRow[];
   credit_by_model: CreditRow[];
+  credit_by_key: CreditRow[];
   series: SeriesPoint[];
   buckets: number;
   since: string;
@@ -206,7 +207,7 @@ export function UsageView({ flash }: { flash: Flash }) {
   const [u, setU] = useState<UsageResp | null>(null);
   const [dim, setDim] = useState<DimKey>("account");
   const [sort, setSort] = useState<SortKey>("total");
-  const [creditDim, setCreditDim] = useState<"account" | "model">("account");
+  const [creditDim, setCreditDim] = useState<"account" | "model" | "key">("account");
   const [provOpen, setProvOpen] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -392,7 +393,7 @@ export function UsageView({ flash }: { flash: Flash }) {
               sub="上游前缀缓存命中 / (命中+未命中)" />
           </div>
           <div className="note">
-            {(u.credit_by_account ?? []).length} 个账号 · {(u.credit_by_model ?? []).length} 个模型倍率分组
+            {(u.credit_by_account ?? []).length} 个账号 · {(u.credit_by_model ?? []).length} 个模型倍率分组 · {(u.credit_by_key ?? []).length} 个 KEY
           </div>
         </div>
       </Box>
@@ -405,28 +406,33 @@ export function UsageView({ flash }: { flash: Flash }) {
           <button className={creditDim === "model" ? "on" : ""} onClick={() => setCreditDim("model")}>
             按模型<span className="cnt">{(u.credit_by_model ?? []).length}</span>
           </button>
+          <button className={creditDim === "key" ? "on" : ""} onClick={() => setCreditDim("key")}>
+            按KEY<span className="cnt">{(u.credit_by_key ?? []).length}</span>
+          </button>
         </div>
       }>
         <div className="tbl-wrap">
           <table className="tbl">
             <thead><tr>
               <th className="mark" aria-hidden="true"></th>
-              <th>{creditDim === "model" ? "模型" : "账号"}</th>
+              <th>{creditDim === "model" ? "模型" : creditDim === "key" ? "Key" : "账号"}</th>
               {creditDim === "model" && <th>积分倍率</th>}
               <th className="num">请求</th><th className="num">扣除积分</th>
               <th className="num">有效样本 Token</th><th className="num">积分 / 1M Token</th>
               <th className="num">缓存命中率</th>
             </tr></thead>
             <tbody>
-              {(creditDim === "model" ? (u.credit_by_model ?? []) : (u.credit_by_account ?? [])).map((row) => (
+              {(creditDim === "model" ? (u.credit_by_model ?? [])
+                : creditDim === "key" ? (u.credit_by_key ?? [])
+                : (u.credit_by_account ?? [])).map((row) => (
                 <tr key={row.key + "|" + (row.rate ?? "")}>
                   <td className="mark" aria-hidden="true"></td>
-                  {creditDim === "model"
-                    ? <td className="mono">{row.key || "—"}</td>
-                    : <td>
+                  {creditDim === "account"
+                    ? <td>
                         {row.nickname || String(row.key || "").slice(0, 8) || "—"}
                         <div className="note">{(row.realm || "cn") + " · " + String(row.key || "").slice(0, 8)}</div>
-                      </td>}
+                      </td>
+                    : <td className="mono">{row.key || "—"}</td>}
                   {creditDim === "model" && <td>{fmtModelRate(row.rate)}</td>}
                   <td className="num">{fmtTok(row.requests)}</td>
                   <td className="num">{fmtCredit(row.credits)}</td>
@@ -439,7 +445,9 @@ export function UsageView({ flash }: { flash: Flash }) {
                   </td>
                 </tr>
               ))}
-              {((creditDim === "model" ? u.credit_by_model : u.credit_by_account) ?? []).length === 0 &&
+              {((creditDim === "model" ? u.credit_by_model
+                : creditDim === "key" ? u.credit_by_key
+                : u.credit_by_account) ?? []).length === 0 &&
                 <tr><td colSpan={creditDim === "model" ? 8 : 7} className="dim" style={{ textAlign: "center", padding: 20 }}>
                   暂无积分扣除记录；升级前仅含 Token 的历史不会伪造积分。
                 </td></tr>}
