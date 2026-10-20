@@ -1,7 +1,7 @@
 "use client";
 // CloseRouter ControlPanel.kt 的 Web 复刻组件体系：
 // CtrlCard / CtrlStatus / CtrlAction / CtrlMetric / CtrlValue / CtrlHint。
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 /** ControlCard：灰面 14px 圆角容器 */
 export function CtrlCard({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
@@ -30,16 +30,33 @@ export function CtrlStatus({ title, detail, active, badge }: {
   );
 }
 
-/** ControlAction：CODE 徽章 + 标题，深色主按钮 / 白底次按钮（箭头按用户要求移除） */
-export function CtrlAction({ text, code, onClick, secondary, disabled, title }: {
-  text: string; code: string; onClick: () => void;
+/** ControlAction：CODE 徽章 + 标题，深色主按钮 / 白底次按钮（箭头按用户要求移除）。
+ *  onClick 返回 Promise 时自动进入加载态：CODE 徽章换转圈、文案改 pendingText、
+ *  按钮禁用，直到 Promise 落定——消除请求空窗期无反馈。 */
+export function CtrlAction({ text, code, onClick, secondary, disabled, title, pendingText }: {
+  text: string; code: string; onClick: () => void | Promise<void>;
   secondary?: boolean; disabled?: boolean; title?: string;
+  /** pendingText 加载态文案，默认「发起中…」 */
+  pendingText?: string;
 }) {
+  const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  const handle = () => {
+    if (busy || disabled) return;
+    const p = onClick();
+    if (p && typeof (p as Promise<void>).then === "function") {
+      setBusy(true);
+      (p as Promise<void>).catch(() => {}).finally(() => {
+        if (mounted.current) setBusy(false);
+      });
+    }
+  };
   return (
-    <button className={"ctrl-action" + (secondary ? " secondary" : "")}
-      onClick={onClick} disabled={disabled} title={title}>
-      <span className="code">{code}</span>
-      <span className="txt">{text}</span>
+    <button className={"ctrl-action" + (secondary ? " secondary" : "") + (busy ? " busy" : "")}
+      onClick={handle} disabled={disabled || busy} title={title}>
+      <span className="code">{busy ? <span className="spin" /> : code}</span>
+      <span className="txt">{busy ? (pendingText ?? "发起中…") : text}</span>
     </button>
   );
 }

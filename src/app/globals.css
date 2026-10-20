@@ -199,6 +199,14 @@ body {
 .ctrl-action:disabled { background: #edeeeb; color: var(--fg-dim); cursor: not-allowed; }
 .ctrl-action:disabled:active { transform: none; box-shadow: none; }
 .ctrl-action:disabled:active::after { animation: none; }
+/* 加载态：CODE 徽章转圈（CSS 画环，无素材依赖） */
+.ctrl-action.busy { pointer-events: none; }
+.ctrl-action .spin {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid rgba(232, 116, 28, .25); border-top-color: var(--accent);
+  animation: spin .7s linear infinite; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .ctrl-action.secondary {
   background: #fff; color: var(--ink); border: 1px solid #dedfdf;
 }

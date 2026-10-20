@@ -39,7 +39,8 @@ export function AccountsView({ ov, flash, onRefresh }: {
     } finally { setBusy(false); }
   }, [flash, onRefresh]);
 
-  const batch = useCallback(async (path: string, label: string) => {
+  // batch 返回 Promise 供 CtrlAction 进入「发起中…」加载态，空窗期按钮即反馈。
+  const batch = useCallback(async (path: string, label: string): Promise<void> => {
     try { await req(path, { method: "POST" }); flash("ok", label + " 已开始，结果见运行日志"); }
     catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   }, [flash]);
@@ -88,11 +89,11 @@ export function AccountsView({ ov, flash, onRefresh }: {
       <CtrlCard style={{ marginBottom: 16 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
           <CtrlAction code="ADD" text="添加账号" onClick={() => setAddOpen(true)} />
-          <CtrlAction code="CHK" text="全部签到" secondary onClick={() => batch("checkin_all", "全部签到")} />
-          <CtrlAction code="TRV" text="旅行巡检" secondary onClick={() => batch("travel_all", "旅行巡检")} />
-          <CtrlAction code="ACT" text="活跃上报" secondary onClick={() => batch("activity_all", "活跃上报")} />
-          <CtrlAction code="KEEP" text="全部保活" secondary onClick={() => batch("keepalive_all", "全部保活")} />
-          <CtrlAction code="BAL" text="刷新余额" secondary onClick={() => batch("balance_all", "刷新余额")} />
+          <CtrlAction code="CHK" text="全部签到" pendingText="发起签到中…" secondary onClick={() => batch("checkin_all", "全部签到")} />
+          <CtrlAction code="TRV" text="旅行巡检" pendingText="发起巡检中…" secondary onClick={() => batch("travel_all", "旅行巡检")} />
+          <CtrlAction code="ACT" text="活跃上报" pendingText="发起上报中…" secondary onClick={() => batch("activity_all", "活跃上报")} />
+          <CtrlAction code="KEEP" text="全部保活" pendingText="发起保活中…" secondary onClick={() => batch("keepalive_all", "全部保活")} />
+          <CtrlAction code="BAL" text="刷新余额" pendingText="刷新中…" secondary onClick={() => batch("balance_all", "刷新余额")} />
         </div>
         <CtrlHint>批量操作异步执行，结果见「运行日志」页；添加账号支持浏览器授权与 JSON 导入两种方式。</CtrlHint>
       </CtrlCard>

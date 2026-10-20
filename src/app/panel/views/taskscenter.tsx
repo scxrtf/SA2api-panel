@@ -91,9 +91,9 @@ export function TasksCenterView({ flash }: { flash: Flash }) {
     {/* CloseRouter ControlAction 操作区 */}
     <CtrlCard style={{ marginBottom: 16 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
-        <CtrlAction code="RUN" text={busy ? "执行中…" : "执行全部待办"} onClick={runQueue} disabled={busy} />
-        <CtrlAction code="SCAN" text="扫描待办" secondary onClick={scan} disabled={busy} />
-        <CtrlAction code="VOCH" text="查询券码" secondary onClick={schoolVouchers}
+        <CtrlAction code="RUN" text="执行全部待办" pendingText="发起执行中…" onClick={runQueue} disabled={busy} />
+        <CtrlAction code="SCAN" text="扫描待办" pendingText="扫描中…" secondary onClick={scan} disabled={busy} />
+        <CtrlAction code="VOCH" text="查询券码" pendingText="查询中…" secondary onClick={schoolVouchers}
           title="开学季抽奖抽中的第三方券码（活动已结束，历史券码仍可查）" />
       </div>
       <label className="sel-note">队列并发
