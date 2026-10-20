@@ -7,14 +7,15 @@ export const maxDuration = 600;
 
 import { randomUUID } from "crypto";
 import { registerTest, cancelTest, unregisterTest } from "@/lib/modeltest";
+import { BASELINE_ID_RE, loadOfficialBaselines } from "@/lib/aichecker-official";
+import { listCustomBaselines } from "@/lib/aichecker-baselines";
+import { loadBaseline } from "@/lib/aichecker-baseline-loader";
 import {
   MIN_SAMPLES, DEFAULT_ITERATIONS,
   buildPrompt, calculateDistribution, calculateStats, calculateSimilarity,
-  quickVerdict, scoreToPct, resolveChannel, sampleOnce, normalizeBaseline,
+  quickVerdict, scoreToPct, resolveChannel, sampleOnce,
   type Baseline,
 } from "@/lib/aichecker";
-
-const SAFE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._\-]{0,80}$/;
 
 // POST 一键鉴别（对齐 hlwy-ai-checker 自动模式 startQuickCheck）：
 // 下载官方基准 → 对待测渠道并发采样 → 与全部官方基准横向比对出报告。
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
   const model = (body.model ?? "").trim();
   const baselineID = (body.baseline ?? "").trim();
   if (!model) return fail(400, "model is required");
-  if (!baselineID || !SAFE_NAME_RE.test(baselineID)) return fail(400, "baseline 缺失或不合法");
+  if (!baselineID || !BASELINE_ID_RE.test(baselineID)) return fail(400, "baseline 缺失或不合法");
   const iterations = Math.max(MIN_SAMPLES, Math.min(500, Math.floor(body.iterations ?? DEFAULT_ITERATIONS)));
   const concurrency = Math.max(1, Math.min(10, Math.floor(body.concurrency ?? 5)));
   const checkID = body.check_id?.trim() || randomUUID();
@@ -41,9 +42,10 @@ export async function POST(req: Request) {
   if (!controller) return fail(409, "check already running: " + checkID);
   try {
     // 步骤 1：下载所选官方基准 + 其余基准（横向比对用；失败不阻塞主流程）。
-    const claimed = await fetchBaseline(req, baselineID);
+    // 直接读本地快照 / DB / 上游，绝不自请求本面板 API。
+    const claimed = await loadBaseline(baselineID);
     if (!claimed) return fail(502, `无法下载基准「${baselineID}」`);
-    const others = await fetchOtherBaselines(req, baselineID);
+    const others = await loadOtherBaselines(req.url, baselineID);
 
     // 步骤 2：并发采样（对齐上游 runWithConcurrency 语义：固定 worker 数抢任务）。
     const ch = resolveChannel({ model, base_url: body.base_url, api_key: body.api_key, uid: body.uid });
@@ -85,9 +87,9 @@ export async function POST(req: Request) {
     // 步骤 3：报告——与所选基准算相似度，并与全部官方基准横向比对。
     const distribution = calculateDistribution(results);
     const stats = calculateStats(results);
-    const similarity = calculateSimilarity(distribution, claimed.distribution, stats, claimed.stats);
+    const similarity = calculateSimilarity(distribution, claimed.data.distribution, stats, claimed.data.stats);
     const matches: { id: string; name: string; claimed: boolean; score: number; sim?: typeof similarity }[] = [
-      { id: baselineID, name: claimed.name, claimed: true, score: scoreToPct(similarity.overallScore), sim: similarity },
+      { id: baselineID, name: claimed.data.name, claimed: true, score: scoreToPct(similarity.overallScore), sim: similarity },
       ...others.map((o) => ({
         id: o.id, name: o.data.name, claimed: false,
         score: scoreToPct(calculateSimilarity(distribution, o.data.distribution, stats, o.data.stats).overallScore),
@@ -104,8 +106,8 @@ export async function POST(req: Request) {
       check_id: checkID,
       result: {
         model, baseline: baselineID, verdict,
-        baseline_name: claimed.name,
-        baseline_distribution: claimed.distribution,
+        baseline_name: claimed.data.name,
+        baseline_distribution: claimed.data.distribution,
         score: scoreToPct(similarity.overallScore),
         similarity,
         stats,
@@ -137,33 +139,24 @@ function pushErr(errors: string[], msg: string) {
   if (errors.length > 50) errors.shift();
 }
 
-// fetchBaseline 读内置基准快照并做最小校验（对齐上游 normalizeBaseline 关键约束）。
-async function fetchBaseline(req: Request, id: string): Promise<Baseline | null> {
+// loadOtherBaselines 由本地清单 + 自建清单拼出候选，再走统一 loader。
+// 任何一路失败都不阻塞主流程：横向比对只是报告里的附加信息。
+async function loadOtherBaselines(reqURL: string, exclude: string): Promise<{ id: string; data: Baseline }[]> {
+  const ids = new Set<string>();
   try {
-    const res = await fetch(new URL(`/api/panel/aichecker/baseline?name=${encodeURIComponent(id)}`, req.url), {
-      headers: { Authorization: req.headers.get("Authorization") ?? "" },
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    const j = await res.json() as { data?: unknown };
-    return normalizeBaseline(j.data);
-  } catch { return null; }
-}
+    for (const b of await loadOfficialBaselines(reqURL)) ids.add(b.id);
+  } catch { /* 官方清单缺失时仍可只用自建基准 */ }
+  try {
+    for (const b of await listCustomBaselines()) ids.add(b.id);
+  } catch { /* DB 未就绪时只比对官方基准 */ }
+  ids.delete(exclude);
 
-async function fetchOtherBaselines(req: Request, exclude: string): Promise<{ id: string; data: Baseline }[]> {
-  try {
-    const res = await fetch(new URL("/api/panel/aichecker/baselines", req.url), {
-      headers: { Authorization: req.headers.get("Authorization") ?? "" },
-      cache: "no-store",
-    });
-    if (!res.ok) return [];
-    const j = await res.json() as { models?: { id: string }[] };
-    const ids = (j.models ?? []).map((m) => m.id).filter((id) => id !== exclude && SAFE_NAME_RE.test(id));
-    const loaded = await Promise.all(ids.map(async (id) => {
-      const data = await fetchBaseline(req, id);
-      return data ? { id, data } : null;
+  const loaded = await Promise.all([...ids]
+    .filter((id) => BASELINE_ID_RE.test(id))
+    .map(async (id) => {
+      const found = await loadBaseline(id, { allowUpstream: false });
+      return found ? { id, data: found.data } : null;
     }));
-    return loaded.filter((x): x is { id: string; data: Baseline } => x !== null);
-  } catch { return []; }
+  return loaded.filter((x): x is { id: string; data: Baseline } => x !== null);
 }
 
