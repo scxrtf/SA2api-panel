@@ -17,6 +17,15 @@ function fmtAgo(iso: string): string {
   return Math.floor(s / 86400) + "d 前";
 }
 
+// fmtMsShort 延迟缩写：999ms / 1.2s / 6s（对齐 Go formatLatency）。
+function fmtMsShort(ms: number | null | undefined): string {
+  const v = Number(ms ?? 0);
+  if (!v || v <= 0) return "—";
+  if (v < 1000) return Math.round(v) + "ms";
+  if (v < 10000) return (v / 1000).toFixed(1).replace(/\.0$/, "") + "s";
+  return Math.round(v / 1000) + "s";
+}
+
 function acctTags(a: StatusRow) {
   const tags: { text: string; cls: string }[] = [];
   if (a.disabled) tags.push({ text: "禁用" + (a.disabled_reason ? ":" + a.disabled_reason : ""), cls: "err" });
@@ -167,10 +176,16 @@ export function AccountsView({ ov, flash, onRefresh }: {
                     <span style={{ color: (a.err_total ?? 0) > 0 ? "var(--err)" : undefined }}>{fmtNum(a.err_total ?? 0)}</span>
                   </td>
                   <td className="mono">{a.in_flight > 0 ? a.in_flight : <span className="dim">0</span>}</td>
+                  {/* 用量四段（Go app.js:430 usage-line 同口径）：次数 · 总 token · 均延迟 · 均速率 */}
                   <td className="mono" title={`累计 ${a.token_usage?.request_count ?? 0} 次 / ${fmtNum(a.token_usage?.total_tokens ?? 0)} tok · 均延迟 ${a.token_usage?.last_latency_ms ? a.token_usage.last_latency_ms + "ms" : "—"} · 均速率 ${a.token_usage?.last_tokens_per_second ? a.token_usage.last_tokens_per_second.toFixed(1) + " tok/s" : "—"}`}>
-                    {(a.token_usage?.request_count ?? 0) > 0
-                      ? <>{a.token_usage!.request_count}<span className="dim"> 次 / </span>{fmtNum(a.token_usage!.total_tokens)}<span className="dim"> tok</span></>
-                      : <span className="dim">—</span>}
+                    {(a.token_usage?.request_count ?? 0) > 0 ? (
+                      <span style={{ display: "inline-flex", gap: 8, whiteSpace: "nowrap" }}>
+                        <span><b>{fmtNum(a.token_usage!.request_count)}</b><span className="dim" style={{ fontSize: 10 }}>次</span></span>
+                        <span><b>{fmtNum(a.token_usage!.total_tokens)}</b><span className="dim" style={{ fontSize: 10 }}>tok</span></span>
+                        <span><b>{fmtMsShort(a.token_usage!.last_latency_ms)}</b></span>
+                        <span><b>{a.token_usage!.last_tokens_per_second > 0 ? a.token_usage!.last_tokens_per_second.toFixed(1) : "—"}</b><span className="dim" style={{ fontSize: 10 }}>tok/s</span></span>
+                      </span>
+                    ) : <span className="dim">—</span>}
                   </td>
                   <td className="mono dim">{a.last_success ? fmtAgo(a.last_success) : "—"}</td>
                   <td>
