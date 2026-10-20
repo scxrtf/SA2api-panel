@@ -7,6 +7,7 @@
 //
 // 每次 pick 把候选行读入内存后纯计算（权重/分层/抽签），写回只落持久字段。
 import { prisma } from "./db";
+import { modelLockViewPure, type ModelLockRow, type LockViewEntry } from "./modelview";
 import type { AppConfig } from "./config";
 import type { Account, AccountState, ModelCooldown, ModelCost } from "@prisma/client";
 import {
@@ -936,6 +937,33 @@ export async function statusList(): Promise<StatusRow[]> {
   return rows;
 }
 
+// ─── 模型锁池视图（移植 Go pool/modelview.go ModelLockView） ─────────────
+
+// modelLockView 汇总当前所有「有未过期模型级冷却」的 (域, 模型)（Go ModelLockView
+// 同口径）。聚合核心在 modelview.ts（纯函数可离线单测），这里只做 ORM 行适配。
+// 无锁时返回 null（前端按空态渲染）。
+export type { ModelLockRow } from "./modelview";
+
+export async function modelLockView(cfg: AppConfig): Promise<ModelLockRow[] | null> {
+  const now = Date.now();
+  const all = await loadEntries();
+  const entries: LockViewEntry[] = all.map((e) => ({
+    uid: e.account.uid,
+    realm: e.account.realm,
+    disabled: e.state.disabled,
+    paused: e.state.paused,
+    accountUnavailableUntil: Math.max(
+      Number(e.state.cooldownUntil), Number(e.state.breakerUntil), Number(e.state.degradeUntil),
+    ),
+    modelCooldowns: e.cooldowns.map((c) => ({
+      model: c.model, until: Number(c.until), reason: c.reason,
+    })),
+  }));
+  return modelLockViewPure(entries, now, (uid) => {
+    const e = all.find((x) => x.account.uid === uid);
+    return e ? inFlightFull(e, cfg) : false;
+  });
+}
 // Counts 池计数（面板概况）。
 export async function counts(): Promise<{
   total: number; healthy: number; cooling: number; disabled: number; paused: number;

@@ -17,7 +17,21 @@ export interface Overview {
   version: string; uptime_sec: number; auth_required: boolean;
   total: number; healthy: number; cooling: number; disabled: number; paused: number;
   sticky_sessions: number; accounts: StatusRow[];
+  // 模型锁池（Go ModelLockRow）：服务端聚合的 (域,模型) 限流清单，无锁为 null。
+  model_locks?: ModelLockRow[] | null;
   gateway: { enabled: boolean; providers: number; keys: number };
+}
+// ModelLockRow 对齐 Go pool.ModelLockRow（服务端 modelLockView 输出）。
+export interface ModelLockRow {
+  model: string;
+  realm: string;
+  total: number;
+  servable: number;
+  locked: number;
+  state: "locked" | "starved" | "partial";
+  unlock_at: string;
+  fully_unlock_at: string;
+  reason?: string;
 }
 export type Flash = (k: "ok" | "err", t: string) => void;
 

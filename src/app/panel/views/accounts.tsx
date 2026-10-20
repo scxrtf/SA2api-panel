@@ -44,18 +44,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
     catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   }, [flash]);
 
-  const modelLocks = React.useMemo(() => {
-    const m = new Map<string, { realm: string; locked: string[]; until: number; reason: string }>();
-    for (const a of ov.accounts) {
-      for (const rl of a.rate_limited_models) {
-        const cur = m.get(rl.model) ?? { realm: a.realm, locked: [], until: 0, reason: rl.reason };
-        cur.locked.push(a.nickname || a.uid);
-        if (rl.until > cur.until) cur.until = rl.until;
-        m.set(rl.model, cur);
-      }
-    }
-    return [...m.entries()];
-  }, [ov.accounts]);
+
 
   const realms = React.useMemo(() => [...new Set(ov.accounts.map((a) => a.realm))], [ov.accounts]);
 
@@ -81,7 +70,15 @@ export function AccountsView({ ov, flash, onRefresh }: {
         <CtrlMetric label="冷却中" value={ov.cooling} unit="COOL" color="var(--warn)" />
         <CtrlMetric label="已禁用" value={ov.disabled} unit="OFF" color="var(--err)" />
         <CtrlMetric label="已暂停选号" value={ov.paused} unit="HOLD" color="var(--warn)" />
-        <CtrlMetric label="粘性会话" value={ov.sticky_sessions} unit="SESS" />
+        <CtrlMetric
+          label="积分剩余 / 总额"
+          value={(() => {
+            const rem = ov.accounts.reduce((n, a) => n + (a.credits || 0), 0);
+            const tot = ov.accounts.reduce((n, a) => n + (a.credits_total || 0), 0);
+            return tot > 0 ? fmtNum(rem) + " / " + fmtNum(tot) : fmtNum(rem);
+          })()}
+          unit="PTS"
+        />        <CtrlMetric label="粘性会话" value={ov.sticky_sessions} unit="SESS" />
       </div>
 
       {/* CloseRouter ControlAction 批量操作区：CODE 徽章 + → */}
@@ -168,26 +165,52 @@ export function AccountsView({ ov, flash, onRefresh }: {
         </div>
       </Box>
 
-      {modelLocks.length > 0 && (
-        <Box title="模型锁池" hint="哪些模型不能用、还要锁多久">
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr><th>模型</th><th>域</th><th>锁定账号</th><th>最早解锁</th><th>原因</th></tr></thead>
-              <tbody>
-                {modelLocks.map(([model, v]) => (
-                  <tr key={model}>
-                    <td className="mono">{model}</td>
-                    <td>{v.realm}</td>
-                    <td>{v.locked.join("、")}</td>
-                    <td className="dim">{fmtTime(v.until)}</td>
-                    <td className="dim">{v.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Box>
-      )}
+      {/* 模型锁池（Go renderModelLocks 同口径）：服务端 model_locks 已按
+          整池不可用 → 没号可用 → 部分限流 排好序，这里只做展示。 */}
+      {ov.model_locks != null && ov.model_locks.length > 0 && (() => {
+        const STATE: Record<string, [string, string]> = {
+          locked: ["err", "整池不可用"],
+          starved: ["warn", "没号可用"],
+          partial: ["warn", "部分限流"],
+        };
+        const left = (iso: string) => {
+          const ms = Date.parse(iso);
+          return Number.isFinite(ms) ? fmtDur(Math.max(0, Math.round((ms - Date.now()) / 1000))) : "—";
+        };
+        const bad = ov.model_locks!.filter((r) => r.state === "locked" || r.state === "starved").length;
+        return (
+          <Box title="模型锁池" hint="哪些模型不能用、还要锁多久"
+            extra={<span className="dim" style={{ fontSize: 12 }}>
+              {bad ? bad + " 个模型整池不可用" : ov.model_locks!.length + " 个模型部分限流"}
+            </span>}>
+            <div className="tbl-wrap">
+              <table className="tbl">
+                <thead><tr>
+                  <th>模型</th><th>域</th><th>状态</th><th>可选/总数</th><th>锁定</th>
+                  <th>最早解锁</th><th>全部解锁</th><th>原因</th>
+                </tr></thead>
+                <tbody>
+                  {ov.model_locks!.map((r) => {
+                    const st = STATE[r.state] ?? ["dim", r.state];
+                    return (
+                      <tr key={r.realm + "/" + r.model}>
+                        <td className="mono">{r.model}</td>
+                        <td>{r.realm === "global" ? "国际版" : "国内版"}</td>
+                        <td><span className={"tag " + st[0]}>{st[1]}</span></td>
+                        <td className="mono">{r.servable} / {r.total}</td>
+                        <td className="mono">{r.locked}</td>
+                        <td className="dim">{left(r.unlock_at || r.fully_unlock_at)}</td>
+                        <td className="dim">{left(r.fully_unlock_at)}</td>
+                        <td className="dim" style={{ maxWidth: 260 }}>{r.reason || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Box>
+        );
+      })()}
 
       {addOpen && <AddAccountModal onClose={() => setAddOpen(false)}
         onDone={async () => { setAddOpen(false); await onRefresh(); }} />}
