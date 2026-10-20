@@ -1,7 +1,7 @@
 // GET/POST /api/panel/keys — 网关密钥环管理（列表只回掩码；POST 新建返回原文一次）。
 import { randomBytes } from "crypto";
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
-import { mask } from "@/lib/auth-guard";
+import { mask, parseProviderAccess } from "@/lib/auth-guard";
 import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -12,7 +12,12 @@ export async function GET(req: Request) {
   if (auth) return auth;
   const rows = await prisma.apiKey.findMany({ orderBy: { createdAt: "asc" } });
   return ok({
-    keys: rows.map((r) => ({ name: r.name, key_mask: mask(r.key), created_at: r.createdAt })),
+    keys: rows.map((r) => ({
+      name: r.name,
+      key_mask: mask(r.key),
+      providers: parseProviderAccess(r.providers),
+      created_at: r.createdAt,
+    })),
   });
 }
 

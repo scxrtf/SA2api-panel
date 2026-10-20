@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { req, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
-interface KeyRow { name: string; key_mask: string; created_at: string }
+interface KeyRow { name: string; key_mask: string; providers: string[]; created_at: string }
 interface ProviderRow { name: string; base_url: string; key_mask: string; created_at: string }
 
 export function GatewayView({ flash }: { flash: Flash }) {
@@ -20,10 +20,19 @@ function KeysBox({ flash }: { flash: Flash }) {
   const [keys, setKeys] = useState<KeyRow[] | null>(null);
   const [name, setName] = useState("");
   const [created, setCreated] = useState<{ name: string; key: string } | null>(null);
+  // 可授权的供应商名列表（来自「聚合供应商」）。
+  const [providers, setProviders] = useState<string[]>([]);
+  // 授权编辑器：all = 全部供应商；picked = 勾选的白名单；password = 超级密码。
+  const [authEditor, setAuthEditor] = useState<{
+    name: string; all: boolean; picked: string[]; password: string;
+  } | null>(null);
 
   const load = useCallback(() => {
     req<{ keys: KeyRow[] }>("keys").then((r) => setKeys(r.keys))
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+    req<{ providers: { name: string }[] }>("providers")
+      .then((r) => setProviders(r.providers.map((p) => p.name)))
+      .catch(() => undefined);
   }, [flash]);
   useEffect(load, [load]);
   useAutoRefresh(load, 30_000);
@@ -41,9 +50,47 @@ function KeysBox({ flash }: { flash: Flash }) {
     try { await req("keys/" + encodeURIComponent(n), { method: "DELETE" }); load(); flash("ok", "密钥已吊销"); }
     catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   };
+  const openAuth = (k: KeyRow) => {
+    setAuthEditor({
+      name: k.name,
+      all: k.providers.includes("*"),
+      picked: k.providers.filter((p) => p !== "*"),
+      password: "",
+    });
+  };
+  const toggleAuthProvider = (n: string) => {
+    setAuthEditor((cur) => {
+      if (!cur) return cur;
+      const picked = cur.picked.includes(n)
+        ? cur.picked.filter((x) => x !== n)
+        : [...cur.picked, n];
+      return { ...cur, picked };
+    });
+  };
+  const saveAuth = async () => {
+    if (!authEditor) return;
+    try {
+      await req("keys/" + encodeURIComponent(authEditor.name), {
+        method: "PATCH",
+        body: {
+          super_password: authEditor.password,
+          providers: authEditor.all ? ["*"] : authEditor.picked,
+        },
+      });
+      setAuthEditor(null);
+      load();
+      flash("ok", "供应商授权已更新");
+    } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+  };
+  const authLabel = (k: KeyRow) =>
+    k.providers.includes("*")
+      ? "全部供应商"
+      : k.providers.length > 0
+        ? k.providers.join(", ")
+        : "未授权任何供应商";
 
   return (
-    <Box title="网关密钥环" hint="可调用 /api/v1/* 的子密钥，用于分发给他人">
+    <Box title="网关密钥环" hint="可调用 /api/v1/* 的子密钥；供应商模型需单独授权后才可调用">
       <div className="pad">
         {created && (
           <div className="msg ok">新密钥 {created.name}：<span className="mono">{created.key}</span>（仅显示一次，请立即保存）</div>
@@ -55,19 +102,56 @@ function KeysBox({ flash }: { flash: Flash }) {
         </div>
         <div className="tbl-wrap">
           <table className="tbl tbl-gateway">
-            <thead><tr><th>名称</th><th>掩码</th><th>创建时间</th><th></th></tr></thead>
+            <thead><tr><th>名称</th><th>掩码</th><th>供应商授权</th><th>创建时间</th><th></th></tr></thead>
             <tbody>
               {(keys ?? []).map((k) => (
                 <tr key={k.name}>
                   <td>{k.name}</td><td className="mono">{k.key_mask}</td>
+                  <td className={k.providers.length === 0 ? "dim" : undefined}>{authLabel(k)}</td>
                   <td className="dim">{new Date(k.created_at).toLocaleString("zh-CN", { hour12: false })}</td>
-                  <td><button className="btn small danger" onClick={() => remove(k.name)}>删除</button></td>
+                  <td>
+                    <div className="btn-row">
+                      <button className="btn small" onClick={() => openAuth(k)}>授权</button>
+                      <button className="btn small danger" onClick={() => remove(k.name)}>删除</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
-              {(keys ?? []).length === 0 && <tr><td colSpan={4} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无密钥</td></tr>}
+              {(keys ?? []).length === 0 && <tr><td colSpan={5} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无密钥</td></tr>}
             </tbody>
           </table>
         </div>
+        {authEditor && (
+          <div style={{ marginTop: 12, padding: 12, border: "1px solid rgba(128,128,128,.35)", borderRadius: 8 }}>
+            <div style={{ marginBottom: 8 }}>供应商授权：<b>{authEditor.name}</b></div>
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center", marginRight: 16 }}>
+              <input type="checkbox" checked={authEditor.all}
+                onChange={(e) => setAuthEditor({ ...authEditor, all: e.target.checked })} />
+              全部供应商
+            </label>
+            {!authEditor.all && providers.length === 0 && (
+              <span className="dim">暂无可授权供应商，请先在下方添加</span>
+            )}
+            {!authEditor.all && providers.length > 0 && (
+              <div className="probe-models" style={{ marginTop: 8 }}>
+                {providers.map((p) => (
+                  <label key={p}>
+                    <input type="checkbox" checked={authEditor.picked.includes(p)}
+                      onChange={() => toggleAuthProvider(p)} />
+                    <span title={p}>{p}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="btn-row" style={{ marginTop: 10 }}>
+              <input className="input" type="password" style={{ width: 200 }} placeholder="超级密码"
+                value={authEditor.password}
+                onChange={(e) => setAuthEditor({ ...authEditor, password: e.target.value })} />
+              <button className="btn primary" onClick={saveAuth} disabled={!authEditor.password}>保存授权</button>
+              <button className="btn" onClick={() => setAuthEditor(null)}>取消</button>
+            </div>
+          </div>
+        )}
       </div>
     </Box>
   );

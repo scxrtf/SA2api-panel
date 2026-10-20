@@ -38,7 +38,7 @@ import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./ups
 import { runlog } from "./runlog";
 import * as wafip from "./wafip";
 import { backoffAfter, sleep } from "./backoff";
-import { identifyKeyName } from "./auth-guard";
+import { identifyKeyIdentity, providerAllowed } from "./auth-guard";
 
 type Obj = Record<string, unknown>;
 
@@ -289,7 +289,9 @@ export async function handleChat(opts: {
   let { realm, provider, bare } = resolveModel(rawModel);
   // 使用者归属（Go keyNameFrom）：多 sk-key 模式下命中哪把 key 就记谁的名字；
   // 单 key / 无鉴权 / 无原始请求时为空串。一次性取值，轮转全程复用。
-  const keyName = opts.req ? await identifyKeyName(opts.req) : "";
+  // 同一身份同时携带供应商授权面，供 provider 通道做准入判定。
+  const keyIdentity = opts.req ? await identifyKeyIdentity(opts.req) : null;
+  const keyName = keyIdentity?.name ?? "";
   // 请求时生效积分倍率（Go handler.go:605）：目录成功刷新时缓存于 modelRates 桶。
   const modelRate = currentModelRate(realm, bare);
   // 未注册的 provider 前缀回落 cn 裸名（bareModel 回填原串）。
@@ -302,6 +304,16 @@ export async function handleChat(opts: {
     }
   }
   if (provider !== "") {
+    // 供应商准入：子密钥只放行 providers 白名单内的供应商；主密钥 / 未启用鉴权
+    // unrestricted。身份缺失（无法识别 / DB 异常）按拒绝处理，避免绕过。
+    if (opts.req && !keyIdentity?.unrestricted && !providerAllowed(keyIdentity?.providers ?? "", provider)) {
+      return openAIError(
+        403,
+        "provider_not_authorized",
+        `key 未授权使用供应商 ${provider}`,
+        "请在面板「网关密钥环」中为该 key 勾选对应供应商授权",
+      );
+    }
     const { providerChat } = await import("./provider");
     return providerChat(provider, bare, JSON.stringify(body), stream, keyName);
   }

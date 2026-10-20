@@ -145,10 +145,14 @@ export async function providerChat(
 }
 
 // providerModels 聚合各供应商的 /v1/models 目录（面板/对外 /v1/models 用）。
-export async function providerModels(): Promise<{ id: string; owned_by: string }[]> {
+// allowed 为 null/undefined 时不限制；传入集合时只探测集合内的供应商。
+export async function providerModels(
+  allowed?: ReadonlySet<string> | null,
+): Promise<{ id: string; owned_by: string }[]> {
   const providers = await prisma.provider.findMany();
   const out: { id: string; owned_by: string }[] = [];
   for (const p of providers) {
+    if (allowed && !allowed.has(p.name)) continue;
     try {
       const base = p.baseUrl.replace(/\/+$/, "");
       const headers: Record<string, string> = {};

@@ -9,7 +9,7 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { verifyAny } from "@/lib/auth-guard";
+import { identifyKeyIdentity, providerAllowlist, verifyAny } from "@/lib/auth-guard";
 import { getConfig } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { authShapeOf } from "@/lib/login";
@@ -107,6 +107,10 @@ export async function GET(req: Request): Promise<Response> {
     );
   }
   const cfg = await getConfig();
+  // 供应商模型目录按 key 授权过滤：主线（主密钥 / 未启用鉴权）不限制；
+  // 子密钥只列出已授权供应商；身份缺失按空集合处理（fail closed）。
+  const keyIdentity = await identifyKeyIdentity(req);
+  const providerAllow = providerAllowlist(keyIdentity);
   const data: Record<string, unknown>[] = [];
   const seen = new Set<string>();
 
@@ -152,7 +156,7 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   // 供应商通道：name:model 前缀（远端探测失败 → 该供应商空名单，不阻塞其他）。
-  for (const m of await providerModels()) {
+  for (const m of await providerModels(providerAllow)) {
     if (seen.has(m.id)) continue;
     seen.add(m.id);
     data.push({ id: m.id, object: "model", created: MODEL_CREATED, owned_by: m.owned_by });
