@@ -5,8 +5,11 @@
 #   WB2A_API_KEY  — 面板主密钥（公网必须设置；面板 / /api/v1/* / cron 都靠它鉴权）
 
 [build]
-builder = "NIXPACKS"
-buildCommand = "npm ci && npx prisma generate && npm run build"
+# 用仓库自带 Dockerfile，避免 Nixpacks 在缓存的 node_modules 上执行
+# `npm ci` 触发 EBUSY（rmdir /app/node_modules/.cache），同时保证构建期
+# 一定装上 devDependencies（prisma/typescript/tailwind）。
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 # 启动前先幂等执行迁移（走 DIRECT_URL session pooler；pgbouncer 事务模式不支持
@@ -17,8 +20,3 @@ healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
 # 单容器语义：选号运行态（inFlight/lastUsed）是进程内 Map，不要水平扩多副本。
-
-[env]
-# 钉 Node LTS 大版本（Next 16 需要 >=20.9；nixpacks 默认跟随 package.json engines，
-# 未写 engines 时可能选过旧版本，这里显式钉住避免构建漂移）。
-NIXPACKS_NODE_VERSION = "22"
