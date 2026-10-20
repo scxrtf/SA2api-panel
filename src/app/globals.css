@@ -548,6 +548,17 @@ body {
 .tc-task:last-child { border-bottom: 0; }
 .tc-task .nm { flex: 1; }
 .tc-task .st { font-size: 12px; }
+.tc-task .qmsg { max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-task.running .nm { color: var(--accent); }
+/* 二次扫描：旧列表保留但降透明度，顶部给出明确刷新提示；扫描完成后
+   列表按 scanSeq 重建，即使返回数据完全相同也能看到刷新结果。 */
+.tc-list { transition: opacity .15s ease; }
+.tc-list.is-refreshing { opacity: .5; pointer-events: none; }
+.tc-refreshing {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; font-size: 12.5px; color: var(--fg-dim);
+  border-bottom: 1px dashed var(--border);
+}
 
 /* ─── 连接向导 ───────────────────────────────────────────────── */
 .connect-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
@@ -747,6 +758,20 @@ body {
 .uschart-body .tk-peak { fill: var(--fg); font-size: 11px; font-weight: 700; }
 .uschart-body rect.usbar { transition: opacity .12s; }
 .uschart-body rect.usbar:hover { opacity: .75; }
+.uschart-legend {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 0 12px 8px;
+}
+.uschart-legend button {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+  border-radius: 999px; padding: 2px 9px; font-size: 11px; cursor: pointer;
+  font-family: inherit; line-height: 1.5;
+}
+.uschart-legend button:hover { border-color: var(--fg-dim); }
+.uschart-legend button i { width: 9px; height: 9px; border-radius: 2px; display: block; flex: none; }
+.uschart-legend button .sum { font-family: var(--mono); color: var(--fg-dim); }
+.uschart-legend button.off { opacity: .4; text-decoration: line-through; }
 .us-empty { text-align: center; color: var(--fg-dim); padding: 34px 10px; font-size: 13px; }
 .us-mix {
   display: flex; height: 3px; border-radius: 2px; overflow: hidden;
@@ -1084,4 +1109,108 @@ button, a, input, select, textarea {
 /* 减少动效偏好 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* ═══ 移动端二次适配：机柜 / 图表 / 宽表 / 顶栏 ═══════════════
+   放在文件末尾，确保覆盖上面的 720 / 900 窄屏块。 */
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.modal { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.logview, .probe-models { overscroll-behavior: contain; }
+
+@media (max-width: 900px) {
+  /* 抽屉顶部避开刘海/状态栏 */
+  .sidenav {
+    padding: calc(10px + env(safe-area-inset-top)) 12px calc(20px + env(safe-area-inset-bottom));
+  }
+  .sidenav ul { -webkit-overflow-scrolling: touch; }
+  .model-picker-pop { min-width: 0; }
+}
+
+@media (max-width: 640px) {
+  /* 机柜：3×3 → 单行横向滚动，保留 CloseRouter 识别特征 */
+  .rack { padding: 10px 0 0; }
+  .rack-units {
+    display: flex; grid-template-columns: none; gap: 6px;
+    overflow-x: auto; scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+    padding-bottom: 4px; scrollbar-width: none;
+  }
+  .rack-units::-webkit-scrollbar { display: none; }
+  .rack-unit {
+    flex: 0 0 82px; min-width: 82px; scroll-snap-align: center; padding: 8px 6px;
+  }
+  .rack-link { display: none; }
+
+  /* 用量时序图：固定读图宽度，横向滑动看刻度 */
+  .uschart-body {
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  .uschart-body svg { width: 720px; max-width: none; height: auto; }
+  .uschart-legend { padding: 0 10px 8px; gap: 4px; }
+  .uschart-legend button { font-size: 10.5px; padding: 2px 7px; }
+  .uschart-legend button span:not(.sum) {
+    max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* 宽表：保留可读列宽，交给 .tbl-wrap 横向滚动 */
+  .tbl.tbl-logs { min-width: 1100px; }
+  .tbl.tbl-models { min-width: 980px; }
+  .tbl.tbl-accounts { min-width: 820px; }
+  .tbl.tbl-locks { min-width: 640px; }
+  .tbl.tbl-usage { min-width: 760px; }
+  .tbl.tbl-scan { min-width: 720px; }
+  .tbl.tbl-catalog { min-width: 560px; }
+  .tbl.tbl-gateway { min-width: 520px; }
+  .tbl.tbl-packages { min-width: 520px; }
+  .tbl.tbl-match { min-width: 420px; }
+
+  /* 账号限流明细不再撑宽表格 */
+  .rate-limits { min-width: 0; }
+  .rate-limit { min-width: 0; overflow-wrap: anywhere; }
+  .rate-limit b { word-break: break-all; }
+
+  /* 任务中心行：长名称换行，不挤压状态 */
+  .tc-task { min-width: 0; flex-wrap: wrap; row-gap: 4px; }
+  .tc-task .nm { min-width: 0; flex: 1 1 140px; overflow-wrap: anywhere; }
+  .tc-task .qmsg { max-width: 100%; flex: 1 1 100%; }
+  .tc-acct { padding: 12px 14px; }
+  .tc-acct h4 .mono { max-width: 100%; overflow-wrap: anywhere; }
+
+  /* 筛选行换行时留出间距 */
+  .box > header { row-gap: 8px; }
+
+  /* 接入引导：标签/地址换行，不截断主机和路径 */
+  .copy-label { min-width: 100%; }
+  .copy-label + code {
+    white-space: normal; word-break: break-all;
+    overflow: visible; text-overflow: clip;
+  }
+  .url-line { flex-wrap: wrap; }
+  .url-line code {
+    flex: 1 1 100%; white-space: normal; overflow: visible;
+    text-overflow: clip; word-break: break-all;
+  }
+  .url-line > .btn { margin-left: auto; }
+  .connect-verify code,
+  .connect-step pre,
+  .connect-card pre { overflow-wrap: anywhere; }
+  .baseline-save-line .input { flex: 1 1 100%; max-width: none; min-width: 0; }
+  .connect-catalog {
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .modal { max-height: calc(100dvh - env(safe-area-inset-top) - 16px); }
+}
+
+/* 375px：顶栏只留页码/页面名、刷新和菜单 */
+@media (max-width: 480px) {
+  .topbar .tb-meta .meta,
+  .topbar .tb-dot-sep { display: none; }
+  .tb-meta { gap: 6px 8px; }
+  .tb-title { font-size: 18px; }
 }

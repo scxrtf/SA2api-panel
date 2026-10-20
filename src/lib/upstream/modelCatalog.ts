@@ -44,6 +44,8 @@ export interface ModelInfoFull {
   promoCredits?: string; // 折扣后倍率原文（如 "0x" / "0.50x"）
   promoLabel?: string; // 徽章文案（限时免费 / 夜间折扣 / 错峰使用）
   promoNote?: string; // hover 说明原文
+  promoWindow?: string; // 生效时间窗摘要（如 "每日 23:00–7:50 · 至 11-01"）
+  promoNextWindow?: string; // 未生效优惠的时间窗摘要（即将开始/未开始时段）
 }
 
 type Obj = Record<string, unknown>;
@@ -592,29 +594,73 @@ export function promoActive(p: V3ModelPromotion, now: Date): boolean {
   return true;
 }
 
+// promoWindowText 把 schedule 浓缩成一行时间窗摘要：daily 时段（Asia/Shanghai）
+// + validUntil 截止；跨午夜窗口原样显示 "23:00–7:50"。坏值跳过。
+// 无 discount 的「标签型」促销（如错峰/白天原价提示）不输出 daily 窗口——
+// 其时段只是标签展示条件，不是价格变化，放出来会误导。
+export function promoWindowText(p: V3ModelPromotion): string | undefined {
+  const sc = p.schedule;
+  if (!sc) return undefined;
+  const parts: string[] = [];
+  const hasDiscount = !!p.discount;
+  const wins = hasDiscount
+    ? (sc.daily ?? [])
+        .map((w) => [promoClock(w.start ?? ""), promoClock(w.end ?? "")] as const)
+        .filter(([st, ed]) => st >= 0 && ed >= 0)
+        .filter(([st, ed]) => !(st === 0 && ed >= 23 * 60 + 59)) // 全天窗不显示
+        .map(([st, ed]) => `${String(Math.floor(st / 60)).padStart(2, "0")}:${String(st % 60).padStart(2, "0")}–${String(Math.floor(ed / 60)).padStart(2, "0")}:${String(ed % 60).padStart(2, "0")}`)
+    : [];
+  if (wins.length > 0) parts.push(`每日 ${wins.join("、")}`);
+  if (sc.validUntil) {
+    const t = Date.parse(sc.validUntil);
+    if (!Number.isNaN(t)) {
+      const d = new Date(t);
+      parts.push(`至 ${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    }
+  }
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
 // applyModelPromotions 把当前生效的优惠挂到目录条目：同模型多条命中取 priority 最高。
+// 未生效的优惠（不在时段/未开始）挂 promoNextWindow，供前端显示「即将开始」。
 // 无 discount 的条目也挂标签/说明（错峰类），promoFactor 留 undefined。
 export function applyModelPromotions(out: Map<string, ModelInfoFull>, promos: V3ModelPromotion[]): void {
   if (promos.length === 0 || out.size === 0) return;
   const now = new Date();
   const best = new Map<string, { prio: number; p: V3ModelPromotion }>();
+  const next = new Map<string, { prio: number; p: V3ModelPromotion }>();
   for (const p of promos) {
-    if (!promoActive(p, now)) continue;
+    const active = promoActive(p, now);
+    // 已结束（validUntil 已过）的优惠不进入"即将"通道。
+    const sc = p.schedule;
+    const expired = !active && sc?.validUntil && !Number.isNaN(Date.parse(sc.validUntil)) && now.getTime() >= Date.parse(sc.validUntil);
     for (const id of p.modelIds ?? []) {
       if (!out.has(id)) continue; // 目录外模型不挂
       const prio = p.priority ?? 0;
-      const b = best.get(id);
-      if (!b || prio > b.prio) best.set(id, { prio, p });
+      if (active) {
+        const b = best.get(id);
+        if (!b || prio > b.prio) best.set(id, { prio, p });
+      } else if (!expired && p.enabled) {
+        const b = next.get(id);
+        if (!b || prio > b.prio) next.set(id, { prio, p });
+      }
     }
   }
   for (const [id, c] of best) {
     const mi = out.get(id)!;
     if (c.p.badge?.label) mi.promoLabel = c.p.badge.label;
     if (c.p.hover?.textZh) mi.promoNote = c.p.hover.textZh;
+    const win = promoWindowText(c.p);
+    if (win) mi.promoWindow = win;
     if (c.p.discount) {
       mi.promoFactor = c.p.discount.factor;
       mi.promoCredits = c.p.discount.discountedCredits;
     }
+  }
+  for (const [id, c] of next) {
+    if (best.has(id)) continue; // 已挂生效优惠，不重复
+    const win = promoWindowText(c.p);
+    if (win) out.get(id)!.promoNextWindow = win;
   }
 }
 

@@ -453,7 +453,7 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
 
           <Box title="横向比对" hint="同一指纹与全部基准（官方 + 自建）的匹配度，其他基准高出 0.5 个百分点即判可能被替换">
             <div className="tbl-wrap">
-              <table className="tbl">
+              <table className="tbl tbl-match">
                 <thead><tr><th>基准</th><th>匹配度</th><th style={{ width: "42%" }}>占比</th></tr></thead>
                 <tbody>
                   {result.matches.map((m) => (

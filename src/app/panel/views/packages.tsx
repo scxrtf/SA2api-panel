@@ -64,7 +64,7 @@ export function PackagesView({ flash }: { flash: Flash }) {
             {!a.error && a.packages.length === 0 && <div className="dim" style={{ fontSize: 13 }}>无套餐包</div>}
             {a.packages.length > 0 && (
               <div className="tbl-wrap">
-                <table className="tbl">
+                <table className="tbl tbl-packages">
                   <thead><tr><th>套餐</th><th>剩余 / 总量</th><th>已用</th><th>到期</th></tr></thead>
                   <tbody>
                     {(expandAll ? a.packages : a.packages.slice(0, detailLimit)).map((p, i, shown) => {

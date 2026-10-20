@@ -65,7 +65,7 @@ function CopyRow({ label, value, tip, copied, onCopy }: {
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0", flexWrap: "wrap" }}>
-      <span style={{ minWidth: 104, fontSize: 12, color: "var(--fg-dim)" }}>{label}</span>
+      <span className="copy-label" style={{ fontSize: 12, color: "var(--fg-dim)" }}>{label}</span>
       <code
         style={{
           flex: "1 1 180px", minWidth: 0, background: "var(--bg-soft)", padding: "5px 8px",
@@ -385,7 +385,7 @@ Content-Type: application/json
 
         {filteredModels.length > 0 ? (
           <div className="connect-catalog">
-            <table className="tbl">
+            <table className="tbl tbl-catalog">
               <thead>
                 <tr><th>模型 ID</th><th>通道</th><th>能力</th><th>倍率</th><th></th></tr>
               </thead>

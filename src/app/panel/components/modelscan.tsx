@@ -194,7 +194,7 @@ export function ModelScanPanel({ scan, onCancel }: {
             ))}
           </div>
           <div className="tbl-wrap" style={{ maxHeight: 420, overflow: "auto" }}>
-            <table className="tbl">
+            <table className="tbl tbl-scan">
               <thead><tr>
                 <th>账号</th><th>模型</th><th>结果</th><th>HTTP</th><th>上游信息</th><th>时间</th>
               </tr></thead>

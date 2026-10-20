@@ -54,7 +54,7 @@ function KeysBox({ flash }: { flash: Flash }) {
           <button className="btn primary" onClick={create} disabled={!name.trim()}>新建密钥</button>
         </div>
         <div className="tbl-wrap">
-          <table className="tbl">
+          <table className="tbl tbl-gateway">
             <thead><tr><th>名称</th><th>掩码</th><th>创建时间</th><th></th></tr></thead>
             <tbody>
               {(keys ?? []).map((k) => (
@@ -165,7 +165,7 @@ function ProvidersBox({ flash }: { flash: Flash }) {
           </div>
         )}
         <div className="tbl-wrap" style={{ marginTop: 14 }}>
-          <table className="tbl">
+          <table className="tbl tbl-gateway">
             <thead><tr><th>名称</th><th>Base URL</th><th>Key 掩码</th><th></th></tr></thead>
             <tbody>
               {(rows ?? []).map((p) => (

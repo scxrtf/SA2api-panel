@@ -123,7 +123,7 @@ export function LogsView({ flash }: { flash: Flash }) {
         </div>
       ) : (
         <div className="tbl-wrap">
-          <table className="tbl">
+          <table className="tbl tbl-logs">
             {/* 列结构对齐 Go index.html:1253 的请求日志 13 列，另加机器码列（本版采集维度）。 */}
             <thead><tr>
               <th>时间</th><th>结果</th><th>模型</th><th>账号</th><th>来源 IP</th><th>User-Agent</th>

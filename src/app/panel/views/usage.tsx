@@ -331,8 +331,9 @@ export function UsageView({ flash }: { flash: Flash }) {
           <span className="note">峰值 {u.series.length > 0 ? fmtTok(Math.max(...u.series.map((p) => p.total_tokens))) : "—"}</span>
         </>}>
         <UsageChart
+          key={chartDim}
           series={u.series}
-          groups={chartDim === "total" ? undefined : u.series_group?.groups}
+          groups={chartDim === "total" ? undefined : (u.series_group?.dim === chartDim ? u.series_group.groups : undefined)}
           dimLabel={CHART_DIMS.find(([k]) => k === chartDim)?.[1] ?? ""}
         />
       </Box>
@@ -349,7 +350,7 @@ export function UsageView({ flash }: { flash: Flash }) {
         <div className="pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {dimTabs}
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="tbl tbl-usage">
               <thead><tr>
                 <th className="mark" aria-hidden="true"></th>
                 <th>{m.title}</th>
@@ -450,7 +451,7 @@ export function UsageView({ flash }: { flash: Flash }) {
         </div>
       }>
         <div className="tbl-wrap">
-          <table className="tbl">
+          <table className="tbl tbl-usage">
             <thead><tr>
               <th className="mark" aria-hidden="true"></th>
               <th>{creditDim === "model" ? "模型" : creditDim === "key" ? "Key" : "账号"}</th>

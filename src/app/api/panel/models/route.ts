@@ -36,12 +36,15 @@ function panelModelEntry(realm: string, mi: ModelInfoFull): Record<string, unkno
   if (mi.supportsImages) entry["supports_images"] = true;
   if (mi.onlyReasoning) entry["only_reasoning"] = true;
   if (mi.canDisableThinking) entry["can_disable_thinking"] = true;
+  if (mi.reasoningSummary) entry["reasoning_summary"] = mi.reasoningSummary;
   if (mi.promoFactor !== undefined) {
     entry["promo_factor"] = mi.promoFactor;
     entry["promo_credits"] = mi.promoCredits;
   }
   if (mi.promoLabel) entry["promo_label"] = mi.promoLabel;
   if (mi.promoNote) entry["promo_note"] = mi.promoNote;
+  if (mi.promoWindow) entry["promo_window"] = mi.promoWindow;
+  if (mi.promoNextWindow) entry["promo_next_window"] = mi.promoNextWindow;
   entry["context_length"] = contextWindowListing(mi.id, mi.contextWindow);
   const mo = maxOutputTokensListing(mi.id, mi.maxTokens);
   if (mo !== undefined) entry["max_output_tokens"] = mo;

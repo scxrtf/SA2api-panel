@@ -1,6 +1,6 @@
 "use client";
 // 模型与档位视图（对齐 Go view-models）：实时模型目录 + 连通性实测（池/供应商双通道）。
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { req, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
@@ -11,7 +11,16 @@ interface ModelRow {
   supports_tool_call?: boolean;
   supports_images?: boolean;
   supports_reasoning?: boolean;
+  only_reasoning?: boolean;
   can_disable_thinking?: boolean;
+  reasoning_summary?: string;
+  tags?: string[];
+  promo_factor?: number;
+  promo_credits?: string;
+  promo_label?: string;
+  promo_note?: string;
+  promo_window?: string;
+  promo_next_window?: string;
   default_effort?: string;
   supported_efforts?: string[];
   context_length?: number;
@@ -77,18 +86,103 @@ function gradeOf(r: TestResult): { cls: string; text: string } {
   return { cls: "warn", text: "偏慢" };
 }
 
+// rateText 把上游 credits 原文（"x0.69" / "0.50x" / "x0.00"）归一成可读倍率。
+function rateText(v: number | string | undefined): string | null {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v === "number") return v === 0 ? "免费" : `${Math.round(v * 100) / 100}×`;
+  const s = v.trim();
+  const m = s.match(/^x?\s*([0-9]+(?:\.[0-9]+)?)/i);
+  if (!m) return s;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return s;
+  if (n === 0) return "免费";
+  return `${Math.round(n * 100) / 100}×`;
+}
+
+// badgeTags 解析企业目录塞在 tags 里的彩色徽章：badge:标签:#RRGGBB。
+function badgeTags(tags?: string[]): { label: string; color?: string }[] {
+  const out: { label: string; color?: string }[] = [];
+  for (const t of tags ?? []) {
+    if (!t.startsWith("badge:")) continue;
+    const parts = t.split(":");
+    const label = (parts[1] ?? "").trim();
+    const color = (parts[2] ?? "").trim();
+    if (label) out.push({ label, color: /^#[0-9a-f]{6}$/i.test(color) ? color : undefined });
+  }
+  return out;
+}
+
+// promoOf 统一优惠徽标：优先 promo_label，其次企业 tags 里的 badge。
+// 只有标签没有 factor 时也能显示，但不编造折后价。
+function promoOf(m: ModelRow): { label: string; cls: string; color?: string; note?: string } | null {
+  const tagBadge = badgeTags(m.tags)[0];
+  const label = m.promo_label || tagBadge?.label;
+  if (!label) return null;
+  const hasFactor = typeof m.promo_factor === "number";
+  const cls = m.promo_factor === 0 ? "ok" : hasFactor ? "warn" : "info";
+  const note = [m.promo_note, m.promo_window].filter(Boolean).join(" · ") || undefined;
+  return { label, cls, color: tagBadge?.color, note };
+}
+
+// PromoPrice 牌价/生效价：有 factor 才显示折后，factor=0 显示免费。
+function PromoPrice({ m }: { m: ModelRow }) {
+  const base = rateText(m.credits);
+  if (typeof m.promo_factor !== "number") {
+    return base ? <span className="dim">{base}</span> : <span className="dim">—</span>;
+  }
+  if (m.promo_factor === 0) {
+    return (
+      <span title={m.promo_note} style={{ whiteSpace: "nowrap" }}>
+        {base && base !== "免费" && <s className="dim" style={{ marginRight: 5 }}>{base}</s>}
+        <span className="tag ok">免费</span>
+      </span>
+    );
+  }
+  const eff = rateText(m.promo_credits);
+  return (
+    <span title={m.promo_note} style={{ whiteSpace: "nowrap" }}>
+      {base && base !== "免费" && <s className="dim" style={{ marginRight: 5 }}>{base}</s>}
+      {eff ? <span className="tag ok">{eff}</span> : <span className="dim">折扣中</span>}
+    </span>
+  );
+}
+
 // CapBadges 能力徽标：默认模型 / 供应商 / 工具调用 / 视觉 / 思考常开（对齐
 // Go 面板 mdRowHtml：上游目录全字段透出，缺失不显示）。
 function CapBadges({ m }: { m: ModelRow }) {
   const caps: React.ReactNode[] = [];
   if (m.is_default) caps.push(<span key="d" className="tag ok">默认</span>);
   if (m.provider) caps.push(<span key="p" className="tag ok">供应商</span>);
+  const promo = promoOf(m);
+  if (promo) {
+    const style = promo.color
+      ? { color: promo.color, borderColor: promo.color, background: promo.color + "14" }
+      : undefined;
+    caps.push(<span key="promo" className={"tag " + promo.cls} title={promo.note} style={style}>{promo.label}</span>);
+    if (m.promo_window) caps.push(<span key="win" className="dim" style={{ fontSize: 11.5, alignSelf: "center" }}>{m.promo_window}</span>);
+  } else if (m.promo_next_window) {
+    caps.push(<span key="next" className="dim" title="优惠未生效时段" style={{ fontSize: 11.5, alignSelf: "center" }}>⏳ 优惠时段 {m.promo_next_window}</span>);
+  }
   if (m.supports_tool_call) caps.push(<span key="t" className="tag warn">工具</span>);
   if (m.supports_images) caps.push(<span key="v" className="tag warn">视觉</span>);
-  if (m.supports_reasoning && !m.can_disable_thinking) caps.push(<span key="r" className="tag warn">思考常开</span>);
+  if (m.only_reasoning) caps.push(<span key="r" className="tag info">仅思考</span>);
+  else if (m.supports_reasoning && m.can_disable_thinking) caps.push(<span key="r" className="tag ok">可关思考</span>);
+  else if (m.supports_reasoning) caps.push(<span key="r" className="tag warn">思考常开</span>);
   if (caps.length === 0) return null;
   return <div style={{ marginTop: 3, display: "flex", gap: 4, flexWrap: "wrap" }}>{caps}</div>;
 }
+
+// CAP_FILTERS 列表筛选 chip；多选时取交集。
+const CAP_FILTERS: { key: string; label: string; test: (m: ModelRow) => boolean }[] = [
+  { key: "promo", label: "有优惠", test: (m) => promoOf(m) !== null },
+  { key: "free", label: "免费", test: (m) => m.promo_factor === 0 },
+  { key: "vision", label: "视觉", test: (m) => !!m.supports_images },
+  { key: "tool", label: "工具", test: (m) => !!m.supports_tool_call },
+  { key: "reasoning", label: "推理", test: (m) => !!m.supports_reasoning },
+  { key: "only", label: "仅思考", test: (m) => !!m.only_reasoning },
+  { key: "disable", label: "可关思考", test: (m) => !!m.can_disable_thinking },
+  { key: "default", label: "默认", test: (m) => !!m.is_default },
+];
 
 // EffortCell 支持的思考档位（对齐 Go：可关思考补 "off（可关）"；无档位列表时
 // 退化为「固定档 · 默认 X / 不支持思考」文案）。
@@ -96,6 +190,10 @@ function EffortCell({ m }: { m: ModelRow }) {
   const eff = (m.supported_efforts ?? []).slice();
   if (m.can_disable_thinking && eff.length && !eff.includes("off")) eff.push("off（可关）");
   if (eff.length === 0) {
+    // summary=auto 时上游不定义固定档（auto 路由按任务自动匹配），显示「自动」。
+    if (m.reasoning_summary === "auto") {
+      return <span className="tag info">自动</span>;
+    }
     return (
       <span className="dim" style={{ fontSize: 12.5 }}>
         {m.supports_reasoning ? "固定档 · 默认 " + (m.default_effort || "?") : "不支持思考"}
@@ -115,12 +213,11 @@ export function ModelsView({ flash }: { flash: Flash }) {
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [q, setQ] = useState("");
   const [src, setSrc] = useState<"" | "pool" | "provider">("");
+  const [capFilters, setCapFilters] = useState<string[]>([]);
   const [results, setResults] = useState<Record<string, TestResult | "running" | string>>({});
   const [probes, setProbes] = useState<Record<string, ProbeRec>>({});
   const [probing, setProbing] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
-  const gen = useRef(0);
-
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
@@ -179,8 +276,16 @@ export function ModelsView({ flash }: { flash: Flash }) {
   const filtered = (models ?? []).filter((m) => {
     if (src === "pool" && m.provider) return false;
     if (src === "provider" && !m.provider) return false;
-    return q === "" || m.id.toLowerCase().includes(q.toLowerCase()) || (m.vendor ?? "").toLowerCase().includes(q.toLowerCase());
+    for (const k of capFilters) {
+      const f = CAP_FILTERS.find((x) => x.key === k);
+      if (f && !f.test(m)) return false;
+    }
+    const needle = q.trim().toLowerCase();
+    return needle === "" || m.id.toLowerCase().includes(needle) || (m.vendor ?? "").toLowerCase().includes(needle);
   });
+
+  const toggleCap = (k: string) =>
+    setCapFilters((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]));
 
   return (
     <Box title="模型能力"
@@ -203,8 +308,22 @@ export function ModelsView({ flash }: { flash: Flash }) {
       {!models ? (
         <div className="pad dim">实时查询上游中…</div>
       ) : (
-        <div className="tbl-wrap">
-          <table className="tbl">
+        <>
+          <div className="pad" style={{ paddingBottom: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span className="dim" style={{ fontSize: 12 }}>筛选</span>
+            {CAP_FILTERS.map((f) => (
+              <button key={f.key} className={"btn xs" + (capFilters.includes(f.key) ? " primary" : "")}
+                aria-pressed={capFilters.includes(f.key)} onClick={() => toggleCap(f.key)}>{f.label}</button>
+            ))}
+            {capFilters.length > 0 && (
+              <button className="btn xs ghost" onClick={() => setCapFilters([])}>清除</button>
+            )}
+            <span className="dim" style={{ fontSize: 12, marginLeft: "auto" }}>
+              {filtered.length} / {models.length}
+            </span>
+          </div>
+          <div className="tbl-wrap">
+            <table className="tbl tbl-models">
             <thead><tr><th>模型 ID</th><th>名称</th><th>来源</th><th>积分/1k</th><th>默认档</th><th>支持的思考档位</th><th>上下文长度</th><th>最大输出</th><th>实测上限</th><th>实测</th><th style={{ width: 1 }}></th></tr></thead>
             <tbody>
               {filtered.length === 0 && <tr><td colSpan={11} className="dim" style={{ textAlign: "center", padding: 24 }}>无匹配模型</td></tr>}
@@ -218,7 +337,7 @@ export function ModelsView({ flash }: { flash: Flash }) {
                       <td className="mono">{m.id}<CapBadges m={m} /></td>
                       <td title={m.description}>{m.name}</td>
                       <td>{m.provider ? <span className="tag info">{m.vendor}</span> : <span className="tag">池</span>}</td>
-                      <td className="dim">{m.credits === "" || m.credits === undefined ? "-" : m.credits}</td>
+                      <td><PromoPrice m={m} /></td>
                       <td>{m.default_effort ? <span className="tag ok">{m.default_effort}</span> : <span className="dim">—</span>}</td>
                       <td style={{ whiteSpace: "normal" }}><EffortCell m={m} /></td>
                       <td className="mono dim">{m.context_length ? fmtK(m.context_length) : "—"}</td>
@@ -237,7 +356,7 @@ export function ModelsView({ flash }: { flash: Flash }) {
                           </>
                         )}
                       </td>
-                      <td>
+                      <td style={{ whiteSpace: "nowrap" }}>
                         <div className="btn-row" style={{ flexWrap: "nowrap" }}>
                           <button className="btn small" disabled={r === "running"} onClick={() => test(m)}>
                             {r === "running" ? "…" : "实测"}
@@ -269,8 +388,9 @@ export function ModelsView({ flash }: { flash: Flash }) {
                 );
               })}
             </tbody>
-          </table>
-        </div>
+            </table>
+          </div>
+        </>
       )}
     </Box>
   );

@@ -1,0 +1,4450 @@
+{
+  "generatedAt": "2026-10-20T11:13:27.450Z",
+  "realm": "cn",
+  "endpoint": "all",
+  "account": {
+    "uidPrefix": "bf79d5…",
+    "nicknamePresent": true,
+    "realm": "cn",
+    "hasEnterpriseId": false,
+    "hasDomain": true,
+    "hasDeviceToken": false,
+    "credits": "5870",
+    "total": "8352"
+  },
+  "dbAccountCounts": {
+    "realmTotal": 11,
+    "usable": 11
+  },
+  "config": {
+    "endpoint": "GET /v3/config",
+    "url": "https://copilot.tencent.com/v3/config",
+    "http": {
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "elapsedMs": 472,
+      "requestIDPresent": true
+    },
+    "envelope": {
+      "rawLength": 37179,
+      "envelopeKeys": [
+        "code",
+        "msg",
+        "requestId",
+        "data"
+      ],
+      "code": 0,
+      "msg": "OK",
+      "hasRequestId": true,
+      "dataType": "object",
+      "dataKeys": [
+        "_configFlag",
+        "agents",
+        "builtInMarketPlugins",
+        "builtInMarketplaces",
+        "builtInSkillMarketplaces",
+        "commands",
+        "completion",
+        "config",
+        "endpoint",
+        "enterpriseId",
+        "featureToggles",
+        "fillToolCallContentModelWhitelist",
+        "integrations",
+        "links",
+        "modelPromotions",
+        "modelTiers",
+        "models",
+        "productFeatures",
+        "productFeaturesConfig",
+        "requestMaxStepLimit",
+        "telemetry",
+        "tokenUsageThresholds"
+      ]
+    },
+    "counts": {
+      "models": 24,
+      "modelPromotions": 8,
+      "trialBanners": 1
+    },
+    "modelIds": [
+      "auto",
+      "hy4-preview",
+      "hy3",
+      "hy3-x",
+      "step-5-preview",
+      "space-bunny",
+      "deepseek-v4.1-flash",
+      "deepseek-v4-pro",
+      "glm-5.3",
+      "glm-5.3-flash",
+      "glm-5.2",
+      "glm-5.1",
+      "kimi-k3-1",
+      "kimi-k2.8-preview",
+      "minimax-m3",
+      "minimax-m3.1-flash",
+      "mimo-v2.6-pro",
+      "codewise-completions",
+      "codewise-rewrite",
+      "deepseek-v4-flash",
+      "codewise-default-model-v2",
+      "hunyuan-image-alpha",
+      "nes-gf",
+      "codewise-jump"
+    ],
+    "models": [
+      {
+        "descriptionEn": "Balances quality and speed. Automatically selects the best model for each task, with a variable credit multiplier.",
+        "descriptionZh": "平衡效果与速度。自动为每个任务匹配最优模型，积分倍率随之浮动",
+        "disabledMultimodal": false,
+        "id": "auto",
+        "isDefault": true,
+        "maxAllowedSize": 256000,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 32000,
+        "name": "Auto",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "high",
+          "summary": "auto"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            960000
+          ]
+        },
+        "credits": "x0.29",
+        "descriptionEn": "Hunyuan's thinking model with enhanced reasoning capabilities",
+        "descriptionZh": "混元思考模型，具有增强的推理能力",
+        "disabledMultimodal": false,
+        "iconUrl": "https://download.codebuddy.cn/codebuddy/ide/model-icons/model-hunyuan-color.svg",
+        "iconUrl_en": "https://download.codebuddy.ai/codebuddy/ide/model-icons/model-hunyuan-color.svg",
+        "id": "hy4-preview",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000,
+        "name": "Hy4 preview",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "high"
+          ]
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 0.9,
+        "top_p": 1,
+        "vendor": "j"
+      },
+      {
+        "credits": "x0.00",
+        "descriptionEn": "Hunyuan's thinking model with enhanced reasoning capabilities",
+        "descriptionZh": "混元思考模型，具有增强的推理能力",
+        "disabledMultimodal": false,
+        "iconUrl": "https://download.codebuddy.cn/codebuddy/ide/model-icons/model-hunyuan-color.svg",
+        "iconUrl_en": "https://download.codebuddy.ai/codebuddy/ide/model-icons/model-hunyuan-color.svg",
+        "id": "hy3",
+        "maxAllowedSize": 192000,
+        "maxInputTokens": 192000,
+        "maxOutputTokens": 64000,
+        "name": "Hy3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high"
+          ]
+        },
+        "relatedModels": {
+          "lite": "hy3",
+          "reasoning": "hy3"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 0.9,
+        "top_p": 1,
+        "vendor": "j"
+      },
+      {
+        "credits": "x0.05",
+        "descriptionEn": "Hunyuan's thinking model with enhanced reasoning capabilities",
+        "descriptionZh": "混元思考模型，具有增强的推理能力",
+        "disabledMultimodal": false,
+        "iconUrl": "https://download.codebuddy.cn/codebuddy/ide/model-icons/model-hunyuan-color.svg",
+        "iconUrl_en": "https://download.codebuddy.ai/codebuddy/ide/model-icons/model-hunyuan-color.svg",
+        "id": "hy3-x",
+        "maxAllowedSize": 192000,
+        "maxInputTokens": 192000,
+        "maxOutputTokens": 64000,
+        "name": "Hy3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high"
+          ]
+        },
+        "relatedModels": {
+          "lite": "hy3-x",
+          "reasoning": "hy3-x"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 0.9,
+        "top_p": 1,
+        "vendor": "j"
+      },
+      {
+        "credits": "x0.43",
+        "descriptionEn": "StepFun's flagship model, built for agents that do real work.",
+        "descriptionZh": "阶跃 StepFun 面向真实任务的新一代旗舰基模",
+        "iconUrl": "https://download.codebuddy.cn/codebuddy/ide/model-icons/stepfun-favicon.svg",
+        "iconUrl_en": "https://download.codebuddy.ai/codebuddy/ide/model-icons/stepfun-favicon.svg",
+        "id": "step-5-preview",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000,
+        "name": "Step-5-Preview",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "medium",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.08",
+        "descriptionEn": "Blazing-fast, anonymous model with strong coding skills and native multimodal input.",
+        "descriptionZh": "推理速度极快，编码能力强劲，并支持原生多模态输入的匿名大模型",
+        "id": "space-bunny",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "name": "Space-Bunny",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "max",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.11",
+        "descriptionEn": "DeepSeek flagship model, supporting 1M context window, native multimodal model",
+        "descriptionZh": "已更新至 V4.1-Flash-1017最新版，支持1M上下文窗口，原生多模态",
+        "id": "deepseek-v4.1-flash",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 393216,
+        "name": "Deepseek-V4.1-Flash",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": true,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        },
+        "relatedModels": {
+          "lite": "deepseek-v4.1-flash",
+          "reasoning": "deepseek-v4.1-flash"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.51",
+        "descriptionEn": "DeepSeek flagship model, supporting 1M context window",
+        "descriptionZh": "DeepSeek 旗舰模型，支持 1M 上下文窗口",
+        "id": "deepseek-v4-pro",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 393216,
+        "name": "Deepseek-V4-Pro",
+        "onlyReasoning": false,
+        "reasoning": {
+          "canDisableThinking": true,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "xhigh"
+          ]
+        },
+        "relatedModels": {
+          "lite": "deepseek-v4-flash",
+          "reasoning": "deepseek-v4-pro"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.69",
+        "descriptionEn": "Flagship model, excelling at complex software engineering and long-horizon agent tasks.",
+        "descriptionZh": "旗舰模型，擅长复杂软件工程与长程 Agent 任务",
+        "id": "glm-5.3",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 131072,
+        "name": "GLM-5.3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": true,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        },
+        "relatedModels": {
+          "lite": "glm-5.3",
+          "reasoning": "glm-5.3"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.08",
+        "descriptionEn": "Native multimodal model, excelling at visual understanding and professional tasks.",
+        "descriptionZh": "原生多模态模型，擅长视觉理解与专业任务",
+        "id": "glm-5.3-flash",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 131072,
+        "name": "GLM-5.3-Flash",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": true,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        },
+        "relatedModels": {
+          "lite": "glm-5.3-flash",
+          "reasoning": "glm-5.3-flash"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.79",
+        "descriptionEn": "1M context, built for long-horizon tasks.",
+        "descriptionZh": "1M 上下文，擅长长程任务",
+        "id": "glm-5.2",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 131072,
+        "name": "GLM-5.2",
+        "onlyReasoning": false,
+        "reasoning": {
+          "canDisableThinking": true,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "high",
+            "xhigh"
+          ]
+        },
+        "relatedModels": {
+          "lite": "glm-5.2",
+          "reasoning": "glm-5.2"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "credits": "x0.79",
+        "descriptionEn": "Great for daily use",
+        "descriptionZh": "能力均衡，适合日常使用",
+        "id": "glm-5.1",
+        "maxAllowedSize": 200000,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 48000,
+        "name": "GLM-5.1",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "glm-5.1",
+          "reasoning": "glm-5.1"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "credits": "x1.62",
+        "descriptionEn": "Excels at complex, long-horizon autonomous tasks, with standout front-end skills and strong knowledge work and scientific reasoning",
+        "descriptionZh": "擅长处理复杂的长程自主任务，前端开发能力突出，同时在知识工作与科研推理上表现出色。",
+        "id": "kimi-k3-1",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1048576,
+        "name": "Kimi-K3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "kimi-k3-1",
+          "reasoning": "kimi-k3-1"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.77",
+        "descriptionEn": "Excels at complex, long-horizon autonomous tasks, with standout front-end skills and strong knowledge work and scientific reasoning",
+        "descriptionZh": "擅长处理复杂的长程自主任务，前端开发能力突出，同时在知识工作与科研推理上表现出色。",
+        "id": "kimi-k2.8-preview",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 131072,
+        "name": "Kimi-K2.8-Preview",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": true,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "relatedModels": {
+          "builtin-lite": "wb-lite",
+          "lite": "kimi-k2.8-preview",
+          "reasoning": "kimi-k2.8-preview"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            512000
+          ]
+        },
+        "credits": "x0.25",
+        "descriptionEn": "Native multimodal model for coding and agents tasks",
+        "descriptionZh": "原生多模态，擅长代码、智能体任务",
+        "disabledMultimodal": false,
+        "id": "minimax-m3",
+        "maxAllowedSize": 512000,
+        "maxInputTokens": 512000,
+        "maxOutputTokens": 524288,
+        "name": "MiniMax-M3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "minimax-m3",
+          "reasoning": "minimax-m3"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.08",
+        "descriptionEn": "Natively multimodal, strong at Office, agentic, and coding tasks, with excellent inference speed.",
+        "descriptionZh": "原生多模态，擅长office、agentic、编程任务，推理速度优异",
+        "id": "minimax-m3.1-flash",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "name": "MiniMax-M3.1-Flash",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "max",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.18",
+        "descriptionEn": "Flagship reasoning model for professional, long-horizon, and complex workflows, with advanced research and cybersecurity capabilities.",
+        "descriptionZh": "旗舰推理模型，面向专业、长程、复杂工作流，并兼顾科学研究、网络安全等高阶能力",
+        "iconUrl": "https://download.codebuddy.cn/codebuddy/ide/model-icons/ook.png",
+        "iconUrl_en": "https://download.codebuddy.ai/codebuddy/ide/model-icons/ook.png",
+        "id": "mimo-v2.6-pro",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "name": "Xiaomi MiMo-V2.6-Pro",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "high",
+          "summary": "auto"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "vendor": "e"
+      },
+      {
+        "descriptionEn": "Specialized model for intelligent code completion and suggestions",
+        "descriptionZh": "专门用于智能代码补全和建议的模型",
+        "id": "codewise-completions",
+        "maxOutputTokens": 256,
+        "name": "codewise-completions",
+        "supportsExtra": true,
+        "vendor": "e"
+      },
+      {
+        "descriptionEn": "Specialized model for code refactoring and rewriting tasks",
+        "descriptionZh": "专门用于代码重构和重写任务的模型",
+        "id": "codewise-rewrite",
+        "maxOutputTokens": 256,
+        "name": "codewise-rewrite",
+        "supportsExtra": true,
+        "vendor": "tencent"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 200000,
+          "supportedLengths": [
+            200000,
+            1000000
+          ]
+        },
+        "credits": "x0.17",
+        "descriptionEn": "DeepSeek flagship model, supporting 1M context window",
+        "descriptionZh": "DeepSeek 旗舰模型，支持 1M 上下文窗口",
+        "id": "deepseek-v4-flash",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 50000,
+        "name": "Deepseek-V4-Flash",
+        "onlyReasoning": false,
+        "reasoning": {
+          "canDisableThinking": true,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "xhigh"
+          ]
+        },
+        "relatedModels": {
+          "lite": "deepseek-v4-flash",
+          "reasoning": "deepseek-v4-pro"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "descriptionEn": "Excellent coding model, great for daily use",
+        "descriptionZh": "优秀的编码模型，适合日常使用",
+        "disabledMultimodal": false,
+        "id": "codewise-default-model-v2",
+        "maxAllowedSize": 128000,
+        "maxInputTokens": 96000,
+        "maxOutputTokens": 32000,
+        "name": "Default",
+        "supportsImages": true,
+        "supportsToolCall": true,
+        "vendor": "f"
+      },
+      {
+        "credits": "x5.00",
+        "id": "hunyuan-image-alpha",
+        "name": "Hunyuan Image Alpha",
+        "tags": [
+          "text-to-image"
+        ]
+      },
+      {
+        "descriptionEn": "Lightweight model for quick responses",
+        "descriptionZh": "用于快速响应的轻量级模型",
+        "id": "nes-gf",
+        "maxOutputTokens": 256,
+        "name": "nes-gf",
+        "supportsExtra": true,
+        "vendor": "tencent"
+      },
+      {
+        "descriptionEn": "Model optimized for code navigation and jump-to-definition tasks",
+        "descriptionZh": "针对代码导航和跳转定义任务优化的模型",
+        "id": "codewise-jump",
+        "maxOutputTokens": 256,
+        "name": "codewise-jump",
+        "supportsExtra": true,
+        "vendor": "tencent"
+      }
+    ],
+    "modelFieldStats": [
+      {
+        "path": "contextWindow",
+        "present": 12,
+        "missing": 12,
+        "types": {
+          "object": 12
+        },
+        "examples": [
+          {
+            "defaultLength": 300000,
+            "supportedLengths": [
+              300000,
+              600000,
+              960000
+            ]
+          },
+          {
+            "defaultLength": 300000,
+            "supportedLengths": [
+              300000,
+              600000,
+              1000000
+            ]
+          },
+          {
+            "defaultLength": 300000,
+            "supportedLengths": [
+              300000,
+              512000
+            ]
+          }
+        ]
+      },
+      {
+        "path": "credits",
+        "present": 18,
+        "missing": 6,
+        "types": {
+          "string": 18
+        },
+        "examples": [
+          "x0.29",
+          "x0.00",
+          "x0.05"
+        ]
+      },
+      {
+        "path": "descriptionEn",
+        "present": 23,
+        "missing": 1,
+        "types": {
+          "string": 23
+        },
+        "examples": [
+          "Balances quality and speed. Automatically selects the best model for each task, with a variable credit multiplier.",
+          "Hunyuan's thinking model with enhanced reasoning capabilities",
+          "StepFun's flagship model, built for agents that do real work."
+        ]
+      },
+      {
+        "path": "descriptionZh",
+        "present": 23,
+        "missing": 1,
+        "types": {
+          "string": 23
+        },
+        "examples": [
+          "平衡效果与速度。自动为每个任务匹配最优模型，积分倍率随之浮动",
+          "混元思考模型，具有增强的推理能力",
+          "阶跃 StepFun 面向真实任务的新一代旗舰基模"
+        ]
+      },
+      {
+        "path": "disabledMultimodal",
+        "present": 6,
+        "missing": 18,
+        "types": {
+          "boolean": 6
+        },
+        "examples": [
+          false
+        ]
+      },
+      {
+        "path": "iconUrl",
+        "present": 5,
+        "missing": 19,
+        "types": {
+          "string": 5
+        },
+        "examples": [
+          "https://download.codebuddy.cn/codebuddy/ide/model-icons/model-hunyuan-color.svg",
+          "https://download.codebuddy.cn/codebuddy/ide/model-icons/stepfun-favicon.svg",
+          "https://download.codebuddy.cn/codebuddy/ide/model-icons/ook.png"
+        ]
+      },
+      {
+        "path": "iconUrl_en",
+        "present": 5,
+        "missing": 19,
+        "types": {
+          "string": 5
+        },
+        "examples": [
+          "https://download.codebuddy.ai/codebuddy/ide/model-icons/model-hunyuan-color.svg",
+          "https://download.codebuddy.ai/codebuddy/ide/model-icons/stepfun-favicon.svg",
+          "https://download.codebuddy.ai/codebuddy/ide/model-icons/ook.png"
+        ]
+      },
+      {
+        "path": "id",
+        "present": 24,
+        "missing": 0,
+        "types": {
+          "string": 24
+        },
+        "examples": [
+          "auto",
+          "hy4-preview",
+          "hy3"
+        ]
+      },
+      {
+        "path": "isDefault",
+        "present": 1,
+        "missing": 23,
+        "types": {
+          "boolean": 1
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "maxAllowedSize",
+        "present": 19,
+        "missing": 5,
+        "types": {
+          "number": 19
+        },
+        "examples": [
+          256000,
+          1000000,
+          192000
+        ]
+      },
+      {
+        "path": "maxInputTokens",
+        "present": 19,
+        "missing": 5,
+        "types": {
+          "number": 19
+        },
+        "examples": [
+          256000,
+          1000000,
+          192000
+        ]
+      },
+      {
+        "path": "maxOutputTokens",
+        "present": 23,
+        "missing": 1,
+        "types": {
+          "number": 23
+        },
+        "examples": [
+          32000,
+          64000,
+          128000
+        ]
+      },
+      {
+        "path": "name",
+        "present": 24,
+        "missing": 0,
+        "types": {
+          "string": 24
+        },
+        "examples": [
+          "Auto",
+          "Hy4 preview",
+          "Hy3"
+        ]
+      },
+      {
+        "path": "onlyReasoning",
+        "present": 18,
+        "missing": 6,
+        "types": {
+          "boolean": 18
+        },
+        "examples": [
+          true,
+          false
+        ]
+      },
+      {
+        "path": "reasoning",
+        "present": 18,
+        "missing": 6,
+        "types": {
+          "object": 18
+        },
+        "examples": [
+          {
+            "effort": "high",
+            "summary": "auto"
+          },
+          {
+            "canDisableThinking": false,
+            "defaultEffort": "high",
+            "summary": "auto",
+            "supportedEfforts": [
+              "high"
+            ]
+          },
+          {
+            "canDisableThinking": false,
+            "defaultEffort": "high",
+            "summary": "auto",
+            "supportedEfforts": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "reasoning.canDisableThinking",
+        "present": 13,
+        "missing": 11,
+        "types": {
+          "boolean": 13
+        },
+        "examples": [
+          false,
+          true
+        ]
+      },
+      {
+        "path": "reasoning.defaultEffort",
+        "present": 13,
+        "missing": 11,
+        "types": {
+          "string": 13
+        },
+        "examples": [
+          "high",
+          "medium",
+          "max"
+        ]
+      },
+      {
+        "path": "reasoning.effort",
+        "present": 5,
+        "missing": 19,
+        "types": {
+          "string": 5
+        },
+        "examples": [
+          "high",
+          "medium"
+        ]
+      },
+      {
+        "path": "reasoning.summary",
+        "present": 18,
+        "missing": 6,
+        "types": {
+          "string": 18
+        },
+        "examples": [
+          "auto"
+        ]
+      },
+      {
+        "path": "reasoning.supportedEfforts",
+        "present": 13,
+        "missing": 11,
+        "types": {
+          "array": 13
+        },
+        "examples": [
+          [
+            "high"
+          ],
+          [
+            "low",
+            "high"
+          ],
+          [
+            "low",
+            "medium",
+            "high"
+          ]
+        ]
+      },
+      {
+        "path": "relatedModels",
+        "present": 12,
+        "missing": 12,
+        "types": {
+          "object": 12
+        },
+        "examples": [
+          {
+            "lite": "hy3",
+            "reasoning": "hy3"
+          },
+          {
+            "lite": "hy3-x",
+            "reasoning": "hy3-x"
+          },
+          {
+            "lite": "deepseek-v4.1-flash",
+            "reasoning": "deepseek-v4.1-flash"
+          }
+        ]
+      },
+      {
+        "path": "supportsExtra",
+        "present": 4,
+        "missing": 20,
+        "types": {
+          "boolean": 4
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "supportsImages",
+        "present": 19,
+        "missing": 5,
+        "types": {
+          "boolean": 19
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "supportsReasoning",
+        "present": 18,
+        "missing": 6,
+        "types": {
+          "boolean": 18
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "supportsToolCall",
+        "present": 19,
+        "missing": 5,
+        "types": {
+          "boolean": 19
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "tags",
+        "present": 7,
+        "missing": 17,
+        "types": {
+          "array": 7
+        },
+        "examples": [
+          [
+            "craft"
+          ],
+          [
+            "text-to-image"
+          ]
+        ]
+      },
+      {
+        "path": "temperature",
+        "present": 17,
+        "missing": 7,
+        "types": {
+          "number": 17
+        },
+        "examples": [
+          1,
+          0.9
+        ]
+      },
+      {
+        "path": "top_p",
+        "present": 3,
+        "missing": 21,
+        "types": {
+          "number": 3
+        },
+        "examples": [
+          1
+        ]
+      },
+      {
+        "path": "vendor",
+        "present": 23,
+        "missing": 1,
+        "types": {
+          "string": 23
+        },
+        "examples": [
+          "f",
+          "j",
+          "e"
+        ]
+      }
+    ],
+    "modelPromotions": [
+      {
+        "badge": {
+          "color": "#1E90FF",
+          "display": "activeOnly",
+          "label": "错峰使用"
+        },
+        "enabled": true,
+        "hover": {
+          "action": {
+            "labelZh": "去使用",
+            "type": "selectModel"
+          },
+          "textZh": "周一至周五 09:00–12:00、14:00–18:00 属高峰原价，非高峰期积分5折"
+        },
+        "id": "deepseek-v4-flash-peak-202608",
+        "kind": "discount",
+        "modelIds": [
+          "deepseek-v4-flash",
+          "deepseek-v4-flash-ioa"
+        ],
+        "priority": 100,
+        "schedule": {
+          "daily": [
+            {
+              "end": "23:59",
+              "start": "00:00"
+            }
+          ],
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "badge": {
+          "color": "#1E90FF",
+          "display": "activeOnly",
+          "label": "错峰使用"
+        },
+        "enabled": true,
+        "hover": {
+          "action": {
+            "labelZh": "去使用",
+            "type": "selectModel"
+          },
+          "textZh": "周一至周五 09:00–12:00、14:00–18:00 属高峰原价，非高峰期积分5折"
+        },
+        "id": "deepseek-v4-pro-peak-202608",
+        "kind": "discount",
+        "modelIds": [
+          "deepseek-v4-pro",
+          "deepseek-v4-pro-ioa"
+        ],
+        "priority": 100,
+        "schedule": {
+          "daily": [
+            {
+              "end": "23:59",
+              "start": "00:00"
+            }
+          ],
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "badge": {
+          "color": "#1E90FF",
+          "label": "夜间折扣"
+        },
+        "discount": {
+          "discountedCredits": "0.50x",
+          "displayMode": "strikethrough",
+          "factor": 0.5
+        },
+        "enabled": true,
+        "hover": {
+          "action": {
+            "labelZh": "去使用",
+            "type": "selectModel"
+          },
+          "textZh": "每晚 23:00—次日 8:00 积分限时立减，错峰用更省"
+        },
+        "id": "glm-52-night-discount-202607",
+        "kind": "discount",
+        "modelIds": [
+          "glm-5.2"
+        ],
+        "priority": 100,
+        "schedule": {
+          "daily": [
+            {
+              "end": "7:50",
+              "start": "23:00"
+            }
+          ],
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "badge": {
+          "color": "#1E90FF",
+          "label": "夜间折扣"
+        },
+        "enabled": true,
+        "hover": {
+          "action": {
+            "labelZh": "去使用",
+            "type": "selectModel"
+          },
+          "textZh": "每晚 23:00—次日 8:00 积分限时立减，错峰用更省"
+        },
+        "id": "glm-52-night-discount-daytime-badge-202607",
+        "kind": "discount",
+        "modelIds": [
+          "glm-5.2"
+        ],
+        "priority": 50,
+        "schedule": {
+          "daily": [
+            {
+              "end": "23:00",
+              "start": "7:50"
+            }
+          ],
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "badge": {
+          "color": "#FF0000",
+          "display": "activeOnly",
+          "label": "限时免费"
+        },
+        "discount": {
+          "discountedCredits": "0x",
+          "displayMode": "replace",
+          "factor": 0
+        },
+        "enabled": true,
+        "hover": {
+          "action": {
+            "labelZh": "去使用",
+            "type": "selectModel"
+          },
+          "textZh": "7月6日–10月31日，每日赠送免费额度。"
+        },
+        "id": "hy3-free-trial-202607",
+        "kind": "discount",
+        "modelIds": [
+          "hy3"
+        ],
+        "priority": 200,
+        "schedule": {
+          "timezone": "Asia/Shanghai",
+          "validFrom": "2026-07-06T00:00:00+08:00",
+          "validUntil": "2026-11-01T00:00:00+08:00"
+        }
+      },
+      {
+        "badge": {
+          "color": "#1E90FF",
+          "label": "夜间免费"
+        },
+        "discount": {
+          "discountedCredits": "0x",
+          "displayMode": "replace",
+          "factor": 0
+        },
+        "enabled": true,
+        "hover": {
+          "action": {
+            "labelZh": "去使用",
+            "type": "selectModel"
+          },
+          "textZh": "9月11日–10月31日，每晚 23:00—次日 8:00 享免费额度。"
+        },
+        "id": "hy4-night-discount-daytime-badge-202609",
+        "kind": "discount",
+        "modelIds": [
+          "hy4-preview"
+        ],
+        "priority": 100,
+        "schedule": {
+          "daily": [
+            {
+              "end": "08:00",
+              "start": "23:00"
+            }
+          ],
+          "timezone": "Asia/Shanghai",
+          "validUntil": "2026-11-01T00:00:00+08:00"
+        }
+      },
+      {
+        "badge": {
+          "color": "#FF0000",
+          "display": "activeOnly",
+          "label": "限时折扣"
+        },
+        "enabled": true,
+        "hover": {
+          "action": {
+            "labelZh": "去使用",
+            "type": "selectModel"
+          },
+          "textZh": "10月2日-10月7日，享限时折扣。"
+        },
+        "id": "space-bunny-limited-discount-202610",
+        "kind": "discount",
+        "modelIds": [
+          "space-bunny"
+        ],
+        "priority": 100,
+        "schedule": {
+          "timezone": "Asia/Shanghai",
+          "validFrom": "2026-10-02T00:00:00+08:00",
+          "validUntil": "2026-10-08T00:00:00+08:00"
+        }
+      },
+      {
+        "badge": {
+          "color": "#FF0000",
+          "display": "activeOnly",
+          "label": "独家限免"
+        },
+        "discount": {
+          "discountedCredits": "0x",
+          "displayMode": "replace",
+          "factor": 0
+        },
+        "enabled": true,
+        "hover": {
+          "action": {
+            "labelZh": "去使用",
+            "type": "selectModel"
+          },
+          "textZh": "10月12日~10月25日，独家官方合作享限时免费体验。"
+        },
+        "id": "step-5-preview-fire-trial-202610",
+        "kind": "discount",
+        "modelIds": [
+          "step-5-preview"
+        ],
+        "priority": 100,
+        "schedule": {
+          "timezone": "Asia/Shanghai",
+          "validFrom": "2026-10-12T00:00:00+08:00",
+          "validUntil": "2026-10-25T00:00:00+08:00"
+        }
+      }
+    ],
+    "promotionFieldStats": [
+      {
+        "path": "badge",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "object": 8
+        },
+        "examples": [
+          {
+            "color": "#1E90FF",
+            "display": "activeOnly",
+            "label": "错峰使用"
+          },
+          {
+            "color": "#1E90FF",
+            "label": "夜间折扣"
+          },
+          {
+            "color": "#FF0000",
+            "display": "activeOnly",
+            "label": "限时免费"
+          }
+        ]
+      },
+      {
+        "path": "badge.color",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "string": 8
+        },
+        "examples": [
+          "#1E90FF",
+          "#FF0000"
+        ]
+      },
+      {
+        "path": "badge.display",
+        "present": 5,
+        "missing": 3,
+        "types": {
+          "string": 5
+        },
+        "examples": [
+          "activeOnly"
+        ]
+      },
+      {
+        "path": "badge.label",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "string": 8
+        },
+        "examples": [
+          "错峰使用",
+          "夜间折扣",
+          "限时免费"
+        ]
+      },
+      {
+        "path": "discount",
+        "present": 4,
+        "missing": 4,
+        "types": {
+          "object": 4
+        },
+        "examples": [
+          {
+            "discountedCredits": "0.50x",
+            "displayMode": "strikethrough",
+            "factor": 0.5
+          },
+          {
+            "discountedCredits": "0x",
+            "displayMode": "replace",
+            "factor": 0
+          }
+        ]
+      },
+      {
+        "path": "enabled",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "boolean": 8
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "hover",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "object": 8
+        },
+        "examples": [
+          {
+            "action": {
+              "labelZh": "去使用",
+              "type": "selectModel"
+            },
+            "textZh": "周一至周五 09:00–12:00、14:00–18:00 属高峰原价，非高峰期积分5折"
+          },
+          {
+            "action": {
+              "labelZh": "去使用",
+              "type": "selectModel"
+            },
+            "textZh": "每晚 23:00—次日 8:00 积分限时立减，错峰用更省"
+          },
+          {
+            "action": {
+              "labelZh": "去使用",
+              "type": "selectModel"
+            },
+            "textZh": "7月6日–10月31日，每日赠送免费额度。"
+          }
+        ]
+      },
+      {
+        "path": "hover.action",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "object": 8
+        },
+        "examples": [
+          {
+            "labelZh": "去使用",
+            "type": "selectModel"
+          }
+        ]
+      },
+      {
+        "path": "hover.textZh",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "string": 8
+        },
+        "examples": [
+          "周一至周五 09:00–12:00、14:00–18:00 属高峰原价，非高峰期积分5折",
+          "每晚 23:00—次日 8:00 积分限时立减，错峰用更省",
+          "7月6日–10月31日，每日赠送免费额度。"
+        ]
+      },
+      {
+        "path": "id",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "string": 8
+        },
+        "examples": [
+          "deepseek-v4-flash-peak-202608",
+          "deepseek-v4-pro-peak-202608",
+          "glm-52-night-discount-202607"
+        ]
+      },
+      {
+        "path": "kind",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "string": 8
+        },
+        "examples": [
+          "discount"
+        ]
+      },
+      {
+        "path": "modelIds",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "array": 8
+        },
+        "examples": [
+          [
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-ioa"
+          ],
+          [
+            "deepseek-v4-pro",
+            "deepseek-v4-pro-ioa"
+          ],
+          [
+            "glm-5.2"
+          ]
+        ]
+      },
+      {
+        "path": "priority",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "number": 8
+        },
+        "examples": [
+          100,
+          50,
+          200
+        ]
+      },
+      {
+        "path": "schedule",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "object": 8
+        },
+        "examples": [
+          {
+            "daily": [
+              {
+                "end": "23:59",
+                "start": "00:00"
+              }
+            ],
+            "timezone": "Asia/Shanghai"
+          },
+          {
+            "daily": [
+              {
+                "end": "7:50",
+                "start": "23:00"
+              }
+            ],
+            "timezone": "Asia/Shanghai"
+          },
+          {
+            "daily": [
+              {
+                "end": "23:00",
+                "start": "7:50"
+              }
+            ],
+            "timezone": "Asia/Shanghai"
+          }
+        ]
+      },
+      {
+        "path": "schedule.daily",
+        "present": 5,
+        "missing": 3,
+        "types": {
+          "array": 5
+        },
+        "examples": [
+          [
+            {
+              "end": "23:59",
+              "start": "00:00"
+            }
+          ],
+          [
+            {
+              "end": "7:50",
+              "start": "23:00"
+            }
+          ],
+          [
+            {
+              "end": "23:00",
+              "start": "7:50"
+            }
+          ]
+        ]
+      },
+      {
+        "path": "schedule.timezone",
+        "present": 8,
+        "missing": 0,
+        "types": {
+          "string": 8
+        },
+        "examples": [
+          "Asia/Shanghai"
+        ]
+      },
+      {
+        "path": "schedule.validFrom",
+        "present": 3,
+        "missing": 5,
+        "types": {
+          "string": 3
+        },
+        "examples": [
+          "2026-07-06T00:00:00+08:00",
+          "2026-10-02T00:00:00+08:00",
+          "2026-10-12T00:00:00+08:00"
+        ]
+      },
+      {
+        "path": "schedule.validUntil",
+        "present": 4,
+        "missing": 4,
+        "types": {
+          "string": 4
+        },
+        "examples": [
+          "2026-11-01T00:00:00+08:00",
+          "2026-10-08T00:00:00+08:00",
+          "2026-10-25T00:00:00+08:00"
+        ]
+      }
+    ],
+    "productFeaturesConfig": {
+      "ModelTrialBanner": {
+        "banners": [
+          {
+            "firstUseTimeKey": "hy4.first_user_time",
+            "modelId": "hy4-preview-f",
+            "targetModelId": "hy4-preview",
+            "trialDays": 14
+          }
+        ]
+      }
+    },
+    "dataKeys": [
+      "_configFlag",
+      "agents",
+      "builtInMarketPlugins",
+      "builtInMarketplaces",
+      "builtInSkillMarketplaces",
+      "commands",
+      "completion",
+      "config",
+      "endpoint",
+      "enterpriseId",
+      "featureToggles",
+      "fillToolCallContentModelWhitelist",
+      "integrations",
+      "links",
+      "modelPromotions",
+      "modelTiers",
+      "models",
+      "productFeatures",
+      "productFeaturesConfig",
+      "requestMaxStepLimit",
+      "telemetry",
+      "tokenUsageThresholds"
+    ],
+    "dataShape": {
+      "_configFlag": {
+        "type": "string"
+      },
+      "agents": {
+        "type": "array",
+        "length": 16
+      },
+      "builtInMarketPlugins": {
+        "type": "array",
+        "length": 8
+      },
+      "builtInMarketplaces": {
+        "type": "object",
+        "keys": [
+          "cb_teams_marketplace",
+          "codebuddy-plugins-official"
+        ]
+      },
+      "builtInSkillMarketplaces": {
+        "type": "object",
+        "keys": [
+          "codebuddy-skill-official"
+        ]
+      },
+      "commands": {
+        "type": "array",
+        "length": 14
+      },
+      "completion": {
+        "type": "object",
+        "keys": [
+          "currentFileMaxLines",
+          "jumpToHere",
+          "maxInputCharacters",
+          "maxInputTokens",
+          "nesPredictionMaxLines",
+          "sensitivity",
+          "suffixPercent"
+        ]
+      },
+      "config": {
+        "type": "object",
+        "keys": [
+          "creditPurchaseActions",
+          "limitHint",
+          "limitHintCN"
+        ]
+      },
+      "endpoint": {
+        "type": "string"
+      },
+      "enterpriseId": {
+        "type": "string"
+      },
+      "featureToggles": {
+        "type": "object",
+        "keys": [
+          "SupportHttpsAgentProxy",
+          "disabledTerminalCheck"
+        ]
+      },
+      "fillToolCallContentModelWhitelist": {
+        "type": "array",
+        "length": 2
+      },
+      "integrations": {
+        "type": "object",
+        "keys": [
+          "builtins"
+        ]
+      },
+      "links": {
+        "type": "object",
+        "keys": [
+          "helpLink"
+        ]
+      },
+      "modelPromotions": {
+        "type": "array",
+        "length": 8
+      },
+      "modelTiers": {
+        "type": "array",
+        "length": 1
+      },
+      "models": {
+        "type": "array",
+        "length": 24
+      },
+      "productFeatures": {
+        "type": "object",
+        "keys": [
+          "AutoMode",
+          "CRLFCompatible",
+          "CodeAdoptionRate",
+          "Codebase",
+          "CompletionsPrefetching",
+          "CompletionsRelatedSnippets",
+          "CompletionsResultFusion",
+          "CursorPositonPrefetching",
+          "DisableMemoryPersonalization",
+          "DisableWechatMiniProgramIntegration",
+          "EnableShareFile",
+          "EnableShareFileToWechat",
+          "EnableShareFileToWecom",
+          "InlineChat",
+          "InlineCompletions",
+          "Inspiration",
+          "MultiFileWithPromptParam",
+          "MultiFileWithSeparateParams",
+          "MultiStepCompletions",
+          "NESNativeRenderer",
+          "NESPrefetchingAfterEmptyCompletion",
+          "NesCompletions",
+          "NesCompletionsJumpToHere",
+          "NesCompletionsPrefetching",
+          "NesDocumentActiveChangeTrigger",
+          "NesRangeFix",
+          "NesRepeatFilter",
+          "NesRepeatFilterV2",
+          "RemoveBelowExist",
+          "StatusBar",
+          "SummaryWebFetch",
+          "TerminalChatIDE",
+          "TodoAssistantDelegate",
+          "TriggerNESAfterCompletionHasBeenAccepted",
+          "TrimByIndentation",
+          "WebBrowserFetch",
+          "WebFetch"
+        ]
+      },
+      "productFeaturesConfig": {
+        "type": "object",
+        "keys": [
+          "ModelTrialBanner"
+        ]
+      },
+      "requestMaxStepLimit": {
+        "type": "number"
+      },
+      "telemetry": {
+        "type": "object",
+        "keys": [
+          "report",
+          "tracing"
+        ]
+      },
+      "tokenUsageThresholds": {
+        "type": "object",
+        "keys": [
+          "compact",
+          "request",
+          "summary"
+        ]
+      }
+    },
+    "startedAt": "2026-10-20T11:13:27.451Z"
+  },
+  "models": {
+    "endpoint": "GET /console/enterprises/personal/models",
+    "url": "https://copilot.tencent.com/console/enterprises/personal/models",
+    "http": {
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "elapsedMs": 272,
+      "requestIDPresent": true
+    },
+    "envelope": {
+      "rawLength": 29428,
+      "envelopeKeys": [
+        "code",
+        "msg",
+        "requestId",
+        "data"
+      ],
+      "code": 0,
+      "msg": "OK",
+      "hasRequestId": true,
+      "dataType": "object",
+      "dataKeys": [
+        "agents",
+        "endpoint",
+        "links",
+        "mergeStrategy",
+        "models",
+        "productFeatures",
+        "stagingEndpoint"
+      ]
+    },
+    "counts": {
+      "models": 34,
+      "agents": 13,
+      "cliModels": 19
+    },
+    "agentNames": [
+      "cli",
+      "general-purpose",
+      "compact",
+      "contentAnalyzer",
+      "terminalTitleGenerator",
+      "summaryGenerator",
+      "promptHookEvaluator",
+      "insightsAnalyzer",
+      "agentInstructions",
+      "statusline-setup",
+      "Explore",
+      "Bash",
+      "Plan"
+    ],
+    "cliModels": [
+      "auto",
+      "hy4-preview",
+      "hy3",
+      "step-5-preview",
+      "space-bunny",
+      "deepseek-v4.1-flash",
+      "glm-5.3",
+      "glm-5.3-flash",
+      "glm-5.2",
+      "glm-5.1",
+      "glm-5v-turbo",
+      "kimi-k3-1",
+      "kimi-k2.8-preview",
+      "kimi-k2.7",
+      "kimi-k2.6",
+      "minimax-m3.1-flash",
+      "minimax-m3",
+      "deepseek-v4-pro",
+      "mimo-v2.6-pro"
+    ],
+    "modelIds": [
+      "auto",
+      "hy3",
+      "hy3-x",
+      "hy4-preview",
+      "hy4-preview-x",
+      "default",
+      "glm-5v-turbo",
+      "glm-5.3",
+      "glm-5.3-flash",
+      "glm-5.2",
+      "glm-5.1",
+      "glm-5.0",
+      "glm-4.7",
+      "glm-4.6",
+      "glm-4.6v",
+      "minimax-m3",
+      "minimax-m2.5",
+      "kimi-k3-1",
+      "kimi-k2.8-preview",
+      "kimi-k2.7",
+      "kimi-k2.6",
+      "kimi-k2.5",
+      "kimi-k2-thinking",
+      "deepseek-v4-flash",
+      "deepseek-v4.1-flash",
+      "deepseek-v4-pro",
+      "deepseek-v3-2-volc",
+      "hunyuan-2.0-thinking",
+      "hunyuan-chat",
+      "hunyuan-image-alpha",
+      "space-bunny",
+      "step-5-preview",
+      "mimo-v2.6-pro",
+      "minimax-m3.1-flash"
+    ],
+    "models": [
+      {
+        "descriptionEn": "Balances quality and speed. Automatically selects the best model for each task, with a variable credit multiplier.",
+        "descriptionZh": "平衡效果与速度。自动为每个任务匹配最优模型，积分倍率随之浮动",
+        "disabledMultimodal": false,
+        "id": "auto",
+        "isDefault": true,
+        "maxAllowedSize": 256000,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 32000,
+        "name": "Auto",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "high",
+          "summary": "auto"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "credits": "x0.00 credits",
+        "descriptionEn": "Hunyuan's thinking model with enhanced reasoning capabilities",
+        "descriptionZh": "混元思考模型，具有增强的推理能力",
+        "disabledMultimodal": false,
+        "iconUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNyIgaGVpZ2h0PSIxNiIgdmlld0JveD0iLTAuNDM3NSAwIDMxLjg3NSAzMCIgZmlsbD0ibm9uZSI+CiAgPHBhdGggZD0iTTE1LjIyODcgMzBDMjMuNDYwMyAzMCAzMC4xMzMzIDIzLjI4NDMgMzAuMTMzMyAxNUMzMC4xMzMzIDYuNzE1NzMgMjMuNDYwMyAwIDE1LjIyODcgMEM2Ljk5NzIgMCAwLjMyNDIxOSA2LjcxNTczIDAuMzI0MjE5IDE1QzAuMzI0MjE5IDIzLjI4NDMgNi45OTcyIDMwIDE1LjIyODcgMzBaIiBmaWxsPSIjQjNEREYyIi8+CiAgPHBhdGggZD0iTTE1LjIzMTggMjkuOTk2NkMxOS4zNDY3IDI5Ljk5NjYgMjIuNjgyNCAyNi42Mzk1IDIyLjY4MjQgMjIuNDk4M0MyMi42ODI0IDE4LjM1NzEgMTkuMzQ2NyAxNSAxNS4yMzE4IDE1QzExLjExNyAxNSA3Ljc4MTI1IDE4LjM1NzEgNy43ODEyNSAyMi40OTgzQzcuNzgxMjUgMjYuNjM5NSAxMS4xMTcgMjkuOTk2NiAxNS4yMzE4IDI5Ljk5NjZaIiBmaWxsPSIjMDA1M0UwIi8+CiAgPG1hc2sgaWQ9Im1hc2swXzYyMV8zMTE1IiBzdHlsZT0ibWFzay10eXBlOmx1bWluYW5jZSIgbWFza1VuaXRzPSJ1c2VyU3BhY2VPblVzZSIgeD0iMCIgeT0iMCIgd2lkdGg9IjMxIiBoZWlnaHQ9IjMwIj4KICAgIDxwYXRoIGQ9Ik0xNS4yMzI2IDMwQzIzLjQ2NDIgMzAgMzAuMTM3MiAyMy4yODQzIDMwLjEzNzIgMTVDMzAuMTM3MiA2LjcxNTczIDIzLjQ2NDIgMCAxNS4yMzI2IDBDNy4wMDExMSAwIDAuMzI4MTI1IDYuNzE1NzMgMC4zMjgxMjUgMTVDMC4zMjgxMjUgMjMuMjg0MyA3LjAwMTExIDMwIDE1LjIzMjYgMzBaIiBmaWxsPSJ3aGl0ZSIvPgogIDwvbWFzaz4KICA8ZyBtYXNrPSJ1cmwoI21hc2swXzYyMV8zMTE1KSI+CiAgICA8cGF0aCBkPSJNMTUuMjMyNCAzMEwzMC4xMzcgMzBMMzAuMTM3IDBMMTUuMjMyNCAwTDE1LjIzMjQgMzBaIiBmaWxsPSIjMDA1M0UwIi8+CiAgPC9nPgogIDxwYXRoIGQ9Ik0xNS4yMzE4IDE0Ljk5NjZDMTkuMzQ2NyAxNC45OTY2IDIyLjY4MjQgMTEuNjM5NSAyMi42ODI0IDcuNDk4MzFDMjIuNjgyNCAzLjM1NzExIDE5LjM0NjcgMCAxNS4yMzE4IDBDMTEuMTE3IDAgNy43ODEyNSAzLjM1NzExIDcuNzgxMjUgNy40OTgzMUM3Ljc4MTI1IDExLjYzOTUgMTEuMTE3IDE0Ljk5NjYgMTUuMjMxOCAxNC45OTY2WiIgZmlsbD0iI0IzRERGMiIvPgogIDxwYXRoIGQ9Ik0xNS4zNzEyIDAuMDA2NzRDMTguNTA2OSAwLjA4NDI5IDIxLjAyMjggMi42NjAxNSAyMS4wMjI4IDUuODMyNzdDMjEuMDIyOCA4LjUwOTc3IDE5LjIyNzEgMTAuODMyOCAxNi42MDA3IDExLjUwMzdDMTQuNDA5NyAxMS45NzU3IDEyLjcyNDYgMTMuOTg1MiAxMi43MjQ2IDE2LjM5MjRDMTIuNzI0NiAxOS4xNjA1IDE0Ljk1MjQgMjEuNDAyNiAxNy43MDI4IDIxLjQwMjZDMTguNDE2NCAyMS40MDI2IDE5LjM4NzkgMjEuMjM0IDIwLjAwMSAyMC45NjA5QzIzLjk2NzUgMTkuMzQ5MyAyNi40NyAxNS40NTUyIDI2LjQ3IDEwLjg4NjdDMjYuNDcgNC44NzE4OCAyMS42MjU4IDAgMTUuNjU1OSAwQzE1LjU1ODggMCAxNS40NjUgMC4wMDMzNyAxNS4zNzEyIDAuMDA2NzRaIiBmaWxsPSIjMkFCOUZGIi8+CiAgPHBhdGggZD0iTTQuMjAyMjIgMTguOTAyOEM0LjIwMjIyIDE1Ljg3MTggNS40MTE2IDEzLjEyNCA3LjM2ODA1IDExLjEyMTNDNy44NzcyNiAxMC41NTQ5IDguMTkyMTcgOS44MTMxMyA4LjE5MjE3IDguOTkzODRDOC4xOTIxNyA3LjI1NzUgNi43OTUxOCA1Ljg1MTU2IDUuMDY5ODkgNS44NTE1NkMzLjg3MDU2IDUuODUxNTYgMi44Mjg2OCA2LjUzNTk5IDIuMzA2MDcgNy41MzczM0MxLjA0OTc5IDkuNzM1NTggMC4zMjYxNzIgMTIuMjgxMSAwLjMyNjE3MiAxNS4wMDE5QzAuMzI2MTcyIDIzLjA5MzYgNi42OTQ2OCAyOS42ODUgMTQuNjY0NSAyOS45ODg0QzguODM4NzMgMjkuNjkxNyA0LjIwMjIyIDI0Ljg0MzUgNC4yMDIyMiAxOC45MDI4WiIgZmlsbD0iIzAwNTNFMCIvPgogIDxwYXRoIGQ9Ik0xNC42NjggMjkuOTg0NEMxNC44NTU2IDI5Ljk5NDUgMTUuMDQ2NSAyOS45OTc5IDE1LjIzNDEgMjkuOTk3OUMxNS4wNDMyIDI5Ljk5NzkgMTQuODU1NiAyOS45OTExIDE0LjY2OCAyOS45ODQ0WiIgZmlsbD0iIzAwNTNFMCIvPgogIDxwYXRoIGQ9Ik0xNS4zNzU2IDAuMDA3ODEyNUMxOC41MTEzIDAuMDg1MzU4IDIxLjAyNzIgMi42NjEyMiAyMS4wMjcyIDUuODMzODRDMjEuMDI3MiA4LjUxMDg0IDE5LjIwMTQgMTAuODM3MiAxNi42MDUxIDExLjUwNDhDMTQuNjI4NSAxMS45NjY3IDEzLjE2NzkgMTMuNTM0NCAxMi44MjYyIDE1LjQwMjNDMTMuODk0OCAxNS4wMDQ0IDE1LjIzMTUgMTUuMDA0NCAxNS4yMzE1IDE1LjAwNDRDMTkuMzQ4OCAxNS4wMDQ0IDIyLjY4MjEgMTEuNjQ2NCAyMi42ODIxIDcuNTA2MTJDMjIuNjgyMSAzLjM2NTg3IDE5LjQyMjUgMC4wODUzNTggMTUuMzc1NiAwLjAwNzgxMjVaIiBmaWxsPSIjRUNFQ0VFIi8+Cjwvc3ZnPgo=",
+        "id": "hy3",
+        "maxAllowedSize": 192000,
+        "maxInputTokens": 192000,
+        "maxOutputTokens": 64000,
+        "name": "Hy3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "high",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "hy3",
+          "reasoning": "hy3"
+        },
+        "repetition_penalty": 1.05,
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft",
+          "badge:限时免费:#FF0000"
+        ],
+        "temperature": 0.7,
+        "top_k": 20,
+        "top_p": 0.8,
+        "vendor": "j"
+      },
+      {
+        "credits": "x0.05",
+        "descriptionEn": "Hunyuan's thinking model with enhanced reasoning capabilities",
+        "descriptionZh": "混元思考模型，具有增强的推理能力",
+        "disabledMultimodal": false,
+        "iconUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNyIgaGVpZ2h0PSIxNiIgdmlld0JveD0iLTAuNDM3NSAwIDMxLjg3NSAzMCIgZmlsbD0ibm9uZSI+CiAgPHBhdGggZD0iTTE1LjIyODcgMzBDMjMuNDYwMyAzMCAzMC4xMzMzIDIzLjI4NDMgMzAuMTMzMyAxNUMzMC4xMzMzIDYuNzE1NzMgMjMuNDYwMyAwIDE1LjIyODcgMEM2Ljk5NzIgMCAwLjMyNDIxOSA2LjcxNTczIDAuMzI0MjE5IDE1QzAuMzI0MjE5IDIzLjI4NDMgNi45OTcyIDMwIDE1LjIyODcgMzBaIiBmaWxsPSIjQjNEREYyIi8+CiAgPHBhdGggZD0iTTE1LjIzMTggMjkuOTk2NkMxOS4zNDY3IDI5Ljk5NjYgMjIuNjgyNCAyNi42Mzk1IDIyLjY4MjQgMjIuNDk4M0MyMi42ODI0IDE4LjM1NzEgMTkuMzQ2NyAxNSAxNS4yMzE4IDE1QzExLjExNyAxNSA3Ljc4MTI1IDE4LjM1NzEgNy43ODEyNSAyMi40OTgzQzcuNzgxMjUgMjYuNjM5NSAxMS4xMTcgMjkuOTk2NiAxNS4yMzE4IDI5Ljk5NjZaIiBmaWxsPSIjMDA1M0UwIi8+CiAgPG1hc2sgaWQ9Im1hc2swXzYyMV8zMTE1IiBzdHlsZT0ibWFzay10eXBlOmx1bWluYW5jZSIgbWFza1VuaXRzPSJ1c2VyU3BhY2VPblVzZSIgeD0iMCIgeT0iMCIgd2lkdGg9IjMxIiBoZWlnaHQ9IjMwIj4KICAgIDxwYXRoIGQ9Ik0xNS4yMzI2IDMwQzIzLjQ2NDIgMzAgMzAuMTM3MiAyMy4yODQzIDMwLjEzNzIgMTVDMzAuMTM3MiA2LjcxNTczIDIzLjQ2NDIgMCAxNS4yMzI2IDBDNy4wMDExMSAwIDAuMzI4MTI1IDYuNzE1NzMgMC4zMjgxMjUgMTVDMC4zMjgxMjUgMjMuMjg0MyA3LjAwMTExIDMwIDE1LjIzMjYgMzBaIiBmaWxsPSJ3aGl0ZSIvPgogIDwvbWFzaz4KICA8ZyBtYXNrPSJ1cmwoI21hc2swXzYyMV8zMTE1KSI+CiAgICA8cGF0aCBkPSJNMTUuMjMyNCAzMEwzMC4xMzcgMzBMMzAuMTM3IDBMMTUuMjMyNCAwTDE1LjIzMjQgMzBaIiBmaWxsPSIjMDA1M0UwIi8+CiAgPC9nPgogIDxwYXRoIGQ9Ik0xNS4yMzE4IDE0Ljk5NjZDMTkuMzQ2NyAxNC45OTY2IDIyLjY4MjQgMTEuNjM5NSAyMi42ODI0IDcuNDk4MzFDMjIuNjgyNCAzLjM1NzExIDE5LjM0NjcgMCAxNS4yMzE4IDBDMTEuMTE3IDAgNy43ODEyNSAzLjM1NzExIDcuNzgxMjUgNy40OTgzMUM3Ljc4MTI1IDExLjYzOTUgMTEuMTE3IDE0Ljk5NjYgMTUuMjMxOCAxNC45OTY2WiIgZmlsbD0iI0IzRERGMiIvPgogIDxwYXRoIGQ9Ik0xNS4zNzEyIDAuMDA2NzRDMTguNTA2OSAwLjA4NDI5IDIxLjAyMjggMi42NjAxNSAyMS4wMjI4IDUuODMyNzdDMjEuMDIyOCA4LjUwOTc3IDE5LjIyNzEgMTAuODMyOCAxNi42MDA3IDExLjUwMzdDMTQuNDA5NyAxMS45NzU3IDEyLjcyNDYgMTMuOTg1MiAxMi43MjQ2IDE2LjM5MjRDMTIuNzI0NiAxOS4xNjA1IDE0Ljk1MjQgMjEuNDAyNiAxNy43MDI4IDIxLjQwMjZDMTguNDE2NCAyMS40MDI2IDE5LjM4NzkgMjEuMjM0IDIwLjAwMSAyMC45NjA5QzIzLjk2NzUgMTkuMzQ5MyAyNi40NyAxNS40NTUyIDI2LjQ3IDEwLjg4NjdDMjYuNDcgNC44NzE4OCAyMS42MjU4IDAgMTUuNjU1OSAwQzE1LjU1ODggMCAxNS40NjUgMC4wMDMzNyAxNS4zNzEyIDAuMDA2NzRaIiBmaWxsPSIjMkFCOUZGIi8+CiAgPHBhdGggZD0iTTQuMjAyMjIgMTguOTAyOEM0LjIwMjIyIDE1Ljg3MTggNS40MTE2IDEzLjEyNCA3LjM2ODA1IDExLjEyMTNDNy44NzcyNiAxMC41NTQ5IDguMTkyMTcgOS44MTMxMyA4LjE5MjE3IDguOTkzODRDOC4xOTIxNyA3LjI1NzUgNi43OTUxOCA1Ljg1MTU2IDUuMDY5ODkgNS44NTE1NkMzLjg3MDU2IDUuODUxNTYgMi44Mjg2OCA2LjUzNTk5IDIuMzA2MDcgNy41MzczM0MxLjA0OTc5IDkuNzM1NTggMC4zMjYxNzIgMTIuMjgxMSAwLjMyNjE3MiAxNS4wMDE5QzAuMzI2MTcyIDIzLjA5MzYgNi42OTQ2OCAyOS42ODUgMTQuNjY0NSAyOS45ODg0QzguODM4NzMgMjkuNjkxNyA0LjIwMjIyIDI0Ljg0MzUgNC4yMDIyMiAxOC45MDI4WiIgZmlsbD0iIzAwNTNFMCIvPgogIDxwYXRoIGQ9Ik0xNC42NjggMjkuOTg0NEMxNC44NTU2IDI5Ljk5NDUgMTUuMDQ2NSAyOS45OTc5IDE1LjIzNDEgMjkuOTk3OUMxNS4wNDMyIDI5Ljk5NzkgMTQuODU1NiAyOS45OTExIDE0LjY2OCAyOS45ODQ0WiIgZmlsbD0iIzAwNTNFMCIvPgogIDxwYXRoIGQ9Ik0xNS4zNzU2IDAuMDA3ODEyNUMxOC41MTEzIDAuMDg1MzU4IDIxLjAyNzIgMi42NjEyMiAyMS4wMjcyIDUuODMzODRDMjEuMDI3MiA4LjUxMDg0IDE5LjIwMTQgMTAuODM3MiAxNi42MDUxIDExLjUwNDhDMTQuNjI4NSAxMS45NjY3IDEzLjE2NzkgMTMuNTM0NCAxMi44MjYyIDE1LjQwMjNDMTMuODk0OCAxNS4wMDQ0IDE1LjIzMTUgMTUuMDA0NCAxNS4yMzE1IDE1LjAwNDRDMTkuMzQ4OCAxNS4wMDQ0IDIyLjY4MjEgMTEuNjQ2NCAyMi42ODIxIDcuNTA2MTJDMjIuNjgyMSAzLjM2NTg3IDE5LjQyMjUgMC4wODUzNTggMTUuMzc1NiAwLjAwNzgxMjVaIiBmaWxsPSIjRUNFQ0VFIi8+Cjwvc3ZnPgo=",
+        "id": "hy3-x",
+        "maxAllowedSize": 192000,
+        "maxInputTokens": 192000,
+        "maxOutputTokens": 64000,
+        "name": "Hy3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high"
+          ]
+        },
+        "relatedModels": {
+          "lite": "hy3-x",
+          "reasoning": "hy3-x"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 0.9,
+        "top_p": 1,
+        "vendor": "j"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            960000
+          ]
+        },
+        "credits": "x0.29",
+        "descriptionEn": "Hunyuan's thinking model with enhanced reasoning capabilities",
+        "descriptionZh": "混元思考模型，具有增强的推理能力",
+        "disabledMultimodal": false,
+        "id": "hy4-preview",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 960000,
+        "maxOutputTokens": 64000,
+        "name": "Hy4 preview",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "high"
+          ]
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft",
+          "badge:夜间免费:#FF0000"
+        ],
+        "temperature": 0.9,
+        "top_p": 1,
+        "vendor": "j"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            960000
+          ]
+        },
+        "credits": "x0.29",
+        "descriptionEn": "Hunyuan's thinking model with enhanced reasoning capabilities",
+        "descriptionZh": "混元思考模型，具有增强的推理能力",
+        "disabledMultimodal": false,
+        "id": "hy4-preview-x",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 960000,
+        "maxOutputTokens": 64000,
+        "name": "Hy4 preview",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "high"
+          ]
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 0.9,
+        "top_p": 1,
+        "vendor": "j"
+      },
+      {
+        "credits": "x2.20 credits",
+        "id": "default",
+        "maxAllowedSize": 56000,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 24000,
+        "name": "Default",
+        "supportsImages": false,
+        "supportsToolCall": true,
+        "vendor": "v"
+      },
+      {
+        "credits": "x0.71 credits",
+        "descriptionEn": "Native Multimodal Model",
+        "descriptionZh": "原生多模态模型",
+        "id": "glm-5v-turbo",
+        "maxAllowedSize": 200000,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000,
+        "name": "GLM-5v-Turbo",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "glm-5v-turbo",
+          "reasoning": "glm-5v-turbo"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.69",
+        "descriptionEn": "Flagship model, excelling at complex software engineering and long-horizon agent tasks",
+        "descriptionZh": "旗舰模型，擅长复杂软件工程与长程 Agent 任务",
+        "id": "glm-5.3",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000,
+        "name": "GLM-5.3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        },
+        "relatedModels": {
+          "lite": "glm-5.3",
+          "reasoning": "glm-5.3"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.08",
+        "descriptionEn": "Native multimodal model, excelling at visual understanding and professional tasks",
+        "descriptionZh": "原生多模态模型，擅长视觉理解与专业任务",
+        "id": "glm-5.3-flash",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 131072,
+        "name": "GLM-5.3-Flash",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        },
+        "relatedModels": {
+          "lite": "glm-5.3-flash",
+          "reasoning": "glm-5.3-flash"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.79 credits",
+        "descriptionEn": "1M context, built for long-horizon tasks.",
+        "descriptionZh": "1M 上下文，擅长长程任务",
+        "id": "glm-5.2",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000,
+        "name": "GLM-5.2",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "glm-5.2",
+          "reasoning": "glm-5.2"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft",
+          "badge:夜间折扣:#1E90FF"
+        ],
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "credits": "x0.79 credits",
+        "descriptionEn": "Great for daily use",
+        "descriptionZh": "能力均衡，适合日常使用",
+        "id": "glm-5.1",
+        "maxAllowedSize": 200000,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 48000,
+        "name": "GLM-5.1",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "glm-5.1",
+          "reasoning": "glm-5.1"
+        },
+        "supportsImages": false,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "credits": "x0.80 credits",
+        "disabledMultimodal": true,
+        "id": "glm-5.0",
+        "maxAllowedSize": 200000,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 48000,
+        "name": "GLM-5.0",
+        "relatedModels": {
+          "lite": "glm-5.0",
+          "reasoning": "glm-5.0"
+        },
+        "supportsImages": false,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "credits": "x0.23 credits",
+        "disabledMultimodal": true,
+        "id": "glm-4.7",
+        "maxAllowedSize": 200000,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 48000,
+        "name": "GLM-4.7",
+        "supportsImages": false,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "credits": "x0.23 credits",
+        "disabledMultimodal": true,
+        "id": "glm-4.6",
+        "maxAllowedSize": 168000,
+        "maxInputTokens": 168000,
+        "maxOutputTokens": 32000,
+        "name": "GLM-4.6",
+        "supportsImages": false,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "credits": "x0.11 credits",
+        "id": "glm-4.6v",
+        "maxAllowedSize": 128000,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 32000,
+        "name": "GLM-4.6V",
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            512000
+          ]
+        },
+        "credits": "x0.25 credits",
+        "descriptionEn": "Native multimodal model for coding and agents tasks",
+        "descriptionZh": "原生多模态，擅长代码、智能体任务",
+        "disabledMultimodal": false,
+        "id": "minimax-m3",
+        "maxAllowedSize": 512000,
+        "maxInputTokens": 512000,
+        "maxOutputTokens": 64000,
+        "name": "MiniMax-M3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "minimax-m3",
+          "reasoning": "minimax-m3"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "credits": "x0.18 credits",
+        "id": "minimax-m2.5",
+        "maxAllowedSize": 200000,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 48000,
+        "name": "MiniMax-M2.5",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "supportsImages": false,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x1.62 credits",
+        "descriptionEn": "Excels at complex, long-horizon autonomous tasks, with standout front-end skills and strong knowledge work and scientific reasoning",
+        "descriptionZh": "擅长处理复杂的长程自主任务，前端开发能力突出，同时在知识工作与科研推理上表现出色。",
+        "id": "kimi-k3-1",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 32000,
+        "name": "Kimi-K3",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "canDisableThinking": true,
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.77 credits",
+        "descriptionEn": "Excels at complex, long-horizon autonomous tasks, with standout front-end skills and strong knowledge work and scientific reasoning",
+        "descriptionZh": "擅长处理复杂的长程自主任务，前端开发能力突出，同时在知识工作与科研推理上表现出色。",
+        "id": "kimi-k2.8-preview",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000,
+        "name": "Kimi-K2.8-Preview",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": true,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        },
+        "relatedModels": {
+          "lite": "kimi-k2.8-preview",
+          "reasoning": "kimi-k2.8-preview"
+        },
+        "summary": "auto",
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "credits": "x0.57 credits",
+        "descriptionEn": "A multimodal model, good for daily use.",
+        "descriptionZh": "多模态模型，适合日常任务",
+        "id": "kimi-k2.7",
+        "maxAllowedSize": 256000,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 32000,
+        "name": "Kimi-K2.7-Code",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "kimi-k2.7",
+          "reasoning": "kimi-k2.7"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "credits": "x0.52 credits",
+        "descriptionEn": "A multimodal model, good for daily use.",
+        "descriptionZh": "多模态模型，适合日常任务",
+        "id": "kimi-k2.6",
+        "maxAllowedSize": 256000,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 32000,
+        "name": "Kimi-K2.6",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "kimi-k2.6",
+          "reasoning": "kimi-k2.6"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "credits": "x0.45 credits",
+        "id": "kimi-k2.5",
+        "maxAllowedSize": 164000,
+        "maxInputTokens": 164000,
+        "maxOutputTokens": 32000,
+        "name": "Kimi-K2.5",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "kimi-k2.5",
+          "reasoning": "kimi-k2.5"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "credits": "x0.54 credits",
+        "id": "kimi-k2-thinking",
+        "maxAllowedSize": 164000,
+        "maxInputTokens": 164000,
+        "maxOutputTokens": 32000,
+        "name": "Kimi-K2-Thinking",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "supportsImages": false,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            1000000
+          ]
+        },
+        "credits": "x0.17 credits",
+        "descriptionEn": "DeepSeek flagship model, supporting 1M context window",
+        "descriptionZh": "DeepSeek 旗舰模型，支持 1M 上下文窗口",
+        "id": "deepseek-v4-flash",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 50000,
+        "name": "Deepseek-V4-Flash",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "high",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "deepseek-v4-flash",
+          "reasoning": "deepseek-v4-flash"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.11 credits",
+        "descriptionEn": "DeepSeek flagship model, supporting 1M context window, native multimodal model",
+        "descriptionZh": "已更新至 V4.1-Flash-1017最新版，支持1M上下文窗口，原生多模态",
+        "id": "deepseek-v4.1-flash",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "name": "Deepseek-V4.1-Flash",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": true,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        },
+        "relatedModels": {
+          "lite": "deepseek-v4.1-flash",
+          "reasoning": "deepseek-v4.1-flash"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft"
+        ],
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.51 credits",
+        "descriptionEn": "DeepSeek flagship model, supporting 1M context window",
+        "descriptionZh": "DeepSeek 旗舰模型，支持 1M 上下文窗口",
+        "id": "deepseek-v4-pro",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "name": "Deepseek-V4-Pro",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "high",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "deepseek-v4-pro",
+          "reasoning": "deepseek-v4-pro"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "credits": "x0.29 credits",
+        "disabledMultimodal": true,
+        "id": "deepseek-v3-2-volc",
+        "maxAllowedSize": 96000,
+        "maxInputTokens": 96000,
+        "maxOutputTokens": 32000,
+        "name": "DeepSeek-V3.2",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "lite": "deepseek-v3-2-volc",
+          "reasoning": "deepseek-v3-2-volc"
+        },
+        "supportsImages": false,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "e"
+      },
+      {
+        "credits": "x0.04 credits",
+        "disabledMultimodal": true,
+        "id": "hunyuan-2.0-thinking",
+        "maxAllowedSize": 128000,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 24000,
+        "name": "Hunyuan-2.0-Thinking",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "medium",
+          "summary": "auto"
+        },
+        "repetition_penalty": 1.05,
+        "supportsImages": false,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 0.7,
+        "top_k": 20,
+        "top_p": 0.8,
+        "vendor": "e"
+      },
+      {
+        "disabledMultimodal": true,
+        "id": "hunyuan-chat",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 8192,
+        "name": "Hunyuan-Turbos",
+        "supportsImages": false,
+        "supportsToolCall": true,
+        "vendor": "j"
+      },
+      {
+        "id": "hunyuan-image-alpha",
+        "name": "Hunyuan Image Alpha",
+        "tags": [
+          "text-to-image"
+        ]
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 1000000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.08 credits",
+        "descriptionEn": "Blazing-fast, anonymous model with strong coding skills and native multimodal input.",
+        "descriptionZh": "推理速度极快，编码能力强劲，并支持原生多模态输入的匿名大模型",
+        "id": "space-bunny",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "name": "Space-Bunny",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "max",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "relatedModels": {
+          "builtin-lite": "wb-lite",
+          "lite": "space-bunny",
+          "reasoning": "space-bunny"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            1000000
+          ]
+        },
+        "credits": "x0.00 credits",
+        "descriptionEn": "StepFun's flagship model, built for agents that do real work.",
+        "descriptionZh": "阶跃 StepFun 面向真实任务的新一代旗舰基模",
+        "iconUrl": "https://download.codebuddy.cn/codebuddy/ide/model-icons/stepfun-favicon.svg",
+        "iconUrl_en": "https://download.codebuddy.ai/codebuddy/ide/model-icons/stepfun-favicon.svg",
+        "id": "step-5-preview",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000,
+        "name": "Step-5-Preview",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "high",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "relatedModels": {
+          "builtin-lite": "wb-lite",
+          "lite": "step-5-preview",
+          "reasoning": "step-5-preview"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "tags": [
+          "craft",
+          "badge:独家限免:#009273"
+        ],
+        "temperature": 1,
+        "vendor": "f"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.13 credits",
+        "descriptionEn": "Flagship reasoning model for professional, long-horizon, and complex workflows, with advanced research and cybersecurity capabilities.",
+        "descriptionZh": "旗舰推理模型，面向专业、长程、复杂工作流，并兼顾科学研究、网络安全等高阶能力",
+        "iconUrl": "https://download.codebuddy.cn/codebuddy/ide/model-icons/ook.png",
+        "iconUrl_en": "https://download.codebuddy.ai/codebuddy/ide/model-icons/ook.png",
+        "id": "mimo-v2.6-pro",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "name": "Xiaomi MiMo-V2.6-Pro",
+        "onlyReasoning": true,
+        "reasoning": {
+          "effort": "high",
+          "summary": "auto"
+        },
+        "relatedModels": {
+          "builtin-lite": "wb-lite",
+          "lite": "mimo-v2.6-pro",
+          "reasoning": "mimo-v2.6-pro"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "vendor": "e"
+      },
+      {
+        "contextWindow": {
+          "defaultLength": 300000,
+          "supportedLengths": [
+            300000,
+            600000,
+            1000000
+          ]
+        },
+        "credits": "x0.08 credits",
+        "descriptionEn": "Natively multimodal, strong at Office, agentic, and coding tasks, with excellent inference speed.",
+        "descriptionZh": "原生多模态，擅长office、agentic、编程任务，推理速度优异",
+        "id": "minimax-m3.1-flash",
+        "maxAllowedSize": 1000000,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "name": "MiniMax-M3.1-Flash",
+        "onlyReasoning": true,
+        "reasoning": {
+          "canDisableThinking": false,
+          "defaultEffort": "max",
+          "summary": "auto",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "relatedModels": {
+          "builtin-lite": "wb-lite",
+          "lite": "minimax-m3.1-flash",
+          "reasoning": "minimax-m3.1-flash"
+        },
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "temperature": 1,
+        "vendor": "f"
+      }
+    ],
+    "modelFieldStats": [
+      {
+        "path": "canDisableThinking",
+        "present": 1,
+        "missing": 33,
+        "types": {
+          "boolean": 1
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "contextWindow",
+        "present": 15,
+        "missing": 19,
+        "types": {
+          "object": 15
+        },
+        "examples": [
+          {
+            "defaultLength": 300000,
+            "supportedLengths": [
+              300000,
+              600000,
+              960000
+            ]
+          },
+          {
+            "defaultLength": 300000,
+            "supportedLengths": [
+              300000,
+              600000,
+              1000000
+            ]
+          },
+          {
+            "defaultLength": 300000,
+            "supportedLengths": [
+              300000,
+              512000
+            ]
+          }
+        ]
+      },
+      {
+        "path": "credits",
+        "present": 31,
+        "missing": 3,
+        "types": {
+          "string": 31
+        },
+        "examples": [
+          "x0.00 credits",
+          "x0.05",
+          "x0.29"
+        ]
+      },
+      {
+        "path": "descriptionEn",
+        "present": 22,
+        "missing": 12,
+        "types": {
+          "string": 22
+        },
+        "examples": [
+          "Balances quality and speed. Automatically selects the best model for each task, with a variable credit multiplier.",
+          "Hunyuan's thinking model with enhanced reasoning capabilities",
+          "Native Multimodal Model"
+        ]
+      },
+      {
+        "path": "descriptionZh",
+        "present": 22,
+        "missing": 12,
+        "types": {
+          "string": 22
+        },
+        "examples": [
+          "平衡效果与速度。自动为每个任务匹配最优模型，积分倍率随之浮动",
+          "混元思考模型，具有增强的推理能力",
+          "原生多模态模型"
+        ]
+      },
+      {
+        "path": "disabledMultimodal",
+        "present": 12,
+        "missing": 22,
+        "types": {
+          "boolean": 12
+        },
+        "examples": [
+          false,
+          true
+        ]
+      },
+      {
+        "path": "iconUrl",
+        "present": 4,
+        "missing": 30,
+        "types": {
+          "string": 4
+        },
+        "examples": [
+          "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNyIgaGVpZ2h0PSIxNiIgdmlld0JveD…",
+          "https://download.codebuddy.cn/codebuddy/ide/model-icons/stepfun-favicon.svg",
+          "https://download.codebuddy.cn/codebuddy/ide/model-icons/ook.png"
+        ]
+      },
+      {
+        "path": "iconUrl_en",
+        "present": 2,
+        "missing": 32,
+        "types": {
+          "string": 2
+        },
+        "examples": [
+          "https://download.codebuddy.ai/codebuddy/ide/model-icons/stepfun-favicon.svg",
+          "https://download.codebuddy.ai/codebuddy/ide/model-icons/ook.png"
+        ]
+      },
+      {
+        "path": "id",
+        "present": 34,
+        "missing": 0,
+        "types": {
+          "string": 34
+        },
+        "examples": [
+          "auto",
+          "hy3",
+          "hy3-x"
+        ]
+      },
+      {
+        "path": "isDefault",
+        "present": 1,
+        "missing": 33,
+        "types": {
+          "boolean": 1
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "maxAllowedSize",
+        "present": 32,
+        "missing": 2,
+        "types": {
+          "number": 32
+        },
+        "examples": [
+          256000,
+          192000,
+          1000000
+        ]
+      },
+      {
+        "path": "maxInputTokens",
+        "present": 33,
+        "missing": 1,
+        "types": {
+          "number": 33
+        },
+        "examples": [
+          256000,
+          192000,
+          960000
+        ]
+      },
+      {
+        "path": "maxOutputTokens",
+        "present": 33,
+        "missing": 1,
+        "types": {
+          "number": 33
+        },
+        "examples": [
+          32000,
+          64000,
+          24000
+        ]
+      },
+      {
+        "path": "name",
+        "present": 34,
+        "missing": 0,
+        "types": {
+          "string": 34
+        },
+        "examples": [
+          "Auto",
+          "Hy3",
+          "Hy4 preview"
+        ]
+      },
+      {
+        "path": "onlyReasoning",
+        "present": 27,
+        "missing": 7,
+        "types": {
+          "boolean": 27
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "reasoning",
+        "present": 28,
+        "missing": 6,
+        "types": {
+          "object": 28
+        },
+        "examples": [
+          {
+            "effort": "high",
+            "summary": "auto"
+          },
+          {
+            "canDisableThinking": false,
+            "defaultEffort": "high",
+            "summary": "auto",
+            "supportedEfforts": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "canDisableThinking": false,
+            "defaultEffort": "high",
+            "summary": "auto",
+            "supportedEfforts": [
+              "high"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "reasoning.canDisableThinking",
+        "present": 10,
+        "missing": 24,
+        "types": {
+          "boolean": 10
+        },
+        "examples": [
+          false,
+          true
+        ]
+      },
+      {
+        "path": "reasoning.defaultEffort",
+        "present": 10,
+        "missing": 24,
+        "types": {
+          "string": 10
+        },
+        "examples": [
+          "high",
+          "max"
+        ]
+      },
+      {
+        "path": "reasoning.effort",
+        "present": 18,
+        "missing": 16,
+        "types": {
+          "string": 18
+        },
+        "examples": [
+          "high",
+          "medium"
+        ]
+      },
+      {
+        "path": "reasoning.summary",
+        "present": 28,
+        "missing": 6,
+        "types": {
+          "string": 28
+        },
+        "examples": [
+          "auto"
+        ]
+      },
+      {
+        "path": "reasoning.supportedEfforts",
+        "present": 10,
+        "missing": 24,
+        "types": {
+          "array": 10
+        },
+        "examples": [
+          [
+            "low",
+            "high"
+          ],
+          [
+            "high"
+          ],
+          [
+            "low",
+            "high",
+            "max"
+          ]
+        ]
+      },
+      {
+        "path": "relatedModels",
+        "present": 21,
+        "missing": 13,
+        "types": {
+          "object": 21
+        },
+        "examples": [
+          {
+            "lite": "hy3",
+            "reasoning": "hy3"
+          },
+          {
+            "lite": "hy3-x",
+            "reasoning": "hy3-x"
+          },
+          {
+            "lite": "glm-5v-turbo",
+            "reasoning": "glm-5v-turbo"
+          }
+        ]
+      },
+      {
+        "path": "repetition_penalty",
+        "present": 2,
+        "missing": 32,
+        "types": {
+          "number": 2
+        },
+        "examples": [
+          1.05
+        ]
+      },
+      {
+        "path": "summary",
+        "present": 1,
+        "missing": 33,
+        "types": {
+          "string": 1
+        },
+        "examples": [
+          "auto"
+        ]
+      },
+      {
+        "path": "supportsImages",
+        "present": 33,
+        "missing": 1,
+        "types": {
+          "boolean": 33
+        },
+        "examples": [
+          true,
+          false
+        ]
+      },
+      {
+        "path": "supportsReasoning",
+        "present": 31,
+        "missing": 3,
+        "types": {
+          "boolean": 31
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "supportsToolCall",
+        "present": 33,
+        "missing": 1,
+        "types": {
+          "boolean": 33
+        },
+        "examples": [
+          true
+        ]
+      },
+      {
+        "path": "tags",
+        "present": 11,
+        "missing": 23,
+        "types": {
+          "array": 11
+        },
+        "examples": [
+          [
+            "craft"
+          ],
+          [
+            "craft",
+            "badge:限时免费:#FF0000"
+          ],
+          [
+            "craft",
+            "badge:夜间免费:#FF0000"
+          ]
+        ]
+      },
+      {
+        "path": "temperature",
+        "present": 30,
+        "missing": 4,
+        "types": {
+          "number": 30
+        },
+        "examples": [
+          1,
+          0.7,
+          0.9
+        ]
+      },
+      {
+        "path": "top_k",
+        "present": 2,
+        "missing": 32,
+        "types": {
+          "number": 2
+        },
+        "examples": [
+          20
+        ]
+      },
+      {
+        "path": "top_p",
+        "present": 5,
+        "missing": 29,
+        "types": {
+          "number": 5
+        },
+        "examples": [
+          0.8,
+          1
+        ]
+      },
+      {
+        "path": "vendor",
+        "present": 33,
+        "missing": 1,
+        "types": {
+          "string": 33
+        },
+        "examples": [
+          "f",
+          "j",
+          "v"
+        ]
+      }
+    ],
+    "dataKeys": [
+      "agents",
+      "endpoint",
+      "links",
+      "mergeStrategy",
+      "models",
+      "productFeatures",
+      "stagingEndpoint"
+    ],
+    "startedAt": "2026-10-20T11:13:27.933Z"
+  },
+  "chat": {
+    "endpoint": "POST /v2/chat/completions",
+    "url": "https://copilot.tencent.com/v2/chat/completions",
+    "model": "auto",
+    "http": {
+      "status": 200,
+      "elapsedMs": 2841,
+      "streamBytes": 4105,
+      "streamMs": 604
+    },
+    "responseHeaders": {
+      "cache-control": "no-cache",
+      "connection": "keep-alive",
+      "content-type": "text/event-stream",
+      "date": "Tue, 20 Oct 2026 11:13:28 GMT",
+      "eo-cache-status": "MISS",
+      "eo-log-uuid": "2604860813085071689",
+      "server": "APISIX/3.9.1",
+      "set-cookie": "[REDACTED]",
+      "traceid": "dc627246c35125bbe4a8905bb56a28a8",
+      "transfer-encoding": "chunked",
+      "x-content-type-options": "nosniff",
+      "x-request-id": "[REDACTED]",
+      "x-user-id": "[REDACTED]"
+    },
+    "requestBodyShape": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Reply with exactly: OK"
+        }
+      ],
+      "stream": true,
+      "stream_options": {
+        "include_usage": true
+      },
+      "max_tokens": 32
+    },
+    "counts": {
+      "dataFrames": 10,
+      "doneSeen": true,
+      "reasoningFrames": 10,
+      "contentFrames": 10
+    },
+    "firstFrames": [
+      {
+        "atMs": 1,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "We",
+                "function_call": null,
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": ""
+            }
+          ],
+          "usage": null
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "",
+        "usage": null
+      },
+      {
+        "atMs": 38,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": " need",
+                "function_call": null,
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": ""
+            }
+          ],
+          "usage": null
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "",
+        "usage": null
+      },
+      {
+        "atMs": 307,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": " answer user",
+                "function_call": null,
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": ""
+            }
+          ],
+          "usage": null
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "",
+        "usage": null
+      },
+      {
+        "atMs": 307,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": " says",
+                "function_call": null,
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": ""
+            }
+          ],
+          "usage": null
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "",
+        "usage": null
+      },
+      {
+        "atMs": 307,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": ": \"Reply with",
+                "function_call": null,
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": ""
+            }
+          ],
+          "usage": null
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "",
+        "usage": null
+      },
+      {
+        "atMs": 308,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": " exactly: OK\".",
+                "function_call": null,
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": ""
+            }
+          ],
+          "usage": null
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "",
+        "usage": null
+      },
+      {
+        "atMs": 344,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": " They",
+                "function_call": null,
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": ""
+            }
+          ],
+          "usage": null
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "",
+        "usage": null
+      },
+      {
+        "atMs": 349,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": " want exactly \"OK\". Need ensure no extra whitespace? \"Reply with exactly:",
+                "function_call": null,
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": ""
+            }
+          ],
+          "usage": null
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "",
+        "usage": null
+      },
+      {
+        "atMs": 574,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": " OK\"",
+                "function_call": null,
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": ""
+            }
+          ],
+          "usage": null
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "",
+        "usage": null
+      },
+      {
+        "atMs": 586,
+        "parsed": {
+          "id": "gen-1792494808-EgAvCbkQGM0qNEQxyrA1",
+          "model": "hy4-preview",
+          "object": "chat.completion.chunk",
+          "created": 1792494808,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "",
+                "function_call": {
+                  "name": "",
+                  "arguments": ""
+                },
+                "refusal": "",
+                "tool_calls": [],
+                "extra_fields": null
+              },
+              "logprobs": null,
+              "finish_reason": "length"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": "[REDACTED]",
+            "completion_tokens": "[REDACTED]",
+            "total_tokens": "[REDACTED]",
+            "completion_tokens_details": "[REDACTED]",
+            "prompt_tokens_details": "[REDACTED]",
+            "prompt_cache_hit_tokens": "[REDACTED]",
+            "prompt_cache_miss_tokens": "[REDACTED]",
+            "cache_read_input_tokens": "[REDACTED]",
+            "cache_creation_input_tokens": "[REDACTED]",
+            "prompt_cache_write_tokens": "[REDACTED]",
+            "completion_thinking_tokens": "[REDACTED]",
+            "credit": 0.01,
+            "cached_tokens": "[REDACTED]"
+          }
+        },
+        "keys": [
+          "id",
+          "model",
+          "object",
+          "created",
+          "choices",
+          "usage"
+        ],
+        "choicesType": "array",
+        "deltaKeys": [
+          "role",
+          "content",
+          "reasoning_content",
+          "function_call",
+          "refusal",
+          "tool_calls",
+          "extra_fields"
+        ],
+        "finishReason": "length",
+        "usage": {
+          "prompt_tokens": 26,
+          "completion_tokens": 32,
+          "total_tokens": 58,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 32,
+            "rejected_prediction_tokens": 0,
+            "cached_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0,
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 26,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "prompt_cache_write_tokens": 0,
+          "completion_thinking_tokens": 32,
+          "credit": 0.01,
+          "cached_tokens": 0
+        }
+      }
+    ],
+    "lastFrames": [],
+    "lastUsage": {
+      "prompt_tokens": 26,
+      "completion_tokens": 32,
+      "total_tokens": 58,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 32,
+        "rejected_prediction_tokens": 0,
+        "cached_tokens": 0
+      },
+      "prompt_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0,
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 26,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "prompt_cache_write_tokens": 0,
+      "completion_thinking_tokens": 32,
+      "credit": 0.01,
+      "cached_tokens": 0
+    }
+  },
+  "billing": {
+    "endpoint": "POST /v2/billing/meter/get-user-resource",
+    "url": "https://www.codebuddy.cn/v2/billing/meter/get-user-resource",
+    "http": {
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "elapsedMs": 676
+    },
+    "requestBody": {
+      "PageNumber": 1,
+      "PageSize": 100,
+      "ProductCode": "p_tcaca",
+      "Status": [
+        0,
+        3
+      ],
+      "PackageEndTimeRangeBegin": "2026-10-20 00:00:00",
+      "PackageEndTimeRangeEnd": "2127-09-26 00:00:00"
+    },
+    "envelope": {
+      "rawLength": 60700,
+      "envelopeKeys": [
+        "code",
+        "msg",
+        "requestId",
+        "data"
+      ],
+      "code": 0,
+      "msg": "OK",
+      "hasRequestId": true,
+      "dataType": "object",
+      "dataKeys": [
+        "Response"
+      ]
+    },
+    "counts": {
+      "accounts": 42
+    },
+    "responseKeys": [
+      "Data",
+      "RequestId"
+    ],
+    "dataKeys": [
+      "TotalCount",
+      "TotalDosage",
+      "Accounts"
+    ],
+    "accountKeys": [
+      "AccountId",
+      "Uin",
+      "AppId",
+      "DealName",
+      "CapacityType",
+      "CapacityUnit",
+      "CreateTime",
+      "CycleStartTime",
+      "CycleEndTime",
+      "DeductionStartTime",
+      "DeductionEndTime",
+      "FeeType",
+      "Region",
+      "Zone",
+      "OriginUnit",
+      "PackageCode",
+      "PackageName",
+      "PackageType",
+      "PkgSourceType",
+      "ProductCode",
+      "ProductName",
+      "SubProductCode",
+      "SubProductName",
+      "CapacityRemain",
+      "CapacityUsed",
+      "CapacitySize",
+      "CycleCapacityRemain",
+      "CycleCapacitySize",
+      "CycleCapacityUsed",
+      "RemainCycles",
+      "TotalCycles",
+      "ResourceCycleId",
+      "ResourceId",
+      "ResourceType",
+      "Status",
+      "Threshold",
+      "SupportAutoRenew",
+      "SupportManualRenew",
+      "AutoRenewFlag",
+      "ExpiredTime",
+      "DeductionProperties",
+      "AutoRenewTimeUnit",
+      "AutoRenewTimeSpan",
+      "RegionId",
+      "ZoneId",
+      "CapacitySizePrecise",
+      "CapacityRemainPrecise",
+      "CapacityUsedPrecise",
+      "CycleCapacitySizePrecise",
+      "CycleCapacityRemainPrecise",
+      "CycleCapacityUsedPrecise",
+      "AccountAttributes"
+    ],
+    "accountSample": {
+      "AccountId": "[REDACTED]",
+      "Uin": "330101…",
+      "AppId": "[REDACTED]",
+      "DealName": "202604…",
+      "CapacityType": 4,
+      "CapacityUnit": "credits",
+      "CreateTime": 1775447464000,
+      "CycleStartTime": "2026-10-01 00:00:00",
+      "CycleEndTime": "2026-10-31 23:59:59",
+      "DeductionStartTime": 1775447463000,
+      "DeductionEndTime": 2035770662000,
+      "FeeType": 1,
+      "Region": "ap-others",
+      "Zone": "ap-others-4",
+      "OriginUnit": "credits",
+      "PackageCode": "TCACA_code_008_cfWoLwvjU4",
+      "PackageName": "CodeBuddy个人体验版",
+      "PackageType": "1",
+      "PkgSourceType": 0,
+      "ProductCode": "p_tcaca",
+      "ProductName": "腾讯云代码助手",
+      "SubProductCode": "sp_tcaca_codebuddy_ide",
+      "SubProductName": "腾讯云代码助手 (IDE)",
+      "CapacityRemain": 500,
+      "CapacityUsed": 0,
+      "CapacitySize": 500,
+      "CycleCapacityRemain": 0,
+      "CycleCapacitySize": 500,
+      "CycleCapacityUsed": 500,
+      "RemainCycles": 0,
+      "TotalCycles": 1,
+      "ResourceCycleId": 0,
+      "ResourceId": "codebu…",
+      "ResourceType": "2",
+      "Status": 0,
+      "Threshold": 0,
+      "SupportAutoRenew": 0,
+      "SupportManualRenew": 0,
+      "AutoRenewFlag": 0,
+      "ExpiredTime": "",
+      "DeductionProperties": [],
+      "AutoRenewTimeUnit": "",
+      "AutoRenewTimeSpan": 0,
+      "RegionId": 47,
+      "ZoneId": 470004,
+      "CapacitySizePrecise": "500",
+      "CapacityRemainPrecise": "500",
+      "CapacityUsedPrecise": "0",
+      "CycleCapacitySizePrecise": "500",
+      "CycleCapacityRemainPrecise": "0",
+      "CycleCapacityUsedPrecise": "500",
+      "AccountAttributes": [
+        {
+          "Key": "payerType",
+          "Type": 5,
+          "Value": "[REDACTED]"
+        },
+        {
+          "Key": "payerUin",
+          "Type": 5,
+          "Value": "[REDACTED]"
+        }
+      ]
+    },
+    "accountSamples": [
+      {
+        "AccountId": "[REDACTED]",
+        "Uin": "330101…",
+        "AppId": "[REDACTED]",
+        "DealName": "202604…",
+        "CapacityType": 4,
+        "CapacityUnit": "credits",
+        "CreateTime": 1775447464000,
+        "CycleStartTime": "2026-10-01 00:00:00",
+        "CycleEndTime": "2026-10-31 23:59:59",
+        "DeductionStartTime": 1775447463000,
+        "DeductionEndTime": 2035770662000,
+        "FeeType": 1,
+        "Region": "ap-others",
+        "Zone": "ap-others-4",
+        "OriginUnit": "credits",
+        "PackageCode": "TCACA_code_008_cfWoLwvjU4",
+        "PackageName": "CodeBuddy个人体验版",
+        "PackageType": "1",
+        "PkgSourceType": 0,
+        "ProductCode": "p_tcaca",
+        "ProductName": "腾讯云代码助手",
+        "SubProductCode": "sp_tcaca_codebuddy_ide",
+        "SubProductName": "腾讯云代码助手 (IDE)",
+        "CapacityRemain": 500,
+        "CapacityUsed": 0,
+        "CapacitySize": 500,
+        "CycleCapacityRemain": 0,
+        "CycleCapacitySize": 500,
+        "CycleCapacityUsed": 500,
+        "RemainCycles": 0,
+        "TotalCycles": 1,
+        "ResourceCycleId": 0,
+        "ResourceId": "codebu…",
+        "ResourceType": "2",
+        "Status": 0,
+        "Threshold": 0,
+        "SupportAutoRenew": 0,
+        "SupportManualRenew": 0,
+        "AutoRenewFlag": 0,
+        "ExpiredTime": "",
+        "DeductionProperties": [],
+        "AutoRenewTimeUnit": "",
+        "AutoRenewTimeSpan": 0,
+        "RegionId": 47,
+        "ZoneId": 470004,
+        "CapacitySizePrecise": "500",
+        "CapacityRemainPrecise": "500",
+        "CapacityUsedPrecise": "0",
+        "CycleCapacitySizePrecise": "500",
+        "CycleCapacityRemainPrecise": "0",
+        "CycleCapacityUsedPrecise": "500",
+        "AccountAttributes": [
+          {
+            "Key": "payerType",
+            "Type": 5,
+            "Value": "[REDACTED]"
+          },
+          {
+            "Key": "payerUin",
+            "Type": 5,
+            "Value": "[REDACTED]"
+          }
+        ]
+      },
+      {
+        "AccountId": "[REDACTED]",
+        "Uin": "330101…",
+        "AppId": "[REDACTED]",
+        "DealName": "202604…",
+        "CapacityType": 1,
+        "CapacityUnit": "credits",
+        "CreateTime": 1775447465000,
+        "CycleStartTime": "2026-04-06 11:51:05",
+        "CycleEndTime": "2027-04-06 11:51:04",
+        "DeductionStartTime": 1775447465000,
+        "DeductionEndTime": 1806983464000,
+        "FeeType": 1,
+        "Region": "ap-others",
+        "Zone": "ap-others-4",
+        "OriginUnit": "credits",
+        "PackageCode": "TCACA_code_007_nzdH5h4Nl0",
+        "PackageName": "CodeBuddy个人版国内运营裂变包",
+        "PackageType": "1",
+        "PkgSourceType": 0,
+        "ProductCode": "p_tcaca",
+        "ProductName": "腾讯云代码助手",
+        "SubProductCode": "sp_tcaca_codebuddyide_bonus_pack",
+        "SubProductName": "腾讯云代码助手 (IDE) - 赠送包",
+        "CapacityRemain": 3000,
+        "CapacityUsed": 0,
+        "CapacitySize": 3000,
+        "CycleCapacityRemain": 3000,
+        "CycleCapacitySize": 3000,
+        "RemainCycles": 0,
+        "TotalCycles": 1,
+        "ResourceCycleId": 0,
+        "ResourceId": "codebu…",
+        "ResourceType": "2",
+        "Status": 0,
+        "Threshold": 0,
+        "SupportAutoRenew": 0,
+        "SupportManualRenew": 0,
+        "AutoRenewFlag": 0,
+        "ExpiredTime": "",
+        "DeductionProperties": [],
+        "AutoRenewTimeUnit": "",
+        "AutoRenewTimeSpan": 0,
+        "RegionId": 47,
+        "ZoneId": 470004,
+        "CapacitySizePrecise": "3000",
+        "CapacityRemainPrecise": "3000",
+        "CapacityUsedPrecise": "0",
+        "CycleCapacitySizePrecise": "3000",
+        "CycleCapacityRemainPrecise": "3000",
+        "CycleCapacityUsedPrecise": "0",
+        "AccountAttributes": [
+          {
+            "Key": "payerType",
+            "Type": 5,
+            "Value": "[REDACTED]"
+          },
+          {
+            "Key": "payerUin",
+            "Type": 5,
+            "Value": "[REDACTED]"
+          }
+        ]
+      },
+      {
+        "AccountId": "[REDACTED]",
+        "Uin": "330101…",
+        "AppId": "[REDACTED]",
+        "DealName": "202610…",
+        "CapacityType": 1,
+        "CapacityUnit": "credits",
+        "CreateTime": 1791792732000,
+        "CycleStartTime": "2026-10-12 16:12:12",
+        "CycleEndTime": "2026-11-12 16:12:11",
+        "DeductionStartTime": 1791792732000,
+        "DeductionEndTime": 1794471131000,
+        "FeeType": 1,
+        "Region": "ap-others",
+        "Zone": "ap-others-4",
+        "OriginUnit": "credits",
+        "PackageCode": "TCACA_code_007_nzdH5h4Nl0",
+        "PackageName": "CodeBuddy个人版国内运营裂变包",
+        "PackageType": "1",
+        "PkgSourceType": 0,
+        "ProductCode": "p_tcaca",
+        "ProductName": "腾讯云代码助手",
+        "SubProductCode": "sp_tcaca_codebuddyide_bonus_pack",
+        "SubProductName": "腾讯云代码助手 (IDE) - 赠送包",
+        "CapacityRemain": 0,
+        "CapacityUsed": 100,
+        "CapacitySize": 100,
+        "CycleCapacityRemain": 0,
+        "CycleCapacitySize": 100,
+        "CycleCapacityUsed": 100,
+        "RemainCycles": 0,
+        "TotalCycles": 1,
+        "ResourceCycleId": 0,
+        "ResourceId": "codebu…",
+        "ResourceType": "2",
+        "Status": 3,
+        "Threshold": 0,
+        "SupportAutoRenew": 0,
+        "SupportManualRenew": 0,
+        "AutoRenewFlag": 0,
+        "ExpiredTime": "2026-10-15 02:45:09",
+        "DeductionProperties": [],
+        "AutoRenewTimeUnit": "",
+        "AutoRenewTimeSpan": 0,
+        "RegionId": 47,
+        "ZoneId": 470004,
+        "CapacitySizePrecise": "100",
+        "CapacityRemainPrecise": "0",
+        "CapacityUsedPrecise": "100",
+        "CycleCapacitySizePrecise": "100",
+        "CycleCapacityRemainPrecise": "0",
+        "CycleCapacityUsedPrecise": "100",
+        "AccountAttributes": [
+          {
+            "Key": "grantSource",
+            "Type": 3,
+            "Value": "[REDACTED]"
+          },
+          {
+            "Key": "payerType",
+            "Type": 5,
+            "Value": "[REDACTED]"
+          },
+          {
+            "Key": "payerUin",
+            "Type": 5,
+            "Value": "[REDACTED]"
+          }
+        ]
+      }
+    ],
+    "startedAt": "2026-10-20T11:13:31.049Z"
+  },
+  "diff": {
+    "v3Only": [
+      "codewise-completions",
+      "codewise-rewrite",
+      "codewise-default-model-v2",
+      "nes-gf",
+      "codewise-jump"
+    ],
+    "enterpriseModelsOnly": [
+      "hy4-preview-x",
+      "default",
+      "glm-5v-turbo",
+      "glm-5.0",
+      "glm-4.7",
+      "glm-4.6",
+      "glm-4.6v",
+      "minimax-m2.5",
+      "kimi-k2.7",
+      "kimi-k2.6",
+      "kimi-k2.5",
+      "kimi-k2-thinking",
+      "deepseek-v3-2-volc",
+      "hunyuan-2.0-thinking",
+      "hunyuan-chat"
+    ],
+    "cliOnly": [
+      "glm-5v-turbo",
+      "kimi-k2.7",
+      "kimi-k2.6"
+    ],
+    "v3NotInCli": [
+      "hy3-x",
+      "codewise-completions",
+      "codewise-rewrite",
+      "deepseek-v4-flash",
+      "codewise-default-model-v2",
+      "hunyuan-image-alpha",
+      "nes-gf",
+      "codewise-jump"
+    ]
+  }
+}

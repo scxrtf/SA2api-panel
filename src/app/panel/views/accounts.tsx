@@ -202,7 +202,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
           </span>
         </div>
         <div className="tbl-wrap">
-          <table className="tbl">
+          <table className="tbl tbl-accounts">
             <thead><tr>
               <th>账号</th><th>域</th><th>积分</th><th>状态</th>
               <th className="num">成功 / 失败</th><th className="num">在途</th>
@@ -299,7 +299,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
               {bad ? bad + " 个模型整池不可用" : locks.length + " 个模型部分限流"}
             </span> : undefined}>
             <div className="tbl-wrap">
-              <table className="tbl">
+              <table className="tbl tbl-locks">
                 <thead><tr>
                   <th>模型</th><th>域</th><th>状态</th><th>可选/总数</th><th>锁定</th>
                   <th>最早解锁</th><th>全部解锁</th><th>原因</th>

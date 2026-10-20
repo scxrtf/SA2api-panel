@@ -197,7 +197,7 @@ export async function GET(req: Request) {
   const from = parseTime(q.get("from"));
   const to = parseTime(q.get("to"));
   let since: Date | null = from;
-  let until: Date | null = to;
+  const until: Date | null = to;
   let explicit = false;
   if (!since && !until) {
     let hours = parseInt(q.get("hours") ?? "72", 10);
