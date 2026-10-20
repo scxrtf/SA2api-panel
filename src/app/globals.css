@@ -105,6 +105,7 @@ body {
   font-family: inherit;
 }
 .ustabs button:hover { border-color: var(--border-soft); color: var(--fg); }
+.ustabs button:active { transform: scale(.92); }
 .ustabs button.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .ustabs button .cnt {
   font-family: var(--mono); font-size: 10px; background: var(--bg-soft); color: var(--fg-dim);
@@ -139,10 +140,21 @@ body {
 .btn {
   padding: 5px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);
   background: #fff; color: var(--fg); cursor: pointer; font-size: 13px;
-  transition: border-color .15s, box-shadow .15s, background .15s, transform .1s;
+  position: relative; overflow: hidden;
+  transition: border-color .15s, box-shadow .15s, background .15s, transform .12s cubic-bezier(.34, 1.56, .64, 1);
 }
 .btn:hover { border-color: var(--border-strong); }
-.btn:active { transform: scale(.97); }
+.btn:active { transform: scale(.93); }
+/* 点击涟漪（align CloseRouter 触摸反馈）：落点圆环扩散 + 收缩回弹 */
+.btn::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: currentColor; opacity: 0; pointer-events: none;
+}
+.btn:active::after { animation: btn-ripple .35s ease-out; }
+@keyframes btn-ripple {
+  from { opacity: .12; transform: scale(.6); }
+  to { opacity: 0; transform: scale(1); }
+}
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn.primary {
   background: var(--ink); border-color: var(--ink); color: #fff;
@@ -174,11 +186,19 @@ body {
   display: flex; align-items: center; gap: 10px; width: 100%;
   min-height: 48px; padding: 12px 13px; border-radius: 12px; border: 0;
   background: var(--ink); color: #fff; cursor: pointer; text-align: left;
-  transition: background .15s, transform .1s;
+  position: relative; overflow: hidden;
+  transition: background .15s, transform .15s cubic-bezier(.34, 1.56, .64, 1), box-shadow .15s;
 }
 .ctrl-action:hover { background: #4a4a52; }
-.ctrl-action:active { transform: scale(.99); }
+.ctrl-action:active { transform: scale(.96); box-shadow: 0 0 0 3px rgba(232, 116, 28, .25); }
+.ctrl-action::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: #fff; opacity: 0; pointer-events: none;
+}
+.ctrl-action:active::after { animation: btn-ripple .35s ease-out; }
 .ctrl-action:disabled { background: #edeeeb; color: var(--fg-dim); cursor: not-allowed; }
+.ctrl-action:disabled:active { transform: none; box-shadow: none; }
+.ctrl-action:disabled:active::after { animation: none; }
 .ctrl-action.secondary {
   background: #fff; color: var(--ink); border: 1px solid #dedfdf;
 }
@@ -372,7 +392,9 @@ body {
 .tb-dot {
   width: 20px; height: 20px; border: 0; padding: 0; background: transparent;
   cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  transition: transform .1s;
 }
+.tb-dot:active { transform: scale(.8); }
 .tb-dot::before {
   content: ""; width: 4px; height: 4px; border-radius: 2px;
   background: #dadbd9; transition: width .25s cubic-bezier(.34, 1.4, .64, 1), background .2s;
@@ -482,6 +504,8 @@ body {
   position: relative; cursor: pointer; flex-shrink: 0; transition: background .15s, border-color .15s;
 }
 .switch:hover { border-color: var(--fg-dim); }
+.switch:active i { transform: scale(.85); }
+.switch.on:active i { transform: translateX(18px) scale(.85); }
 .switch i {
   position: absolute; left: 2px; top: 50%; margin-top: -8px;
   width: 16px; height: 16px; border-radius: 50%; background: #fff;

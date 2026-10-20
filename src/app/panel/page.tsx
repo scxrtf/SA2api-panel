@@ -12,6 +12,7 @@ import { UsageView } from "./views/usage";
 import { PackagesView } from "./views/packages";
 import { TasksCenterView } from "./views/taskscenter";
 import { ModelsView } from "./views/models";
+import { AiCheckerView } from "./views/aichecker";
 import { GatewayView } from "./views/gateway";
 import { ConnectView } from "./views/connect";
 import { ConfigView } from "./views/config";
@@ -57,6 +58,7 @@ export default function PanelPage() {
       {view === "packages" && <PackagesView flash={flash} />}
       {view === "taskscenter" && <TasksCenterView flash={flash} />}
       {view === "models" && <ModelsView flash={flash} />}
+      {view === "aichecker" && <AiCheckerView />}
       {view === "gateway" && <GatewayView flash={flash} />}
       {view === "connect" && <ConnectView />}
       {view === "config" && <ConfigView flash={flash} />}

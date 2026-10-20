@@ -2166,7 +2166,7 @@
                 'X-Target-Base-URL': baseUrl,
                 'X-Header-Preset': headerPreset || 'default'
             };
-            const response = await fetch('/api/panel/aichecker/chat/completions', {
+            const response = await fetch('/api/panel/aichecker/proxy/chat-completions', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
@@ -2196,7 +2196,7 @@
                 'X-Target-Base-URL': baseUrl,
                 'X-Header-Preset': headerPreset || 'default'
             };
-            const response = await fetch('/api/panel/aichecker/messages', {
+            const response = await fetch('/api/panel/aichecker/proxy/messages', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
@@ -2225,7 +2225,7 @@
                 'X-Target-Base-URL': baseUrl,
                 'X-Header-Preset': headerPreset || 'default'
             };
-            const response = await fetch('/api/panel/aichecker/responses', {
+            const response = await fetch('/api/panel/aichecker/proxy/responses', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({

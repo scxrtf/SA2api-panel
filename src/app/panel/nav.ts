@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import React from "react";
 
-export type View = "accounts" | "usage" | "packages" | "taskscenter" | "models" | "gateway" | "connect" | "config" | "logs";
+export type View = "accounts" | "usage" | "packages" | "taskscenter" | "models" | "aichecker" | "gateway" | "connect" | "config" | "logs";
 
 export interface NavItem {
   id: View;
@@ -26,6 +26,8 @@ export const NAV: NavItem[] = [
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M3 2.5h10v9H8l-3 3v-3H3z" }), React.createElement("path", { d: "M6 6.5h4M6 9h2.5" })) },
   { id: "models", label: "模型与档位", code: "MODEL", title: "模型与档位", sub: "可用模型目录与连通性实测",
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M8 1.8 14 5v6L8 14.2 2 11V5z" }), React.createElement("path", { d: "M2 5l6 3.2L14 5M8 8.2v6" })) },
+  { id: "aichecker", label: "模型鉴别", code: "CHECK", title: "模型鉴别", sub: "统计指纹比对，鉴别渠道掺假（hlwy-ai-checker）",
+    icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M6.5 1.8h3v5.2l3.5 5.6a1.8 1.8 0 0 1-1.6 2.7H4.6a1.8 1.8 0 0 1-1.6-2.7L6.5 7z" }), React.createElement("path", { d: "M5.2 10.5h5.6" })) },
   { id: "gateway", label: "供应商与密钥", code: "GW", title: "供应商与密钥", sub: "聚合供应商与网关子密钥",
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M2.5 8h3M10.5 8h3M8 2.5v3M8 10.5v3" }), React.createElement("circle", { cx: 8, cy: 8, r: 2.2 }), React.createElement("circle", { cx: 4, cy: 8, r: 1.4 }), React.createElement("circle", { cx: 12, cy: 8, r: 1.4 })) },
   { id: "connect", label: "接入引导", code: "LINK", title: "接入引导", sub: "OpenAI / Anthropic 客户端接入片段",
