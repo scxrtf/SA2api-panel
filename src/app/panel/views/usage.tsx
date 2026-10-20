@@ -229,6 +229,7 @@ function DimRow({ name, sub, a, realm, withPerf }: {
 /* ── 视图 ───────────────────────────────────────────────────────── */
 export function UsageView({ flash }: { flash: Flash }) {
   const [hours, setHours] = useState(72);
+  const [chartDim, setChartDim] = useState<ChartDim>("total");
   const [u, setU] = useState<UsageResp | null>(null);
   const [dim, setDim] = useState<DimKey>("account");
   const [sort, setSort] = useState<SortKey>("total");
@@ -236,9 +237,10 @@ export function UsageView({ flash }: { flash: Flash }) {
   const [provOpen, setProvOpen] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    req<UsageResp>("usage?hours=" + hours).then(setU)
+    const query = "usage?hours=" + hours + (chartDim === "total" ? "" : "&group=" + chartDim);
+    req<UsageResp>(query).then(setU)
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
-  }, [hours, flash]);
+  }, [hours, chartDim, flash]);
   useEffect(load, [load]);
   useAutoRefresh(load, 30_000);
   // 顶栏「刷新」按钮广播的事件：否则在该 tab 点刷新只更新了侧边栏统计。
@@ -317,11 +319,22 @@ export function UsageView({ flash }: { flash: Flash }) {
         </div>
       </Box>
 
-      <Box title="用量时序" hint="蓝=prompt · 绿=completion；横轴为真实时间"
-        extra={<span className="note">峰值 {u.series.length > 0 ? fmtTok(Math.max(...u.series.map((p) => p.total_tokens))) : "—"}</span>}>
-        <div className="uschart-body">
-          <UsageChart series={u.series} />
-        </div>
+      <Box title="用量时序"
+        hint={chartDim === "total"
+          ? "蓝=prompt · 绿=completion；横轴为真实时间"
+          : "按 " + (CHART_DIMS.find(([k]) => k === chartDim)?.[1] ?? chartDim) + " 堆叠；点图例可隐藏/恢复"}
+        extra={<>
+          <select className="select" style={{ width: 120 }} value={chartDim}
+            onChange={(e) => setChartDim(e.target.value as ChartDim)}>
+            {CHART_DIMS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+          <span className="note">峰值 {u.series.length > 0 ? fmtTok(Math.max(...u.series.map((p) => p.total_tokens))) : "—"}</span>
+        </>}>
+        <UsageChart
+          series={u.series}
+          groups={chartDim === "total" ? undefined : u.series_group?.groups}
+          dimLabel={CHART_DIMS.find(([k]) => k === chartDim)?.[1] ?? ""}
+        />
       </Box>
 
       <Box title="用量明细" extra={<>
