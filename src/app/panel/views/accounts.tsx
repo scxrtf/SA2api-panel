@@ -78,6 +78,9 @@ export function AccountsView({ ov, flash, onRefresh }: {
             return tot > 0 ? fmtNum(rem) + " / " + fmtNum(tot) : fmtNum(rem);
           })()}
           unit="PTS"
+          // 千分位长值（如 1,234,567 / 8,901,234）会被 .stat-num 的 nowrap+ellipsis
+          // 截断——这张卡单独缩小字号并允许换行，保证“剩余 / 总额”完整可见。
+          numStyle={{ fontSize: 15, whiteSpace: "normal", overflow: "visible", textOverflow: "clip" }}
         />        <CtrlMetric label="粘性会话" value={ov.sticky_sessions} unit="SESS" />
       </div>
 

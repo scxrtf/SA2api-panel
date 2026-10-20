@@ -169,6 +169,7 @@ model RequestLog {
   ua            String   @default("")
   keyName       String   @default("") // 命中的网关密钥名；供应商路径为槽位名
   slot          String   @default("") // 供应商内实际命中的 key 槽位
+  machineId     String   @default("") // 该请求实际用号派生的机器码（desktop.go deriveID "machine" 同口径）
   path          String   @default("")
   at            DateTime @default(now())
 

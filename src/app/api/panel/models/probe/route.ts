@@ -17,15 +17,32 @@ import {
 } from "@/lib/modelprobe";
 
 // POST 面板内一键探测模型真实输出上限（对齐 scripts/probe_max_tokens.py，结果落库 ModelProbe）。
-// body: {model:"cn:glm-5.2"|"artex:xxx", tiers?:[40000,100000], retries?:2, probe_id?:uuid, uid?:string}
+// body: {model:"cn:glm-5.2"|"artex:xxx", tiers?:[40000,100000], retries?:2, probe_id?:uuid, uid?:string, force?:bool}
+// 去重：已有可信结论（clamped/at_least）且未指定 force 时直接返回库内缓存，不再发上游请求。
 // 阶梯上探 × 判据与脚本一致；同步阻塞至出结论（单模型最坏 tiers×retries 次长输出）。
 export async function POST(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
-  let body: { model?: string; tiers?: number[]; retries?: number; probe_id?: string; uid?: string };
+  let body: { model?: string; tiers?: number[]; retries?: number; probe_id?: string; uid?: string; force?: boolean };
   try { body = await req.json(); } catch { return fail(400, "parse body failed"); }
   const model = (body.model ?? "").trim();
   if (!model) return fail(400, "model is required");
+
+  // 避免多次探测：库内已有可信结论（clamped=真实钳制点 / at_least=已知下界）时直接复用，
+  // 仅 inconclusive（未测出）允许静默重测；强制重测显式传 force=true。
+  if (!body.force) {
+    const existing = await prisma.modelProbe.findUnique({ where: { key: model } });
+    if (existing && (existing.verdict === "clamped" || existing.verdict === "at_least") && existing.measured !== null) {
+      return ok({
+        probe_id: null, cached: true,
+        result: {
+          model, measured: existing.measured, verdict: existing.verdict,
+          note: existing.note, elapsed_s: 0, tested_at: existing.testedAt.toISOString(),
+        },
+      });
+    }
+  }
+
   const tiers = (Array.isArray(body.tiers) && body.tiers.length > 0 ? body.tiers : DEFAULT_TIERS)
     .map((n) => Math.floor(n)).filter((n) => n > 0).sort((a, b) => a - b);
   if (tiers.length === 0) return fail(400, "tiers invalid");

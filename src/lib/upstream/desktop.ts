@@ -9,7 +9,7 @@ import { chatBase, webBaseOf, type AuthShape } from "./client";
 export const DESKTOP_UA = "WorkBuddy/5.5.6 WorkBuddy/5.5.6 CLI/2.137.1";
 
 // deriveID 由 uid 稳定派生 36 位 hex 设备/会话标识（同盐幂等，模拟固定设备）。
-function deriveID(a: AuthShape, salt: string): string {
+export function deriveID(a: { uid: string }, salt: string): string {
   return createHash("sha256").update(salt + ":" + a.uid, "utf8").digest("hex").slice(0, 36);
 }
 

@@ -5,6 +5,7 @@
 import { prisma } from "./db";
 import { getConfig, type AppConfig } from "./config";
 import * as pool from "./pool";
+import { deriveID } from "./upstream/desktop";
 import {
   extractKey,
   turnKey,
@@ -220,6 +221,7 @@ async function recordRequestLog(r: {
   cacheMissTok?: number;
   keyName?: string;
   slot?: string;
+  machineId?: string;
 }): Promise<void> {
   try {
     await prisma.requestLog.create({ data: r });
@@ -410,6 +412,9 @@ export async function handleChat(opts: {
       cacheHitTok: extra?.hasCache ? (extra?.cacheHitTokens ?? 0) : 0,
       cacheMissTok: extra?.hasCache ? (extra?.cacheMissTokens ?? 0) : 0,
       keyName,
+      // 机器码 = 实际用号按 desktop.go deriveID("machine") 同盐派生（sha36 截 36 hex）。
+      // uid 为空（选号前失败 / 供应商直连）时留空，与 Go 请求日志"账号列 + 派生"口径一致。
+      machineId: uid ? deriveID({ uid }, "machine") : "",
     });
   };
 

@@ -30,7 +30,7 @@ export function CtrlStatus({ title, detail, active, badge }: {
   );
 }
 
-/** ControlAction：CODE 徽章 + 标题 + →，深色主按钮 / 白底次按钮 */
+/** ControlAction：CODE 徽章 + 标题，深色主按钮 / 白底次按钮（箭头按用户要求移除） */
 export function CtrlAction({ text, code, onClick, secondary, disabled, title }: {
   text: string; code: string; onClick: () => void;
   secondary?: boolean; disabled?: boolean; title?: string;
@@ -40,19 +40,20 @@ export function CtrlAction({ text, code, onClick, secondary, disabled, title }: 
       onClick={onClick} disabled={disabled} title={title}>
       <span className="code">{code}</span>
       <span className="txt">{text}</span>
-      <span className="arr">→</span>
     </button>
   );
 }
 
 /** ControlMetric：标签 + 22px 等宽大数字 + 单位 */
-export function CtrlMetric({ label, value, unit, color }: {
+export function CtrlMetric({ label, value, unit, color, numStyle }: {
   label: string; value: React.ReactNode; unit?: string; color?: string;
+  /** numStyle 透传给 .stat-num：长值（如“积分剩余 / 总额”）可缩字号/允许换行。 */
+  numStyle?: React.CSSProperties;
 }) {
   return (
     <div className="stat">
       <div className="stat-label">{label}</div>
-      <span className="stat-num" style={color ? { color } : undefined}>{value}</span>
+      <span className="stat-num" style={{ ...(color ? { color } : undefined), ...numStyle }}>{value}</span>
       {unit && <span className="stat-unit">{unit}</span>}
     </div>
   );

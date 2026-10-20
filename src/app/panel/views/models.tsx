@@ -152,8 +152,11 @@ export function ModelsView({ flash }: { flash: Flash }) {
     const id = m.id;
     setProbing((s) => ({ ...s, [id]: true }));
     try {
-      const r = await req<{ result: { measured: number | null; verdict: string; note: string; elapsed_s: number } }>(
-        "models/probe", { method: "POST", body: { model: id } });
+      // 已有可信结论时本次为强制重测（上游可能改限）；服务端默认命中缓存直接返回，不再探测。
+      const cur = probes[id];
+      const force = !!(cur && (cur.verdict === "clamped" || cur.verdict === "at_least") && cur.measured !== null);
+      const r = await req<{ cached?: boolean; result: { measured: number | null; verdict: string; note: string; elapsed_s: number } }>(
+        "models/probe", { method: "POST", body: { model: id, force } });
       // 探测结果落库，本地同步刷新该行（claimed 面板探测未知，置 null）。
       setProbes((s) => ({
         ...s,
@@ -162,13 +165,15 @@ export function ModelsView({ flash }: { flash: Flash }) {
           note: r.result.note, tested_at: new Date().toISOString(), source: "panel-probe",
         },
       }));
-      flash("ok", `${id} 探测完成：${r.result.verdict}${r.result.measured ? " " + fmtK(r.result.measured) : ""}`);
+      flash("ok", r.cached
+        ? `${id} 已有实测结论（${r.result.verdict}${r.result.measured ? " " + fmtK(r.result.measured) : ""}），未重复探测`
+        : `${id} 探测完成：${r.result.verdict}${r.result.measured ? " " + fmtK(r.result.measured) : ""}`);
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     } finally {
       setProbing((s) => ({ ...s, [id]: false }));
     }
-  }, [flash]);
+  }, [flash, probes]);
 
   const filtered = (models ?? []).filter((m) => {
     if (src === "pool" && m.provider) return false;
@@ -237,8 +242,10 @@ export function ModelsView({ flash }: { flash: Flash }) {
                             {r === "running" ? "…" : "实测"}
                           </button>
                           <button className="btn small ghost" disabled={probing[m.id]} onClick={() => probe(m)}
-                            title="阶梯上探真实输出上限（耗时较长，结果落库）">
-                            {probing[m.id] ? "探测中…" : "探测"}
+                            title={probeOf(m.id) && probeOf(m.id)!.measured !== null
+                              ? "已有实测结论（落库），点击强制重测（耗时较长）"
+                              : "阶梯上探真实输出上限（耗时较长，结果落库，已有结论时不再重复探测）"}>
+                            {probing[m.id] ? "探测中…" : (probeOf(m.id) && probeOf(m.id)!.measured !== null ? "重测" : "探测")}
                           </button>
                           {r !== undefined && r !== "running" && (
                             <button className="btn small ghost" onClick={() => setExpanded(open ? null : m.id)}>

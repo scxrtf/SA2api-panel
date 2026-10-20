@@ -191,8 +191,6 @@ body {
 .ctrl-action.secondary .code { background: var(--surface); }
 .ctrl-action:disabled .code { color: var(--fg-dim); }
 .ctrl-action .txt { flex: 1; font-size: 13px; font-weight: 600; }
-.ctrl-action .arr { font-size: 17px; color: #cbccd0; flex-shrink: 0; }
-.ctrl-action.secondary .arr { color: var(--fg-dim); }
 
 /* CloseRouter ControlStatus：圆点 + 标题 + badge + 描述 */
 .ctrl-status {
