@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "crypto";
 import { getConfig, type AppConfig } from "../config";
 import { classify, parseRetryAfter, UpstreamError } from "./errors";
 import { prepareBodyOpt, ensureConsoleSystem, globalEffortMap, realmKey } from "./payload";
+import { effortsSnapshot as catalogEffortsSnapshot } from "./modelCatalog";
 
 // 端点常量（realm 感知）
 export const CHAT_BASE_CN = "https://copilot.tencent.com";
@@ -106,7 +107,7 @@ function userAgent(cfg: AppConfig, a: AuthShape): string {
   return `WorkBuddy/${clientVersion(cfg)} ${platform}/${clientVersion(cfg)} CLI/${cliVersion(cfg)}`;
 }
 
-function commonHeaders(cfg: AppConfig, a: AuthShape): Record<string, string> {
+export function commonHeaders(cfg: AppConfig, a: AuthShape): Record<string, string> {
   const origin = originReferer(a);
   const h: Record<string, string> = {
     "Content-Type": "application/json",
@@ -293,21 +294,26 @@ export async function refreshToken(
 // ---------- 出站请求体组装（对齐 Go client.go prepareBody + cache_key.go） ----------
 
 // efforts 能力缓存（按 realm 分桶）：fetchModels 解析的 supportedEfforts/defaultEffort。
-// 对齐 Go Client.efforts/defaultEfforts——本网关暂无远端探测桶，global 域走
-// globalEffortMap 静态兜底合成（issue #84：国际版不发 supportedEfforts 也必须降级）。
+// 对齐 Go Client.efforts/defaultEfforts——远端探测桶在 modelCatalog（fetchModelsFull /
+// fetchGlobalModelInfos 成功时权威写入）；global 域无桶时走 globalEffortMap 静态兜底合成
+// （issue #84：国际版不发 supportedEfforts 也必须降级）。
 type EffortMaps = {
   efforts: Record<string, string[]> | null;
   defs: Record<string, string> | null;
 };
 
-// effortsSnapshot 取指定 realm 的 effort 能力表。当前实现：
-//   - global → 产品静态兜底表（对齐 Go globalEffortMap(nil, nil) 的结果）
-//   - cn     → null（未知，透传不降级；thinking.ts 缺档回退硬编码 high）
+// effortsSnapshot 取指定 realm 的 effort 能力表（对齐 Go 语义）：
+//   - global → globalEffortMap(远端桶, defs) 合成：静态兜底表为基，远端桶覆盖（权威优先）
+//   - cn     → 远端桶原样（无桶 = null，透传不降级；thinking.ts 缺档回退硬编码 high）
 function effortsSnapshot(realm: string): EffortMaps {
+  const remote = catalogEffortsSnapshot(realm);
+  const hasRemote =
+    Object.keys(remote.efforts).length > 0 || Object.keys(remote.defaults).length > 0;
   if (realmKey(realm) === "global") {
-    const m = globalEffortMap(null, null);
+    const m = globalEffortMap(remote.efforts, remote.defaults);
     return { efforts: m.efforts, defs: m.defs };
   }
+  if (hasRemote) return { efforts: remote.efforts, defs: remote.defaults };
   return { efforts: null, defs: null };
 }
 

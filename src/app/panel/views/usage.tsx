@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { req, fmtNum, useAutoRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
+import { CtrlMetric } from "../components/ctrl";
 import { UsageChart, type SeriesPoint } from "../components/usageChart";
 
 interface UsageResp {
@@ -38,12 +39,12 @@ export function UsageView({ flash }: { flash: Flash }) {
       </>}>
         <div className="pad">
           <div className="stat-grid">
-            <div className="stat"><div className="stat-num">{fmtNum(u.count)}</div><div className="stat-label">请求数</div></div>
-            <div className="stat"><div className="stat-num">{fmtNum(u.ok_count)}</div><div className="stat-label">成功数</div></div>
-            <div className="stat"><div className="stat-num">{fmtNum(u.prompt_tokens)}</div><div className="stat-label">输入 tokens</div></div>
-            <div className="stat"><div className="stat-num">{fmtNum(u.completion_tokens)}</div><div className="stat-label">输出 tokens</div></div>
-            <div className="stat"><div className="stat-num">{fmtNum(u.total_tokens)}</div><div className="stat-label">总 tokens</div></div>
-            <div className="stat"><div className="stat-num">{u.credit.toFixed(2)}</div><div className="stat-label">积分消耗</div></div>
+            <CtrlMetric label="请求数" value={fmtNum(u.count)} unit="REQ" />
+            <CtrlMetric label="成功数" value={fmtNum(u.ok_count)} unit="OK" color="var(--ok)" />
+            <CtrlMetric label="输入 tokens" value={fmtNum(u.prompt_tokens)} unit="IN" />
+            <CtrlMetric label="输出 tokens" value={fmtNum(u.completion_tokens)} unit="OUT" />
+            <CtrlMetric label="总 tokens" value={fmtNum(u.total_tokens)} unit="TOK" />
+            <CtrlMetric label="积分消耗" value={u.credit.toFixed(2)} unit="CR" color="var(--accent)" />
           </div>
         </div>
       </Box>

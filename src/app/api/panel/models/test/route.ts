@@ -95,12 +95,23 @@ export async function POST(req: Request) {
   }
 }
 
-function toResult(model: string, r: { firstTokenMs: number; totalMs: number; outputTokens: number }): ModelTestResult {
+function toResult(model: string, r: {
+  firstTokenMs: number; totalMs: number; outputTokens: number;
+  chunks: number; outputChars: number; usageTokens: number | null;
+}): ModelTestResult {
+  const genMs = Math.max(0, r.totalMs - r.firstTokenMs);
+  // usage 精确值优先；缺失按 4 字符≈1 token 估算（对齐 Go modeltest 口径）。
+  const outTokens = r.usageTokens ?? Math.max(r.outputTokens, Math.ceil(r.outputChars / 4));
   return {
     model,
     first_token_ms: r.firstTokenMs,
     total_ms: r.totalMs,
-    output_tokens: r.outputTokens,
-    tokens_per_sec: r.totalMs > 0 ? Math.round((r.outputTokens / r.totalMs) * 1000 * 10) / 10 : 0,
+    output_tokens: outTokens,
+    // tok/s 口径对齐原作 SpeedTester：输出 tokens ÷（总耗时 − TTFT）。
+    tokens_per_sec: genMs > 0 ? Math.round((outTokens / genMs) * 1000 * 10) / 10 : 0,
+    gen_ms: genMs,
+    chunks: r.chunks,
+    output_chars: r.outputChars,
+    usage_tokens: r.usageTokens,
   };
 }

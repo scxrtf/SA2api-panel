@@ -953,6 +953,22 @@ export async function counts(): Promise<{
   return { total: all.length, healthy, cooling, disabled, paused };
 }
 
+// countsDetailed 对齐 Go Pool.CountsDetailed：在 counts 之上附 in_flight_full
+//（在途打满上限的账号数，含域上限口径），供 /status 与面板 overview。
+export async function countsDetailed(cfg: AppConfig): Promise<{
+  total: number; healthy: number; cooling: number; disabled: number; paused: number;
+  in_flight_full: number;
+}> {
+  const base = await counts();
+  const all = await loadEntries();
+  let inFlightFullN = 0;
+  for (const e of all) {
+    if (e.state.disabled || e.state.paused) continue;
+    if (inFlightFull(e, cfg)) inFlightFullN++;
+  }
+  return { ...base, in_flight_full: inFlightFullN };
+}
+
 export function costExploreStatus(): { events: number; last: Record<string, number> } {
   const last: Record<string, number> = {};
   for (const [k, v] of exploreLast) last[k.replace("\x1f", "|")] = v;

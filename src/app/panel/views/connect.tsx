@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { getKey } from "../lib";
 import { Box } from "../components/ui";
+import { CtrlValue, CtrlHint } from "../components/ctrl";
 
 export function ConnectView() {
   const [origin, setOrigin] = useState("");
@@ -23,21 +24,29 @@ export function ConnectView() {
         <div className="connect-grid">
           <div className="connect-card">
             <h4>OpenAI 兼容（Chat Completions）</h4>
-            <div className="dim" style={{ fontSize: 12.5 }}>Base URL 指向 <span className="mono">/api/v1</span>，模型名直接用池内模型（如 glm-5.2）。</div>
+            <div style={{ display: "grid", gap: 8, marginBottom: 4 }}>
+              <CtrlValue label="BASE URL" value={openaiBase} accent />
+              <CtrlValue label="API KEY" value={k} />
+            </div>
             <pre>{`base_url: ${openaiBase}
 api_key:  ${k}
 model:    glm-5.2`}</pre>
           </div>
           <div className="connect-card">
             <h4>Anthropic 兼容（Messages）</h4>
-            <div className="dim" style={{ fontSize: 12.5 }}>Claude Code / 支持 ANTHROPIC_BASE_URL 的工具，指向 <span className="mono">/api</span>。</div>
+            <div style={{ display: "grid", gap: 8, marginBottom: 4 }}>
+              <CtrlValue label="BASE URL" value={anthropicBase} accent />
+              <CtrlValue label="AUTH TOKEN" value={k} />
+            </div>
             <pre>{`ANTHROPIC_BASE_URL=${anthropicBase}
 ANTHROPIC_AUTH_TOKEN=${k}
 ANTHROPIC_MODEL=glm-5.2`}</pre>
           </div>
           <div className="connect-card">
             <h4>curl 验证</h4>
-            <div className="dim" style={{ fontSize: 12.5 }}>列出当前可用模型：</div>
+            <div style={{ marginBottom: 4 }}>
+              <CtrlHint>列出当前可用模型：</CtrlHint>
+            </div>
             <pre>{`curl ${openaiBase}/models \\
   -H "Authorization: Bearer ${k}"`}</pre>
           </div>

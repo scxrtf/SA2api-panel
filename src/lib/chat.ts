@@ -27,6 +27,7 @@ import {
 } from "./upstream/errors";
 import { streamPassthrough, aggregate, type StreamStats } from "./upstream/sse";
 import { runlog } from "./runlog";
+import * as wafip from "./wafip";
 
 type Obj = Record<string, unknown>;
 
@@ -445,6 +446,17 @@ export async function handleChat(opts: {
         };
         await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, lastErr.retryAfterMs);
         fail(acct.uid);
+        // WAF IP 级 fail-fast（优先于轮转退避——IP 级拦截时退避无意义）：
+        // 该次 WAF 403 喂入 IP 级状态机，若激活（短窗多号命中，IP 被拦而非账号）
+        // 直接终止轮转返回 403，避免把一次客户端请求放大 max_rotate 倍加重风控。
+        if (kind === "waf_block" && wafip.noteWaf(acct.uid)) {
+          finishLog(403, acct.uid, "waf_ip_blocked");
+          return openAIError(
+            403, "waf_ip_blocked",
+            "waf ip-level block: upstream firewall is blocking the gateway IP, " +
+            "rotation stopped; retry after the block window expires",
+          );
+        }
         continue;
       }
 
@@ -534,6 +546,16 @@ export async function handleChat(opts: {
 
   if (lastErr) {
     switch (lastErr.kind) {
+      case "waf_block":
+        if (wafip.active()) {
+          // IP 级拦截措辞（fail-fast 终止路径）。
+          status = 403;
+          code = "waf_ip_blocked";
+          msg = "waf ip-level block: upstream firewall is blocking the gateway IP, " +
+            "rotation stopped; retry after the block window expires";
+          upstreamMsgPassed = true;
+        }
+        break;
       case "soft_rate":
         status = 429;
         code = "rate_limit_exceeded";
@@ -546,7 +568,7 @@ export async function handleChat(opts: {
       default:
         break;
     }
-    if (lastErr.msg.trim()) {
+    if (lastErr.msg.trim() && code !== "waf_ip_blocked") {
       msg = lastErr.msg.trim();
       upstreamMsgPassed = true;
     }

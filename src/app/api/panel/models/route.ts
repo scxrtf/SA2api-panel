@@ -2,7 +2,7 @@
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
-import { fetchModels } from "@/lib/upstream/client";
+import { fetchModelsFull, fetchGlobalModelInfos } from "@/lib/upstream/modelCatalog";
 import { providerModels } from "@/lib/provider";
 import { authShapeOf } from "@/lib/login";
 
@@ -26,9 +26,19 @@ export async function GET(req: Request) {
     const acct = usable.find((a) => a.realm === realm);
     if (!acct) continue;
     try {
-      const infos = await fetchModels(cfg, authShapeOf(acct));
-      for (const mi of infos) {
-        out.push({ id: realm + ":" + mi.id, name: mi.id, credits: mi.credits ?? "" });
+      const shape = authShapeOf(acct);
+      if (realm === "global") {
+        // global 域纯动态四路探测（v3 三路 UA + 企业端点补缺），拉不出即空名单。
+        const { names, infos } = await fetchGlobalModelInfos(cfg, shape);
+        for (const id of names) {
+          const mi = infos?.find((x) => x.id === id);
+          out.push({ id: realm + ":" + id, name: mi?.name ?? id, credits: mi?.credits ?? "" });
+        }
+      } else {
+        const infos = await fetchModelsFull(cfg, shape);
+        for (const mi of infos) {
+          out.push({ id: realm + ":" + mi.id, name: mi.name ?? mi.id, credits: mi.credits ?? "" });
+        }
       }
     } catch (e) {
       fetchErrs.push(realm + ": " + (e instanceof Error ? e.message : String(e)));

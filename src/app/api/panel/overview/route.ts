@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const cfg = await getConfig();
-  const c = await pool.counts();
+  const c = await pool.countsDetailed(cfg);
   const accounts = await pool.statusList();
   const sticky = await prisma.stickySession.count().catch(() => 0);
   const providerCount = await prisma.provider.count().catch(() => 0);
@@ -25,7 +25,6 @@ export async function GET(req: Request) {
     redis_mode: "noop",
     sticky_sessions: sticky,
     ...c,
-    in_flight_full: 0,
     accounts,
     gateway: { enabled: providerCount > 0, providers: providerCount, keys: keyCount },
   });

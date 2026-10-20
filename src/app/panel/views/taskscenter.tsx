@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { req } from "../lib";
 import { Box, type Flash } from "../components/ui";
+import { CtrlAction, CtrlCard, CtrlHint } from "../components/ctrl";
 
 interface GrowthTask {
   task_code: string; title?: string; task_desc?: string; description?: string;
@@ -86,16 +87,24 @@ export function TasksCenterView({ flash }: { flash: Flash }) {
   const pct = items.length > 0 ? Math.round((doneCount / items.length) * 100) : 0;
 
   return (
-    <Box title="成长任务队列" hint={queue?.running ? "执行中 " + doneCount + "/" + items.length : undefined} extra={<>
-      <button className="btn xs" onClick={schoolVouchers} title="开学季抽奖抽中的第三方券码（活动已结束，历史券码仍可查）">查询券码</button>
-      <label className="sel-note">并发
+    <>
+    {/* CloseRouter ControlAction 操作区 */}
+    <CtrlCard style={{ marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+        <CtrlAction code="RUN" text={busy ? "执行中…" : "执行全部待办"} onClick={runQueue} disabled={busy} />
+        <CtrlAction code="SCAN" text="扫描待办" secondary onClick={scan} disabled={busy} />
+        <CtrlAction code="VOCH" text="查询券码" secondary onClick={schoolVouchers}
+          title="开学季抽奖抽中的第三方券码（活动已结束，历史券码仍可查）" />
+      </div>
+      <label className="sel-note">队列并发
         <select className="select" value={conc} onChange={(e) => setConc(Number(e.target.value))}>
           <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
         </select>
       </label>
-      <button className="btn xs" disabled={busy} onClick={scan}>扫描待办</button>
-      <button className="btn xs primary" disabled={busy} onClick={runQueue}>执行全部待办</button>
-    </>}>
+      <CtrlHint>扫描所有账号的成长任务与开学季待办，排成队列后按并发执行；执行结果实时刷新。</CtrlHint>
+    </CtrlCard>
+
+    <Box title="成长任务队列" hint={queue?.running ? "执行中 " + doneCount + "/" + items.length : undefined}>
       {queue && queue.total > 0 && (
         <div className="qprog">
           <div className="qbar"><i style={{ width: pct + "%" }}></i></div>
@@ -152,5 +161,6 @@ export function TasksCenterView({ flash }: { flash: Flash }) {
         </div>
       )}
     </Box>
+    </>
   );
 }

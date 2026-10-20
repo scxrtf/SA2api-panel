@@ -3,6 +3,7 @@
 import React, { useCallback, useState } from "react";
 import { req, fmtNum, fmtTime, fmtDur } from "../lib";
 import { Box, type StatusRow, type Overview, type Flash } from "../components/ui";
+import { CtrlMetric, CtrlAction, CtrlCard, CtrlHint } from "../components/ctrl";
 import { AddAccountModal } from "../components/addAccount";
 
 function acctTags(a: StatusRow) {
@@ -73,23 +74,30 @@ export function AccountsView({ ov, flash, onRefresh }: {
 
   return (
     <>
+      {/* CloseRouter ControlMetric 栅格：等宽大数字 + 小标签 */}
       <div className="stat-grid" style={{ marginBottom: 14 }}>
-        <div className="stat"><div className="stat-num">{ov.total}</div><div className="stat-label">账号总数</div></div>
-        <div className="stat"><div className="stat-num" style={{ color: "var(--ok)" }}>{ov.healthy}</div><div className="stat-label">可用</div></div>
-        <div className="stat"><div className="stat-num" style={{ color: "var(--warn)" }}>{ov.cooling}</div><div className="stat-label">冷却中</div></div>
-        <div className="stat"><div className="stat-num" style={{ color: "var(--err)" }}>{ov.disabled}</div><div className="stat-label">已禁用</div></div>
-        <div className="stat"><div className="stat-num" style={{ color: "var(--warn)" }}>{ov.paused}</div><div className="stat-label">已暂停选号</div></div>
-        <div className="stat"><div className="stat-num">{ov.sticky_sessions}</div><div className="stat-label">粘性会话</div></div>
+        <CtrlMetric label="账号总数" value={ov.total} unit="ACC" />
+        <CtrlMetric label="可用" value={ov.healthy} unit="OK" color="var(--ok)" />
+        <CtrlMetric label="冷却中" value={ov.cooling} unit="COOL" color="var(--warn)" />
+        <CtrlMetric label="已禁用" value={ov.disabled} unit="OFF" color="var(--err)" />
+        <CtrlMetric label="已暂停选号" value={ov.paused} unit="HOLD" color="var(--warn)" />
+        <CtrlMetric label="粘性会话" value={ov.sticky_sessions} unit="SESS" />
       </div>
 
-      <Box title="账号池" extra={<>
-        <button className="btn xs" onClick={() => batch("checkin_all", "全部签到")}>全部签到</button>
-        <button className="btn xs" onClick={() => batch("travel_all", "旅行巡检")}>旅行巡检</button>
-        <button className="btn xs" onClick={() => batch("activity_all", "活跃上报")}>活跃上报</button>
-        <button className="btn xs" onClick={() => batch("keepalive_all", "全部保活")}>全部保活</button>
-        <button className="btn xs" onClick={() => batch("balance_all", "刷新余额")}>刷新余额</button>
-        <button className="btn xs primary" onClick={() => setAddOpen(true)}>添加账号</button>
-      </>}>
+      {/* CloseRouter ControlAction 批量操作区：CODE 徽章 + → */}
+      <CtrlCard style={{ marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+          <CtrlAction code="ADD" text="添加账号" onClick={() => setAddOpen(true)} />
+          <CtrlAction code="CHK" text="全部签到" secondary onClick={() => batch("checkin_all", "全部签到")} />
+          <CtrlAction code="TRV" text="旅行巡检" secondary onClick={() => batch("travel_all", "旅行巡检")} />
+          <CtrlAction code="ACT" text="活跃上报" secondary onClick={() => batch("activity_all", "活跃上报")} />
+          <CtrlAction code="KEEP" text="全部保活" secondary onClick={() => batch("keepalive_all", "全部保活")} />
+          <CtrlAction code="BAL" text="刷新余额" secondary onClick={() => batch("balance_all", "刷新余额")} />
+        </div>
+        <CtrlHint>批量操作异步执行，结果见「运行日志」页；添加账号支持浏览器授权与 JSON 导入两种方式。</CtrlHint>
+      </CtrlCard>
+
+      <Box title="账号池">
         <div className="pad" style={{ paddingBottom: 0, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input className="input" style={{ width: 220 }} placeholder="搜索 UID / 昵称"
             value={q} onChange={(e) => setQ(e.target.value)} />
@@ -140,7 +148,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
                   </td>
                   <td>{acctTags(a).map((t) => <span key={t.text} className={"tag " + t.cls}>{t.text}</span>)}</td>
                   <td>
-                    <div className="btn-row">
+                    <div className="btn-row" style={{ flexWrap: "nowrap" }}>
                       <button className="btn small" disabled={busy} onClick={() => op(a.uid, "checkin")}>签到</button>
                       <button className="btn small" disabled={busy} onClick={() => op(a.uid, "balance")}>余额</button>
                       {a.paused

@@ -1,17 +1,23 @@
 "use client";
 // 积分构成可视化组件（对齐 Go pkBySource/pkAccountSegments/renderExpiryDistribution）：
-// 1) PackageMixBar — 账号内按来源分色的构成条
+// 1) PackageMixBar — 账号内按来源分色的构成条（含剩余/已用占比）
 // 2) ExpiryDistribution — 按剩余天数逐行聚合的到期分布图（横向堆叠、按账号着色）
+// 色板对齐 CloseRouter Pal：橙系主色 + 同暖度灰阶，避免彩虹配色。
 import React from "react";
 import type { CreditPackage, PkgAccount } from "../views/packages";
 
-const PK_COLORS = ["#4f8cff", "#25b08b", "#e8a33d", "#c96bd6", "#e2607a",
-  "#5aa9e6", "#8fbf3f", "#b58b5a", "#7d8fa8", "#d4785c"];
-const PK_ACCOUNT_COLORS = ["#4f8cff", "#25b08b", "#e8a33d", "#c96bd6",
-  "#e2607a", "#20a4a4", "#8fbf3f", "#d4785c",
-  "#7c83db", "#c48a2f", "#b45f8c", "#5aa9e6"];
+// 来源色阶：橙 → 琥珀 → 暖灰 → 墨灰循环（对齐 Pal.orange / orangeDeep / ink / mute）。
+const PK_COLORS = ["#e8741c", "#f28a2e", "#f5a95c", "#d9a066", "#8a8f98",
+  "#b4b7bb", "#5a5c64", "#c98a4b", "#e39a55", "#6e6f78"];
+// 账号色阶：同色系不同明度，保证多账号可区分又不破坏黑白橙基调。
+const PK_ACCOUNT_COLORS = ["#e8741c", "#f28a2e", "#f5a95c", "#c9711a",
+  "#3a3a40", "#6e6f78", "#9a9aa3", "#d9a066",
+  "#b45a12", "#8a8f98", "#e39a55", "#48494e"];
+// 已用部分统一用浅灰斜纹，与剩余彩色形成「色比」对比。
+const PK_USED_COLOR = "#dedfdf";
 
 const fmtN = (n: number) => n.toLocaleString("en-US");
+const fmtPct = (x: number) => (x * 100).toFixed(1) + "%";
 
 // bySource 包按 code+name 归并（对齐 Go pkBySource）。
 function bySource(packs: CreditPackage[]) {
@@ -33,19 +39,39 @@ export function PackageMixBar({ packs }: { packs: CreditPackage[] }) {
   const srcs = bySource(packs);
   if (srcs.length === 0) return <div className="dim" style={{ fontSize: 12.5 }}>无套餐包</div>;
   const total = Math.max(1, srcs.reduce((s, x) => s + x.size, 0));
+  const keys = srcs.map((x) => x.key);
   return (
     <div>
       <div className="mixbar" role="img" aria-label="积分包构成">
         {srcs.map((s) => (
-          <i key={s.key} style={{ width: (s.size / total * 100).toFixed(2) + "%", background: colorOf(s.key, srcs.map((x) => x.key)) }}
-            title={s.name + " " + fmtN(s.size)}></i>
+          <i key={s.key} style={{ width: (s.size / total * 100).toFixed(2) + "%", background: colorOf(s.key, keys) }}
+            title={s.name + " " + fmtN(s.remain) + " / " + fmtN(s.size)}></i>
         ))}
       </div>
       <div className="pk-legend">
         {srcs.map((s) => (
-          <span key={s.key}><i style={{ background: colorOf(s.key, srcs.map((x) => x.key)) }}></i>
-            {s.name.replace(/^CodeBuddy/, "")} x{s.n} · {fmtN(s.size)}</span>
+          <span key={s.key}><i style={{ background: colorOf(s.key, keys) }}></i>
+            {s.name.replace(/^CodeBuddy/, "")} x{s.n} · {fmtPct(s.size / total)}</span>
         ))}
+      </div>
+      <div className="pk-srcbars">
+        {srcs.map((s) => {
+          const remainPct = s.size > 0 ? s.remain / s.size : 0;
+          return (
+            <div className="pk-srcrow" key={s.key}>
+              <span className="pk-srcname" title={s.name}>{s.name.replace(/^CodeBuddy/, "")}</span>
+              <div className="pk-srctrack">
+                <i style={{ width: fmtPct(remainPct), background: colorOf(s.key, keys) }}
+                  title={"剩余 " + fmtN(s.remain) + " / " + fmtN(s.size)}></i>
+                <b style={{ width: fmtPct(1 - remainPct), background: PK_USED_COLOR }}></b>
+              </div>
+              <span className="pk-srcnum mono">
+                {fmtN(s.remain)} <em>/ {fmtN(s.size)}</em>
+              </span>
+              <span className={"pk-srcpct mono" + (remainPct < 0.15 ? " low" : "")}>{fmtPct(remainPct)}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -121,7 +147,7 @@ export function ExpiryDistribution({ accounts }: { accounts: PkgAccount[] }) {
             <div className="pk-expiry-track">
               {row.segs.map((s, i) => (
                 <span key={i} className="pk-expiry-seg"
-                  style={{ ["--seg-color" as string]: colorMap.get(s.uid) ?? "#4f8cff", opacity: opacity(row.days), flex: Math.max(0.008, s.amount / Math.max(1, row.credits)) }}
+                  style={{ ["--seg-color" as string]: colorMap.get(s.uid) ?? PK_ACCOUNT_COLORS[0], opacity: opacity(row.days), flex: Math.max(0.008, s.amount / Math.max(1, row.credits)) }}
                   title={s.source + "\n" + fmtN(s.amount) + " 积分\n" + (s.expiresAt ? new Date(s.expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) : "—") + "\n" + s.accountName}
                   aria-label={s.accountName + " " + fmtN(s.amount)}></span>
               ))}
@@ -132,7 +158,7 @@ export function ExpiryDistribution({ accounts }: { accounts: PkgAccount[] }) {
       </div>
       <div className="pk-expiry-legend">
         {ok.filter((a) => accountSegments(a, now).some((s) => s.days != null)).map((a) => (
-          <span key={a.uid}><i style={{ background: colorMap.get(a.uid) ?? "#4f8cff" }}></i>{a.nickname || a.uid.slice(0, 8)}</span>
+          <span key={a.uid}><i style={{ background: colorMap.get(a.uid) ?? PK_ACCOUNT_COLORS[0] }}></i>{a.nickname || a.uid.slice(0, 8)}</span>
         ))}
       </div>
       <div className="pk-expiry-foot">{ok.length + " 个账号" + (accounts.length - ok.length > 0 ? " · " + (accounts.length - ok.length) + " 个未获取余额" : "")}</div>
