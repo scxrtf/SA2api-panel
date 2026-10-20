@@ -26,6 +26,7 @@ import {
   type ErrKind,
 } from "./upstream/errors";
 import { streamPassthrough, aggregate, type StreamStats } from "./upstream/sse";
+import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
 import * as wafip from "./wafip";
 
@@ -246,6 +247,12 @@ export async function handleChat(opts: {
   let degradedApplied = degradeActive() && (cfg.prompt_mode === "passthrough" || cfg.prompt_mode === "append");
   if (bare !== rawModel) outBody = rewriteModel(outBody, bare);
 
+  // 工具名名单（Go handler.go:591 同语义）：上游在没有 tools 的请求里会把工具调用
+  // 吐成原生标记文本（见 upstream/dsml.ts），修复层用它做严格判定。名单来自本请求
+  // 声明的 tools 与会话历史里出现过的工具名两个来源——tools 声明会在中转环节丢失，
+  // 只认前者会让修复层在最需要它的场景下失效。提示词/模型名改写不动 tools 子树。
+  const declaredTools = toolNameAllowlist(outBody);
+
   const tried = new Set<string>();
   let lastErr: { kind: ErrKind; status: number; msg: string; retryAfterMs: number } | null = null;
   let modelBlock: pool.ModelBlockStatus | null = null;
@@ -464,7 +471,12 @@ export async function handleChat(opts: {
       if (stream && res.body) {
         // 流式：规范化透传 + error 帧旁路采集。
         const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-        const statsPromise = streamPassthrough(res.body, writable);
+        // 标记修复（Go handler.go:1047 同语义）：restore 上游吐在 content 里的
+        // 原生工具调用标记为 delta.tool_calls；第二参 true = 名单为空时弱判定
+        // （tools 声明链路丢失是实测最常见的泄漏成因，只做严格判定等于不设防）。
+        const statsPromise = streamPassthrough(
+          res.body, writable, new MarkupRepair(declaredTools, true),
+        );
         const uidCaptured = acct.uid;
         void statsPromise.then(async (stats) => {
           try {
@@ -531,7 +543,11 @@ export async function handleChat(opts: {
         await pool.noteModelCost(acct.uid, bare, agg.stats.credit, agg.stats.totalTokens);
       }
       finishLog(200, acct.uid, "");
-      return Response.json(agg.resp);
+      // 非流式标记修复（Go handler.go:1148 同语义）：content 含原生标记且
+      // 无结构化 tool_calls、finish_reason=stop 时，还原为 message.tool_calls。
+      return Response.json(
+        repairAggregatedResponse(agg.resp as Obj, declaredTools, true),
+      );
     }
   } finally {
     releaseHeld();

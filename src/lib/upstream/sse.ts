@@ -2,6 +2,8 @@
 //  - streamPassthrough：逐帧规范化透传（白名单重建 + error 帧观察 + [DONE] 兜底）
 //  - aggregate：把 SSE 流聚合成单个非流式响应（tool_calls 分片合并）
 
+import { MarkupRepair, markupToolCalls } from "./dsml";
+
 export interface StreamStats {
   validFrames: number;
   errorFrame: string; // 上游 error 帧原文（空 = 无）
@@ -84,10 +86,72 @@ function readUsageInto(stats: StreamStats, u: Obj): void {
   }
 }
 
+
+// ─── 标记修复（dsml.go）的流式帧改写助手 ─────────────────────────────────────
+
+// takeFinishReason 取出并删除所有 choice 的 finish_reason，返回第一个非空值。
+function takeFinishReason(obj: Obj): string {
+  let fr = "";
+  const chs = obj["choices"];
+  if (!Array.isArray(chs)) return fr;
+  for (const ci of chs) {
+    if (!ci || typeof ci !== "object") continue;
+    const c = ci as Obj;
+    const v = c["finish_reason"];
+    if (typeof v === "string" && v !== "" && fr === "") fr = v;
+    delete c["finish_reason"];
+  }
+  return fr;
+}
+
+// rewriteFinishReason 把 choice 上「已有且为 stop」的 finish_reason 改写成 want。
+// 本来就没有 finish_reason 的中间帧一律不动；已有其他值（length/content_filter）
+// 也不动。返回是否发生了改写。
+function rewriteFinishReason(obj: Obj, want: string): boolean {
+  let changed = false;
+  const chs = obj["choices"];
+  if (!Array.isArray(chs)) return false;
+  for (const ci of chs) {
+    if (!ci || typeof ci !== "object") continue;
+    const c = ci as Obj;
+    if (c["finish_reason"] === "stop") {
+      c["finish_reason"] = want;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+// markupCallFrame 以 src 帧为模板构造一帧只带单个 delta.tool_calls 的 chunk。
+function markupCallFrame(src: Obj, idx: number, call: { name: string; arguments: string }): Obj {
+  const frame: Obj = {
+    object: "chat.completion.chunk",
+    choices: [{ index: 0, delta: { tool_calls: markupToolCalls([call], idx) } }],
+  };
+  for (const k of ["created", "model"]) {
+    const v = src[k];
+    if (v !== undefined && v !== null) frame[k] = v;
+  }
+  return frame;
+}
+
+// finishOnlyFrame 构造一帧只带 finish_reason 的收尾 chunk（空 delta）。
+function finishOnlyFrame(src: Obj, finish: string): Obj {
+  const frame: Obj = {
+    object: "chat.completion.chunk",
+    choices: [{ index: 0, delta: {}, finish_reason: finish }],
+  };
+  for (const k of ["created", "model"]) {
+    const v = src[k];
+    if (v !== undefined && v !== null) frame[k] = v;
+  }
+  return frame;
+}
 // streamPassthrough 透传上游 SSE（逐帧规范化）。返回 stats；写失败抛错（客户端断连）。
 export async function streamPassthrough(
   upstream: ReadableStream<Uint8Array>,
   out: WritableStream<Uint8Array>,
+  repair?: MarkupRepair | null,
 ): Promise<StreamStats> {
   const stats: StreamStats = {
     validFrames: 0, errorFrame: "",
@@ -100,6 +164,79 @@ export async function streamPassthrough(
   const dec = new TextDecoder();
   const enc = new TextEncoder();
   let buf = "";
+  // 标记修复跨帧状态（见 dsml.go / Go StreamHint）：
+  //   synthIdx 本流已还原的调用数（合成 index 从上游最大 index 之后接续）；
+  //   maxToolIdx 上游已用过的最大 tool_call index（避免合成 index 撞车）；
+  //   toolFinishSent 是否已发出过 finish_reason: tool_calls（流尾兜底用）。
+  const repairOn = repair != null && repair.enabled();
+  let synthIdx = 0;
+  let maxToolIdx = -1;
+  let toolFinishSent = false;
+
+  // repairFrame 在透传前跑标记修复，把一帧展开成「可能多帧」：正文帧 + N 个
+  // delta.tool_calls 帧 + 收尾 finish_reason 帧。没有命中标记时原样返回入参帧。
+  const repairFrame = (obj: Obj): Obj[] => {
+    if (!repairOn) return [obj];
+    const chs = obj["choices"];
+    if (!Array.isArray(chs)) return [obj];
+    const calls: { name: string; arguments: string }[] = [];
+    for (const ci of chs) {
+      if (!ci || typeof ci !== "object") continue;
+      const c = ci as Obj;
+      const d = c["delta"];
+      if (!d || typeof d !== "object") continue;
+      const dm = d as Obj;
+      const txt = dm["content"];
+      if (typeof txt !== "string" || txt === "") continue;
+      const { emit, calls: got } = repair!.feed(txt);
+      calls.push(...got);
+      if (emit === "") {
+        delete dm["content"];
+      } else {
+        dm["content"] = emit;
+      }
+    }
+    if (calls.length === 0) {
+      // 本帧没命中标记；但本流此前还原过调用 → 把上游的 stop 收尾改写成 tool_calls。
+      if (synthIdx > 0 && rewriteFinishReason(obj, "tool_calls")) {
+        toolFinishSent = true;
+      }
+      return [obj];
+    }
+    // 命中：finish_reason 必须挪到工具调用帧之后（客户端读到调用前不得认为回合
+    // 已结束）；本帧本来没有 finish_reason 时不得补收尾（上游收尾帧随后就到）。
+    const fr = takeFinishReason(obj);
+    const out: Obj[] = [obj];
+    for (const call of calls) {
+      const idx = maxToolIdx + 1 + synthIdx;
+      synthIdx++;
+      out.push(markupCallFrame(obj, idx, call));
+    }
+    if (fr !== "") {
+      const fr2 = fr === "stop" ? "tool_calls" : fr;
+      out.push(finishOnlyFrame(obj, fr2));
+      toolFinishSent = fr2 === "tool_calls";
+    }
+    return out;
+  };
+
+  // noteToolIdx 维护上游已用过的最大 tool_call index（修复合成帧接续编号用）。
+  const noteToolIdx = (obj: Obj) => {
+    const chs = obj["choices"];
+    if (!Array.isArray(chs)) return;
+    for (const ci of chs) {
+      if (!ci || typeof ci !== "object") continue;
+      const d = (ci as Obj)["delta"];
+      if (!d || typeof d !== "object") continue;
+      const tcs = (d as Obj)["tool_calls"];
+      if (!Array.isArray(tcs)) continue;
+      for (const tci of tcs) {
+        if (!tci || typeof tci !== "object") continue;
+        const v = (tci as Obj)["index"];
+        if (typeof v === "number" && v > maxToolIdx) maxToolIdx = v;
+      }
+    }
+  };
   const write = async (payload: string) => {
     await writer.write(enc.encode("data: " + payload + "\n\n"));
   };
@@ -136,7 +273,10 @@ export async function streamPassthrough(
             if (stats.validFrames === 0) stats.ttfbMs = Date.now() - started;
             const u = usageFromFrame(obj);
             if (u) readUsageInto(stats, u);
-            await write(JSON.stringify(normalizeFrame(obj)));
+            noteToolIdx(obj);
+            for (const fr of repairFrame(obj)) {
+              await write(JSON.stringify(normalizeFrame(fr)));
+            }
             stats.validFrames++;
             continue;
           }
@@ -151,12 +291,37 @@ export async function streamPassthrough(
       }
       if (doneSeen) break;
     }
+    // 标记修复的尾部收尾：流结束时仍未判定的字节一律原文回吐（绝不吞字节，
+    // 未闭合的块连起始标记一起交还）；若本流还原过调用、但上游从未给出收尾帧，
+    // 补一帧 finish_reason: tool_calls，保证客户端不会把「工具调用回合」读成
+    // 「模型只说了话」。
+    if (repairOn) {
+      const tail = repair!.flush();
+      if (tail !== "") {
+        const tailObj: Obj = {
+          object: "chat.completion.chunk",
+          choices: [{ index: 0, delta: { content: tail } }],
+        };
+        await write(JSON.stringify(normalizeFrame(tailObj)));
+        stats.validFrames++;
+      }
+      if (synthIdx > 0 && !toolFinishSent) {
+        await write(JSON.stringify(normalizeFrame(finishOnlyFrame({}, "tool_calls"))));
+      }
+    }
     // 空流兜底：先写 error 帧再补 [DONE]（HTTP 头已发只能 200）。
     if (stats.validFrames === 0) {
       await write('{"error":{"message":"empty upstream stream","type":"upstream_error","code":"upstream_parse"}}');
     }
     await writer.write(enc.encode("data: [DONE]\n\n"));
   } finally {
+    // 关闭 writable 让下游读到 done（releaseLock 不关流，下游会一直挂起）。
+    // 客户端断连时 close 抛错，吞掉即可。
+    try {
+      await writer.close();
+    } catch {
+      // 忽略。
+    }
     try {
       writer.releaseLock();
     } catch {
