@@ -1,6 +1,8 @@
 // POST .../pause — 暂停选号（保号任务照常；不写 reason/不清冷却，区别于 disable）。
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
 import * as pool from "@/lib/pool";
+import { runlogAccount } from "@/lib/runlog";
+import { label } from "@/lib/logfmt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,5 +17,6 @@ export async function POST(req: Request, ctx: Ctx) {
   const acct = await prisma.account.findUnique({ where: { uid } });
   if (!acct) return fail(404, "account not found");
   await pool.pause(uid);
+  runlogAccount("暂停选号", label(acct.uid, acct.nickname));
   return ok();
 }

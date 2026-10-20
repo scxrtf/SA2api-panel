@@ -6,6 +6,8 @@ import * as pool from "@/lib/pool";
 import { dailyCheckin, userResource, expiringSoonMs } from "@/lib/upstream/client";
 import { isAlreadyCheckin } from "@/lib/upstream/errors";
 import { authShapeOf } from "@/lib/login";
+import { runlogAccount } from "@/lib/runlog";
+import { label } from "@/lib/logfmt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ export async function POST(req: Request, ctx: Ctx) {
   if (!row) return fail(404, "account not found");
   const cfg = await getConfig();
   const a = authShapeOf(row);
+  const who = label(row.uid, row.nickname);
 
   let checkinMsg = "";
   let checkinDone = false;
@@ -27,17 +30,22 @@ export async function POST(req: Request, ctx: Ctx) {
   if (enterprise || row.realm === "global") {
     // 企业号无签到体系；global 无 CN 签到（注册激活/trial 在登录时已处理）。
     checkinMsg = enterprise ? "企业账号无签到体系（已跳过签到，仅刷新额度）" : "global 域无签到（仅刷新额度）";
+    runlogAccount("签到", who + ": " + checkinMsg);
   } else {
     try {
       await dailyCheckin(cfg, a);
       await pool.markCheckin(uid);
       checkinDone = true;
+      runlogAccount("签到", who + ": 成功");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       checkinMsg = msg; // "今天已签到"等业务错误照常查余额
       if (isAlreadyCheckin(msg)) {
         await pool.markCheckin(uid);
         checkinDone = true;
+        runlogAccount("签到", who + ": 今天已签到");
+      } else {
+        runlogAccount("签到", who + ": 失败 " + msg);
       }
     }
   }
@@ -53,8 +61,11 @@ export async function POST(req: Request, ctx: Ctx) {
     );
     resp["credits"] = r.remain;
     resp["credits_total"] = r.total;
+    runlogAccount("余额刷新", who + ": " + r.remain + "/" + r.total);
   } catch (e) {
-    resp["balance_error"] = e instanceof Error ? e.message : String(e);
+    const msg = e instanceof Error ? e.message : String(e);
+    resp["balance_error"] = msg;
+    runlogAccount("余额刷新失败", who + ": " + msg);
   }
   return ok(resp);
 }

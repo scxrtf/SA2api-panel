@@ -89,6 +89,21 @@ export function AccountsView({ ov, flash, onRefresh }: {
   const now = useNow();
   const scan = useModelScan(flash, onRefresh);
   const [addOpen, setAddOpen] = useState(false);
+  // 账号池区块折叠：默认展开；收起后隐藏筛选条与账号表，只留标题栏和计数，
+  // 状态持久化到 localStorage（惰性初始化，避免 effect 内 setState）。
+  const [poolOpen, setPoolOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try { return localStorage.getItem("wb2a:accounts-pool-collapsed") !== "1"; }
+    catch { return true; }
+  });
+  const togglePool = useCallback(() => {
+    setPoolOpen((v) => {
+      const nv = !v;
+      try { localStorage.setItem("wb2a:accounts-pool-collapsed", nv ? "0" : "1"); }
+      catch { /* 忽略 */ }
+      return nv;
+    });
+  }, []);
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"" | "healthy" | "cooling" | "paused" | "disabled">("");
@@ -134,6 +149,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
       {/* CloseRouter ControlMetric 栅格：等宽大数字 + 小标签 */}
       <div className="stat-grid" style={{ marginBottom: 14 }}>
         <CtrlMetric label="账号总数" value={ov.total} unit="ACC" />
+        <CtrlMetric label="国际账号" value={ov.accounts.filter((a) => a.realm === "global").length} unit="ACC" color="var(--ok)" />
         <CtrlMetric label="可用" value={ov.healthy} unit="OK" color="var(--ok)" />
         <CtrlMetric label="冷却中" value={ov.cooling} unit="COOL" color="var(--warn)" />
         <CtrlMetric label="已禁用" value={ov.disabled} unit="OFF" color="var(--err)" />
@@ -149,7 +165,20 @@ export function AccountsView({ ov, flash, onRefresh }: {
           // 千分位长值（如 1,234,567 / 8,901,234）会被 .stat-num 的 nowrap+ellipsis
           // 截断——这张卡单独缩小字号并允许换行，保证“剩余 / 总额”完整可见。
           numStyle={{ fontSize: 15, whiteSpace: "normal", overflow: "visible", textOverflow: "clip" }}
-        />        <CtrlMetric label="粘性会话" value={ov.sticky_sessions} unit="SESS" />
+        />
+        <CtrlMetric
+          label="国际积分剩余 / 总额"
+          value={(() => {
+            const g = ov.accounts.filter((a) => a.realm === "global");
+            const rem = g.reduce((n, a) => n + (a.credits || 0), 0);
+            const tot = g.reduce((n, a) => n + (a.credits_total || 0), 0);
+            return tot > 0 ? fmtNum(rem) + " / " + fmtNum(tot) : fmtNum(rem);
+          })()}
+          unit="PTS"
+          color="var(--ok)"
+          numStyle={{ fontSize: 15, whiteSpace: "normal", overflow: "visible", textOverflow: "clip" }}
+        />
+        <CtrlMetric label="粘性会话" value={ov.sticky_sessions} unit="SESS" />
       </div>
 
       {/* CloseRouter ControlAction 批量操作区：CODE 徽章 + → */}
@@ -179,7 +208,14 @@ export function AccountsView({ ov, flash, onRefresh }: {
         </div>
       )}
 
-      <Box title="账号池">
+      <Box title="账号池"
+        extra={
+          <button className="btn ghost xs" onClick={togglePool}
+            aria-expanded={poolOpen} title={poolOpen ? "收起账号列表" : "展开账号列表"}>
+            {poolOpen ? "收起 ▲" : "展开 ▼（" + filtered.length + " / " + ov.accounts.length + "）"}
+          </button>
+        }>
+        {poolOpen && (<>
         <div className="pad" style={{ paddingBottom: 0, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input className="input" style={{ width: 220 }} placeholder="搜索 UID / 昵称"
             value={q} onChange={(e) => setQ(e.target.value)} />
@@ -274,6 +310,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
             </tbody>
           </table>
         </div>
+        </>)}
       </Box>
 
       {/* 模型锁池（Go renderModelLocks 同口径）：服务端 model_locks 已按

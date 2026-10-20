@@ -42,6 +42,14 @@ export function runlogSnapshot(): LogEntry[] {
   return ring.entries.slice();
 }
 
+// runlogAccount 账号池操作日志：统一 "[accounts] " 前缀，classify 自动归 sys 频道。
+// action 写动作与账号标签（label(uid, nickname)），detail 补原因/余额等附加信息。
+// 约定：不写入 token/refresh_token 等凭证字段。
+export function runlogAccount(action: string, detail = ""): void {
+  const line = "[accounts] " + action + (detail ? " " + detail : "");
+  runlog(line);
+}
+
 // 环形缓冲在模块初始化时预写一条启动行，保证首个 /api/panel/logs 请求
 // 一定能看到「缓冲就绪」——即使 instrumentation 尚未跑、console hook 还没装上。
 if (ring.entries.length === 0) {

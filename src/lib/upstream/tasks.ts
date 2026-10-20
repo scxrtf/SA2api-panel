@@ -189,8 +189,11 @@ export async function buddyInfo(cfg: AppConfig, a: AuthShape): Promise<{ id: num
 export async function buddyFirst(cfg: AppConfig, a: AuthShape): Promise<unknown> {
   return growthJSON(cfg, a, "POST", "/activity/growth/buddy/first", {});
 }
+// buddyAgreement 同意领养协议。上游对空 {} 会回 400 "must agree to adopt"，
+// 需要显式携带 agree=true；同时补 client_token 幂等键（与 redeem/lottery 同口径），
+// 防重复提交产生协议记录冲突。
 export async function buddyAgreement(cfg: AppConfig, a: AuthShape): Promise<unknown> {
-  return growthJSON(cfg, a, "POST", "/activity/growth/buddy/agreement", {});
+  return growthJSON(cfg, a, "POST", "/activity/growth/buddy/agreement", { agree: true, client_token: clientToken() });
 }
 export async function streakReport(cfg: AppConfig, a: AuthShape): Promise<unknown> {
   return growthJSON(cfg, a, "POST", "/activity/growth/streak", {});

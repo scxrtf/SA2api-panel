@@ -299,7 +299,18 @@ async function travelAdopt(cfg: AppConfig, a: AuthShape, lb: string): Promise<bo
     runlog("travel " + lb + ": adopt preflight report: " + errMsg(e));
   }
   try { await buddyAgreement(cfg, a); }
-  catch (e) { runlog("travel " + lb + ": agreement: " + errMsg(e)); return false; }
+  catch (e) {
+    const msg = errMsg(e);
+    // 协议接口返回参数级 400（如 must agree to adopt）属确定性失败，
+    // 当日不再重试，避免每轮巡检刷同一条错误。
+    if (/http 4\d\d/.test(msg)) {
+      adoptTried.set(a.uid, travelDay());
+      runlog("travel " + lb + ": agreement rejected, retry tomorrow: " + msg);
+    } else {
+      runlog("travel " + lb + ": agreement: " + msg);
+    }
+    return false;
+  }
   try {
     await buddyFirst(cfg, a);
     runlog("travel " + lb + ": adopt ok (+300 credits)");

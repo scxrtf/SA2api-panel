@@ -3,6 +3,7 @@
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { loginEndpoints, loginDoJSON } from "@/lib/login";
+import { runlogAccount } from "@/lib/runlog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,10 +23,15 @@ export async function POST(req: Request) {
   try {
     data = await loginDoJSON("POST", ep.state, "", "{}", ep.origin);
   } catch (e) {
-    return fail(502, "auth state: " + (e instanceof Error ? e.message : String(e)));
+    const msg = e instanceof Error ? e.message : String(e);
+    runlogAccount("发起添加账号失败", "realm=" + realm + ": " + msg);
+    return fail(502, "auth state: " + msg);
   }
   const st = data as { state?: string; authUrl?: string };
-  if (!st?.state || !st?.authUrl) return fail(502, "auth state: missing state or authUrl");
+  if (!st?.state || !st?.authUrl) {
+    runlogAccount("发起添加账号失败", "realm=" + realm + ": missing state or authUrl");
+    return fail(502, "auth state: missing state or authUrl");
+  }
   // 顺手回收过期会话（防"开弹窗走开"的 state 滞留）。
   await prisma.loginSession.deleteMany({
     where: { createdAt: { lt: new Date(Date.now() - 15 * 60_000) } },
@@ -35,5 +41,6 @@ export async function POST(req: Request) {
     create: { id: st.state, state: st.state, verifyUrl: st.authUrl, realm },
     update: { realm, verifyUrl: st.authUrl },
   });
+  runlogAccount("发起添加账号", "realm=" + realm + " state=" + st.state.slice(0, 8));
   return ok({ url: st.authUrl, state: st.state, realm });
 }
