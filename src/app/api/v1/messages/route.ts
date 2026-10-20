@@ -55,6 +55,7 @@ export async function POST(req: Request): Promise<Response> {
     inboundHeaders: req.headers,
     ua,
     path: "/v1/messages",
+    req,
   });
 
   // 上游错误（非 2xx）：OpenAI 错误形态翻成 Anthropic 错误形态，message 透出。

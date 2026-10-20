@@ -28,5 +28,6 @@ export async function POST(req: Request): Promise<Response> {
     inboundHeaders: req.headers,
     ua: req.headers.get("user-agent") ?? "",
     path: "/v1/chat/completions",
+    req,
   });
 }
