@@ -13,6 +13,8 @@ async function loadAuth(uid: string) {
 }
 
 import { claimTaskReward } from "@/lib/taskcenter";
+import { runlogAccount } from "@/lib/runlog";
+import { label } from "@/lib/logfmt";
 
 // POST 领取任务奖励（未达标时上游业务错误原样透出；mp 码走 mp 口径）。
 export async function POST(req: Request, ctx: Ctx) {
@@ -27,10 +29,17 @@ export async function POST(req: Request, ctx: Ctx) {
   try {
     const r = await claimTaskReward(await getConfig(), a, body.task_code);
     if (r.credit === 0 && r.energy === 0) {
+      runlogAccount("领取奖励", label(a.uid, a.nickname) + " " + body.task_code + ": 此前已领取");
       return ok({ already_claimed: true, message: "该奖励此前已领取" });
     }
+    runlogAccount(
+      "领取奖励",
+      label(a.uid, a.nickname) + " " + body.task_code + ": +" + r.credit + " 分 +" + r.energy + " 能",
+    );
     return ok({ credit: r.credit, energy: r.energy });
   } catch (e) {
-    return fail(502, "claim: " + (e instanceof Error ? e.message : String(e)));
+    const msg = e instanceof Error ? e.message : String(e);
+    runlogAccount("领取奖励失败", label(a.uid, a.nickname) + " " + body.task_code + ": " + msg);
+    return fail(502, "claim: " + msg);
   }
 }
