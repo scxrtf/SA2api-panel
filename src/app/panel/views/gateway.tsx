@@ -53,8 +53,9 @@ function KeysBox({ flash }: { flash: Flash }) {
   const openAuth = (k: KeyRow) => {
     setAuthEditor({
       name: k.name,
-      // 空绑定等价于不限制，编辑器里按「全部供应商」展示。
-      all: k.providers.includes("*") || k.providers.length === 0,
+      // 只有显式 "*" 才预勾「全部供应商」；空绑定保持未勾选状态，
+      // 直接保存仍是空绑定（不限制），不会被改写为 "*"。
+      all: k.providers.includes("*"),
       picked: k.providers.filter((p) => p !== "*"),
       password: "",
     });
