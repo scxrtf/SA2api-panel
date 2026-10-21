@@ -1080,6 +1080,15 @@ export async function applyErrorKind(
     case "hard_credit":
       await cooldownHardCredit(uid, "hard_credit: " + body.slice(0, 120));
       return;
+    case "soft_queue": {
+      // 6020 排队等待只锁当前模型一小段时间：不推进 softStreak、不清路由豁免、
+      // 不罚账号——队列是上游容量现象，换号/换模型仍可能立刻可用。
+      if (!model) return;
+      const retry = retryAfterMs > 0 ? retryAfterMs : cfg.soft_cooldown_ms;
+      const resetAt = Date.now() + Math.min(cfg.soft_cooldown_ms, retry);
+      await cooldownSoftForModel(cfg, uid, resetAt, model, "6020 queue: " + body.slice(0, 110));
+      return;
+    }
     case "soft_rate": {
       const resetAt = parseRateReset(body) || (retryAfterMs > 0 ? Date.now() + retryAfterMs : 0);
       if (model && isModelRateLimit(body)) {

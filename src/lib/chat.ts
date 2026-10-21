@@ -146,10 +146,13 @@ export function openAIError(
   code: string,
   message: string,
   hint?: string,
+  headers?: HeadersInit,
 ): Response {
   const err: Obj = { message, type: code, code };
   if (hint) err["gateway_hint"] = hint;
-  return Response.json({ error: err }, { status });
+  const init: ResponseInit = { status };
+  if (headers) init.headers = headers;
+  return Response.json({ error: err }, init);
 }
 
 // ─── 记账（UsageEvent / RequestLog） ──────────────────────────────────────
@@ -564,6 +567,26 @@ export async function handleChat(opts: {
           ok: false, errKind: kind,
         });
 
+        // 6020 队列等待：模型级短冷却后立即返回 429，不换号不退避。
+        // 继续轮转只会把一次排队放大成 max_rotate 次上游请求；落到末端还会
+        // 被误报成 503 no_healthy_account。Retry-After 给客户端明确等待口径。
+        if (kind === "soft_queue") {
+          const retryMs = res.error?.retryAfterMs && res.error.retryAfterMs > 0
+            ? res.error.retryAfterMs
+            : cfg.soft_cooldown_ms;
+          const effectiveMs = Math.min(cfg.soft_cooldown_ms, retryMs);
+          await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, retryMs);
+          fail(acct.uid);
+          finishLog(429, acct.uid, kind);
+          return openAIError(
+            429,
+            "upstream_queueing",
+            respBody.trim() || "upstream is queueing this request; retry shortly",
+            hintOf(kind, respBody),
+            { "Retry-After": String(Math.max(1, Math.ceil(effectiveMs / 1000))) },
+          );
+        }
+
         // 内容拦截误报（passthrough/append 首遇）→ 触发降级同请求内重试。
         if (
           kind === "content_blocked" &&
@@ -758,6 +781,11 @@ export async function handleChat(opts: {
         status = 429;
         code = "rate_limit_exceeded";
         msg = "rate limited: all accounts are cooling down, please wait a moment and try again";
+        break;
+      case "soft_queue":
+        status = 429;
+        code = "upstream_queueing";
+        msg = "upstream is queueing this request; retry shortly";
         break;
       case "model_blocked":
         status = 400;

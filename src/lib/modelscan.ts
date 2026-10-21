@@ -11,7 +11,7 @@ import { getConfig, type AppConfig } from "./config";
 import { authShapeOf } from "./login";
 import { chatStream } from "./upstream/client";
 import { fetchGlobalModelInfos, fetchModelsFull } from "./upstream/modelCatalog";
-import { classify, isModelRateLimit, type ErrKind } from "./upstream/errors";
+import { classify, isModelRateLimit, isQueueWait, type ErrKind } from "./upstream/errors";
 import * as pool from "./pool";
 import { runlog } from "./runlog";
 import { label } from "./logfmt";
@@ -317,6 +317,9 @@ function addIssue(job: ScanJob, i: Omit<ScanIssue, "at">): void {
 
 // codeOf 把一次探测结果映射成面板可筛选的短码。
 function codeOf(r: ProbeResult): { code: string; label: string } {
+  if (isQueueWait(r.body) || r.kind === "soft_queue") {
+    return { code: "6020", label: "6020 队列等待" };
+  }
   if (isModelRateLimit(r.body)) return { code: "6004", label: "6004 模型限流" };
   if (r.status === 429) return { code: "429", label: "429 账号限流" };
   if (r.kind === "model_blocked") return { code: "11102", label: "11102 模型不可用" };
@@ -339,6 +342,8 @@ function codeOf(r: ProbeResult): { code: string; label: string } {
 
 // stopAccount 账号级问题出现后不再继续扫该号剩余模型（继续打只会重复失败）。
 function stopAccount(r: ProbeResult): boolean {
+  // 队列等待时继续扫剩余模型只会把排队放大；本模型已落短冷却，先停本号。
+  if (r.kind === "soft_queue") return true;
   if (r.kind === "soft_rate" && !isModelRateLimit(r.body)) return true;
   return (
     r.kind === "hard_credit" ||
@@ -352,6 +357,7 @@ function stopAccount(r: ProbeResult): boolean {
 async function applyOutcome(cfg: AppConfig, uid: string, model: string, r: ProbeResult): Promise<void> {
   switch (r.kind) {
     case "soft_rate":
+    case "soft_queue":
     case "hard_credit":
     case "model_blocked":
     case "session_dead":
@@ -399,6 +405,7 @@ async function probeModel(
       let kind: ProbeKind = res.error?.kind ?? classify(res.status, body);
       // 6004 也可能以 HTTP 400 原文返回（classify 只认 429 兜底），显式归到模型限流。
       if (isModelRateLimit(body)) kind = "soft_rate";
+      if (isQueueWait(body)) kind = "soft_queue";
       if (res.status >= 400 && kind === "none") kind = "client";
       return {
         status: res.status, kind, body,

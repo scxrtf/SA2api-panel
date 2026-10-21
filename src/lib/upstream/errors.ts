@@ -4,6 +4,7 @@ export type ErrKind =
   | "none"
   | "hard_credit" // 余额耗尽（402 / 14018 / 计费关键词）→ 冷却到次日 04:00
   | "soft_rate" // 429 软限流 → 对齐上游重置墙钟，封顶 softRateMax
+  | "soft_queue" // 6020 queue.waiting 排队等待 → 仅模型级短冷却，绝不罚号
   | "session_dead" // 401+12153 会话失效 → 连续 3 次禁用
   | "account_fault" // 11140 request illegal / 14017 未激活 → 冷却轮换
   | "content_blocked" // 内容审核误报 → 不罚号，网关降级重试
@@ -81,6 +82,57 @@ const reModelRateLimit = /"code"\s*:\s*"?6004"?/;
 
 export function isModelRateLimit(body: string): boolean {
   return reModelRateLimit.test(body);
+}
+
+// 6020 排队等待业务码 / queue.waiting 文案：与 429 账号限流区分。
+const reQueueCode = /"code"\s*:\s*"?6020"?(?!\d)/;
+const reQueueMsg = /queue[._\s-]*waiting|waiting\s+in\s+(?:the\s+)?queue/i;
+
+export function isQueueWait(body: string): boolean {
+  if (!body) return false;
+  return reQueueCode.test(body) || reQueueMsg.test(body);
+}
+
+const queuePositionKeys = [
+  "queue_position", "queuePosition", "queue_position_index", "queuePositionIndex",
+];
+
+// parseQueuePosition 从排队信封里取队列位置（仅真值 >0 才返回；0 = 未提供/不可解析）。
+// 只认精确键名，避免 queue_position_total 之类的总数被误当位置。
+export function parseQueuePosition(body: string): number {
+  if (!body) return 0;
+  let root: unknown;
+  try {
+    root = JSON.parse(body);
+  } catch {
+    return 0;
+  }
+  const walk = (value: unknown): number => {
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        const n = walk(v);
+        if (n > 0) return n;
+      }
+      return 0;
+    }
+    if (value && typeof value === "object") {
+      const node = value as Record<string, unknown>;
+      for (const k of queuePositionKeys) {
+        const v = node[k];
+        if (typeof v === "number" && Number.isFinite(v) && v > 0) return Math.floor(v);
+        if (typeof v === "string" && /^\d+$/.test(v.trim())) {
+          const n = Number(v.trim());
+          if (n > 0) return n;
+        }
+      }
+      for (const v of Object.values(node)) {
+        const n = walk(v);
+        if (n > 0) return n;
+      }
+    }
+    return 0;
+  };
+  return walk(root);
 }
 
 const MODEL_BLOCK_CODE = "11102";
@@ -212,6 +264,9 @@ export function classify(status: number, body: string): ErrKind {
   }
   // 4. 429 + code 14018 = 明确的账号积分耗尽。
   if (status === 429 && hasBusinessCode(body, "14018")) return "hard_credit";
+  // 4.5 6020 queue.waiting：排队等待不是限流，也不能触发账号级软冷却。
+  // 与状态码无关（实测 429，但 400/403/200 信封同样可能出现）。
+  if (isQueueWait(body)) return "soft_queue";
   // 5. 429 状态码兜底 = 限流语义（先于 hardMarkers，防止限流被误判硬冷却）。
   if (status === 429) return "soft_rate";
   // 6. 非 429 携带计费关键词。
@@ -338,6 +393,12 @@ export function gatewayHint(kind: ErrKind, msg: string, ctx: HintContext): strin
     case "waf_block":
       // 账号级 WAF 403 与 IP 级 fail-fast 同 hint：对客户端动作一致（等窗口过去再试）。
       return "upstream WAF blocked the gateway; retry after the block window";
+    case "soft_queue": {
+      const pos = parseQueuePosition(msg);
+      return pos > 0
+        ? `upstream is queueing this request (queue position ${pos}); retry shortly`
+        : "upstream is queueing this request; retry shortly";
+    }
     case "soft_rate":
       return "rate limited by upstream; retry after reset";
     case "account_fault":
@@ -365,6 +426,7 @@ export const noHealthyAccountHint = (): string => NO_HEALTHY_HINT;
 // 其余取帧内 error.message 走 classify（请求级 400 口径）。判不出 → "none"（无 hint）。
 export function frameKind(payload: string): ErrKind {
   if (isModelRateLimit(payload)) return "soft_rate";
+  if (isQueueWait(payload)) return "soft_queue";
   try {
     const f = JSON.parse(payload) as { error?: { message?: string } };
     const m = f?.error?.message;

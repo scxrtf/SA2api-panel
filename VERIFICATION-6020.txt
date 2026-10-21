@@ -1,0 +1,92 @@
+[VERIFICATION] wb2api-next · 6020 queue.waiting 分类修复
+Date: 2026-10-21  (Asia/Shanghai)
+HEAD: 8cc40b9 fix(panel): wire gcSticky into keepalive cron + filter active sticky count
+Baseline worktree: clean (git status --short empty)
+
+== 1. Baseline ==
+tsc --noEmit (before edits): exit 0, no diagnostics
+
+== 2. Files modified (Copy-first backups in backup-6020/) ==
+path                                      sha256 before                                                     sha256 after
+src/lib/upstream/errors.ts                2EF89DC65073976F60021115497EDAACB08D38E0FA651EEBF21BC339940EC0F5  3E83CFE4954FBAA23E9E1B6E4E50990CB17C66FCEA3FF9195F406994ED3DC6DE
+src/lib/pool.ts                           FE94CA0574326306AB326DAC9F424694B7124F0EF08DCE248755B7452EB0D131  2EAA56DCC3407856FBD2C495C370B0DCBBE577969A229EEC842846FCC71C673D
+src/lib/chat.ts                           8B2EE2AC1DA6D65DE1CA42270928D8FC5127AA4B627C0F540C2D99DD52320DA1  862674197739969235B36A0BC3E14C50389C96C0DBC13EF4B05059311940A85B
+src/lib/modelscan.ts                      24EF54B2AAEACE7541FE3C6F53AE85967B0E322433DAB1902E39BAD9703A5908  2F5D2E496D5B50001A354365CD02BDBFF9776DF1705EFC4DF7E0F85DB041B3ED
+src/lib/upstream/client.ts                C251C0532A58391F29EDB9ABE74E195C908DF104BEA9AE49BC21B1FE47416DF6  49FBA62ABBC235C5761A97571F79B70A8CE12D2AB39CFC73B233375E4910158F
+scripts/queue-6020.test.mts (new)         (absent)                                                          B78F140194DB6C077E204ADF1D9B2BA235689E96C399B321BB937C3100578B66
+
+== 3. Change points ==
+errors.ts
+  - ErrKind += "soft_queue" (6020 queue.waiting → 仅模型级短冷却)
+  - isQueueWait(): /"code"\s*:\s*"?6020"?(?!\d)/ 或 /queue[._\s-]*waiting|waiting in (the) queue/i
+  - parseQueuePosition(): 精确键 queue_position/queuePosition/queue_position_index/queuePositionIndex，不误取 *_total
+  - classify(): 在 429+14018 之后、status==429 兜底之前判定 → 状态码无关
+  - gatewayHint(): soft_queue 附带队列位置；frameKind(): SSE error 帧识别队列
+
+pool.ts
+  - applyErrorKind(): case "soft_queue" → cooldownSoftForModel(resetAt>0, min(soft_cooldown_ms, retryAfter))
+    不调用 cooldownSoftRate、不递增 softStreak、不删除其他模型冷却
+
+chat.ts
+  - openAIError(): 可选 headers 参数（向后兼容）
+  - 错误分支：soft_queue 终态返回 429 upstream_queueing + Retry-After，不换号、不退避、不再轮转
+  - 末端映射 switch 增加 soft_queue（防御性兜底）
+
+modelscan.ts
+  - codeOf(): 6020 优先标记 "6020 队列等待"（不被 429 标签覆盖）
+  - stopAccount(): soft_queue 停止本账号剩余模型扫描
+  - applyOutcome(): 转发 soft_queue 落模型级冷却；probeModel() 增加 body 覆盖
+
+upstream/client.ts (doJSON)
+  - 业务信封非 0：classify(resp.status, raw)（原实现只传 msg，丢 code）并透传 parseRetryAfter
+
+== 4. Verification commands & literal results ==
+tsc --noEmit (after edits):
+  .\node_modules\.bin\tsc.cmd --noEmit
+  exit 0, no output
+
+targeted regression:
+  npx --yes tsx scripts/queue-6020.test.mts
+  queue-6020: all assertions passed
+  exit 0
+
+full scripts suite:
+  dsml.test.mts => exit 0
+  global-cache-uid.test.mts => exit 0
+  model-json.test.mts => exit 0
+  modelview.test.mts => exit 0
+  queue-6020.test.mts => exit 0
+  sse-repair.test.mts => exit 0
+
+assertion coverage (scripts/queue-6020.test.mts):
+  - live truncated body {"code":6020,"msg":"queue.waiting.title",...} → soft_queue
+  - 429/400/200/403 + 6020 → soft_queue (not soft_rate)
+  - whitespace "code" : 6020 and string "6020" tolerated; 60201 rejected
+  - plain 429 → soft_rate; 14018 → hard_credit; 6004 → soft_rate (no regression)
+  - parseQueuePosition(full body) == 3; *_total ignored; truncated JSON → 0
+  - gatewayHint contains "queue position 3"
+  - frameKind(error frame wrapping the live body) == soft_queue
+
+== 5. Rollback ==
+ROLLBACK-6020.cmd restores the five .bak files and removes scripts/queue-6020.test.mts.
+Rollback drill was executed in a mirrored sandbox; restored file hashes matched the
+baseline hashes above exactly (see drill output appended by the operator run).
+
+== 6. Unverified / Assumed ==
+[Assumed] Upstream HTTP status for 6020 is 429 in the observed incident; detection is
+status-agnostic by design. Next live hit should capture status + headers to confirm
+Retry-After handling.
+[Assumed] Chat endpoint may return 6020 as an HTTP 200 JSON envelope instead of SSE;
+chatStream only classifies HTTP >= 400 bodies and SSE error frames. If live capture shows
+a 200 non-SSE envelope, that path needs a separate guard (not covered here).
+
+== 7. Rollback drill (mirrored sandbox, %TEMP%\wb2api-rollback-drill-6020-a) ==
+[ROLLBACK] restored 5 files; removed scripts/queue-6020.test.mts
+CMD_EXIT=0
+sha256 after rollback (all five equal baseline hashes above):
+2EF89DC65073976F60021115497EDAACB08D38E0FA651EEBF21BC339940EC0F5  errors.ts
+FE94CA0574326306AB326DAC9F424694B7124F0EF08DCE248755B7452EB0D131  pool.ts
+8B2EE2AC1DA6D65DE1CA42270928D8FC5127AA4B627C0F540C2D99DD52320DA1  chat.ts
+24EF54B2AAEACE7541FE3C6F53AE85967B0E322433DAB1902E39BAD9703A5908  modelscan.ts
+C251C0532A58391F29EDB9ABE74E195C908DF104BEA9AE49BC21B1FE47416DF6  upstream/client.ts
+TEST_FILE_PRESENT=False

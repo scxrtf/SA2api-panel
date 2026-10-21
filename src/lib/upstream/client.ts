@@ -256,9 +256,10 @@ async function doJSON(req: {
   }
   if (env.code !== 0 && env.code !== undefined) {
     const msg = `code=${env.code} msg=${truncate(env.msg ?? "", 160)}`;
-    let kind = classify(resp.status, env.msg ?? "");
+    // 用完整信封分类：只传 msg 会丢掉业务码（6020 排队 / 11101 / 11115 等）。
+    let kind = classify(resp.status, raw);
     if (kind === "none") kind = "client";
-    throw new UpstreamError(kind, resp.status, msg);
+    throw new UpstreamError(kind, resp.status, msg, parseRetryAfter(resp.headers));
   }
   return env.data;
 }
