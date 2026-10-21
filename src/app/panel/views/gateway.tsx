@@ -53,7 +53,8 @@ function KeysBox({ flash }: { flash: Flash }) {
   const openAuth = (k: KeyRow) => {
     setAuthEditor({
       name: k.name,
-      all: k.providers.includes("*"),
+      // 空绑定等价于不限制，编辑器里按「全部供应商」展示。
+      all: k.providers.includes("*") || k.providers.length === 0,
       picked: k.providers.filter((p) => p !== "*"),
       password: "",
     });
@@ -87,10 +88,10 @@ function KeysBox({ flash }: { flash: Flash }) {
       ? "全部供应商"
       : k.providers.length > 0
         ? k.providers.join(", ")
-        : "未授权任何供应商";
+        : "未绑定（全部供应商）";
 
   return (
-    <Box title="网关密钥环" hint="可调用 /api/v1/* 的子密钥；供应商模型需单独授权后才可调用">
+    <Box title="网关密钥环" hint="可调用 /api/v1/* 的子密钥；绑定供应商后仅可调用已勾选项，留空 = 不限制">
       <div className="pad">
         {created && (
           <div className="msg ok">新密钥 {created.name}：<span className="mono">{created.key}</span>（仅显示一次，请立即保存）</div>
@@ -107,7 +108,7 @@ function KeysBox({ flash }: { flash: Flash }) {
               {(keys ?? []).map((k) => (
                 <tr key={k.name}>
                   <td>{k.name}</td><td className="mono">{k.key_mask}</td>
-                  <td className={k.providers.length === 0 ? "dim" : undefined}>{authLabel(k)}</td>
+                  <td>{authLabel(k)}</td>
                   <td className="dim">{new Date(k.created_at).toLocaleString("zh-CN", { hour12: false })}</td>
                   <td>
                     <div className="btn-row">
@@ -129,6 +130,9 @@ function KeysBox({ flash }: { flash: Flash }) {
                 onChange={(e) => setAuthEditor({ ...authEditor, all: e.target.checked })} />
               全部供应商
             </label>
+            {!authEditor.all && (
+              <span className="dim">不勾选 = 未绑定（不限制）</span>
+            )}
             {!authEditor.all && providers.length === 0 && (
               <span className="dim">暂无可授权供应商，请先在下方添加</span>
             )}

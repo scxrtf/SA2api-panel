@@ -304,15 +304,20 @@ export async function handleChat(opts: {
     }
   }
   if (provider !== "") {
-    // 供应商准入：子密钥只放行 providers 白名单内的供应商；主密钥 / 未启用鉴权
-    // unrestricted。身份缺失（无法识别 / DB 异常）按拒绝处理，避免绕过。
-    if (opts.req && !keyIdentity?.unrestricted && !providerAllowed(keyIdentity?.providers ?? "", provider)) {
-      return openAIError(
-        403,
-        "provider_not_authorized",
-        `key 未授权使用供应商 ${provider}`,
-        "请在面板「网关密钥环」中为该 key 勾选对应供应商授权",
-      );
+    // 供应商准入：子密钥绑定白名单时只放行名单内供应商；未绑定（空）或 "*"
+    // 不限制。身份缺失（无法识别 / DB 异常）仍按拒绝处理，避免借空绑定绕过。
+    if (opts.req) {
+      const allowed = keyIdentity
+        ? keyIdentity.unrestricted || providerAllowed(keyIdentity.providers, provider)
+        : false;
+      if (!allowed) {
+        return openAIError(
+          403,
+          "provider_not_authorized",
+          `key 未授权使用供应商 ${provider}`,
+          "请在面板「网关密钥环」中为该 key 勾选对应供应商授权",
+        );
+      }
     }
     const { providerChat } = await import("./provider");
     return providerChat(provider, bare, JSON.stringify(body), stream, keyName);

@@ -25,9 +25,12 @@ export async function PATCH(req: Request, ctx: Ctx) {
     return fail(403, "超级密码错误");
   }
 
-  // providers 接收字符串数组（兼容逗号分隔字符串）；[] = 撤销全部授权。
+  // providers 接收字符串数组（兼容逗号分隔字符串）；[] / "" / null / 缺省 =
+  // 清空绑定（未绑定 = 不限制供应商）。
   let rawList: unknown[];
-  if (Array.isArray(body.providers)) {
+  if (body.providers === undefined || body.providers === null) {
+    rawList = [];
+  } else if (Array.isArray(body.providers)) {
     rawList = body.providers;
   } else if (typeof body.providers === "string") {
     rawList = body.providers.split(",");
@@ -52,7 +55,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!list.includes(v)) list.push(v);
   }
 
-  // 非全量授权时逐个核对供应商是否已注册，避免写出永不命中的幽灵授权。
+  // 绑定白名单时逐个核对供应商是否已注册，避免写出永不命中的幽灵授权。
   if (!list.includes("*") && list.length > 0) {
     const found = await prisma.provider.findMany({
       where: { name: { in: list } },

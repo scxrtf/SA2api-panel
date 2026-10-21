@@ -40,7 +40,7 @@ export interface KeyIdentity {
 
 // parseProviderAccess 解析 ApiKey.providers 存储串：
 //   "*"        → ["*"]
-//   ""         → []（全部禁止）
+//   ""         → []（未绑定；由 providerAllowed / providerAllowlist 解释为不限制）
 //   "foo,bar"  → ["foo", "bar"]
 export function parseProviderAccess(raw: string): string[] {
   const s = (raw ?? "").trim();
@@ -53,6 +53,8 @@ export function parseProviderAccess(raw: string): string[] {
 // providerAllowed 判断指定供应商是否在该 key 的授权名单内。
 export function providerAllowed(providersRaw: string, provider: string): boolean {
   const list = parseProviderAccess(providersRaw);
+  // 未绑定任何供应商 = 不限制（面板允许把绑定留空）。
+  if (list.length === 0) return true;
   return list.includes("*") || list.includes(provider);
 }
 
@@ -85,13 +87,13 @@ export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | n
 }
 
 // providerAllowlist 把身份折算成供应商白名单：
-//   null       = 不限制（主密钥 / 未启用鉴权 / 子密钥显式 "*"）
+//   null       = 不限制（主密钥 / 未启用鉴权 / 子密钥未绑定或显式 "*"）
 //   空集合     = 禁止所有供应商（身份缺失也按空集合处理，fail closed）
 export function providerAllowlist(id: KeyIdentity | null): Set<string> | null {
   if (!id) return new Set();
   if (id.unrestricted) return null;
   const list = parseProviderAccess(id.providers);
-  if (list.includes("*")) return null;
+  if (list.length === 0 || list.includes("*")) return null;
   return new Set(list);
 }
 
