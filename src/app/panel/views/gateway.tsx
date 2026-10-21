@@ -1,7 +1,7 @@
 "use client";
 // 供应商与密钥视图（对齐 Go view-gateway：密钥环 + 聚合供应商合一页）。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, useAutoRefresh, usePanelRefresh } from "../lib";
+import { req, useAutoRefresh, usePanelRefresh, emitPanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
 interface KeyRow { name: string; key_mask: string; providers: string[]; created_at: string }
@@ -180,13 +180,19 @@ function ProvidersBox({ flash }: { flash: Flash }) {
   const create = async () => {
     try {
       await req("providers", { method: "POST", body: form });
-      setForm({ name: "", base_url: "", key: "", models: "" }); load();
+      setForm({ name: "", base_url: "", key: "", models: "" });
+      // 广播刷新：已挂载的「模型与档位」视图立即重载，不必等 120s 轮询。
+      emitPanelRefresh();
       flash("ok", "供应商已添加");
     } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   };
   const remove = async (n: string) => {
     if (!window.confirm("确认删除供应商 " + n + "？")) return;
-    try { await req("providers/" + encodeURIComponent(n), { method: "DELETE" }); load(); flash("ok", "供应商已删除"); }
+    try {
+      await req("providers/" + encodeURIComponent(n), { method: "DELETE" });
+      emitPanelRefresh();
+      flash("ok", "供应商已删除");
+    }
     catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   };
   const [probing, setProbing] = useState(false);

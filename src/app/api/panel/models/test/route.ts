@@ -11,6 +11,7 @@ import {
   type ModelTestResult,
 } from "@/lib/modeltest";
 import { randomUUID } from "crypto";
+import { providerEndpoint } from "@/lib/provider-endpoint";
 
 // POST 执行一次连通性测试（同步阻塞至完成/超时/取消，最长 45s；对齐 modelTest）。
 // body: {model:"cn:glm-5.2"|"artex:xxx"|"glm-5.2", test_id?:uuid, uid?:string}
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
       // 供应商直连通道。
       const p = await prisma.provider.findUnique({ where: { name: providerName } });
       if (!p) return fail(404, "provider not registered: " + providerName);
-      const resp = await fetch(p.baseUrl.replace(/\/+$/, "") + "/v1/chat/completions", {
+      const resp = await fetch(providerEndpoint(p.baseUrl, "/chat/completions"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + p.apiKey },
         body: requestBody(bare),

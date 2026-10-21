@@ -1,4 +1,5 @@
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { providerEndpoint } from "@/lib/provider-endpoint";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
   try {
     const headers: Record<string, string> = {};
     if (key) headers["Authorization"] = "Bearer " + key;
-    const url = /\/v\d+[a-z]*$/i.test(baseUrl) ? baseUrl + "/models" : baseUrl + "/v1/models";
+    const url = providerEndpoint(baseUrl, "/models");
     const resp = await fetch(url, {
       headers,
       signal: AbortSignal.timeout(15_000),

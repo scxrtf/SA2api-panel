@@ -96,8 +96,9 @@ export async function GET(req: Request) {
   }
 
   // 供应商通道：name:model 前缀入库（与路由口径一致）。
+  const providerErrs: string[] = [];
   try {
-    for (const m of await providerModels()) {
+    for (const m of await providerModels(undefined, providerErrs)) {
       const name = m.owned_by;
       const bare = m.id.startsWith(name + ":") ? m.id.slice(name.length + 1) : m.id;
       out.push({ id: m.id, name: bare, vendor: name, provider: true });
@@ -107,8 +108,10 @@ export async function GET(req: Request) {
   }
 
   if (out.length === 0) {
-    if (fetchErrs.length > 0) return fail(502, "fetch models: " + fetchErrs.join("; "));
+    const errs = [...fetchErrs, ...providerErrs];
+    if (errs.length > 0) return fail(502, "fetch models: " + errs.join("; "));
     return fail(503, "没有可用账号：请先在面板添加账号再查询");
   }
-  return ok({ models: out });
+  // 供应商目录失败时透出原因，避免「探测能拿到模型、模型页却空着」无从排查。
+  return ok({ models: out, ...(providerErrs.length > 0 ? { warnings: providerErrs } : {}) });
 }

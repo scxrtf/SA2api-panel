@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { authShapeOf } from "@/lib/login";
 import { chatStream } from "@/lib/upstream/client";
+import { providerEndpoint } from "@/lib/provider-endpoint";
 
 export const DIST_LENGTH = 355;
 export const BASE_PROMPT =
@@ -240,7 +241,7 @@ export async function sampleOnce(
       base = ch.baseUrl; key = ch.apiKey;
     }
     if (!base || !key) throw new Error("provider not registered: " + (ch.kind === "provider" ? ch.providerName : ""));
-    const endpoint = base.replace(/\/+$/, "") + "/v1/chat/completions";
+    const endpoint = providerEndpoint(base, "/chat/completions");
     const body = remoteBody(ch.bare, prompt, "max_tokens");
     let resp = await fetch(endpoint, {
       method: "POST",

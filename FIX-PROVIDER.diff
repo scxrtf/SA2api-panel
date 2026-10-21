@@ -1,0 +1,328 @@
+diff --git a/scripts/provider-endpoint.test.mts b/scripts/provider-endpoint.test.mts
+new file mode 100644
+index 0000000..7f7ecf6
+--- /dev/null
++++ b/scripts/provider-endpoint.test.mts
+@@ -0,0 +1,53 @@
++// provider-endpoint.test.mts — Base URL 带/不带版本段时的端点拼接回归。
++import assert from "node:assert/strict";
++import { providerEndpoint } from "../src/lib/provider-endpoint.ts";
++
++let n = 0;
++function t(name: string, fn: () => void) {
++  fn(); n++; console.log("PASS " + name);
++}
++
++// 只填主机：补 /v1
++t("host only → /v1/models", () => {
++  assert.equal(providerEndpoint("https://api.example.com", "/models"), "https://api.example.com/v1/models");
++});
++t("host + trailing slash → /v1/models", () => {
++  assert.equal(providerEndpoint("https://api.example.com/", "/models"), "https://api.example.com/v1/models");
++});
++t("host only → /v1/chat/completions", () => {
++  assert.equal(
++    providerEndpoint("https://api.example.com", "/chat/completions"),
++    "https://api.example.com/v1/chat/completions",
++  );
++});
++
++// 已带版本段：不再补 /v1（此前的 /v1/v1/models 404 根因）
++t("base ends with /v1 → /v1/models", () => {
++  assert.equal(providerEndpoint("https://api.example.com/v1", "/models"), "https://api.example.com/v1/models");
++});
++t("base ends with /v1/ → /v1/models", () => {
++  assert.equal(providerEndpoint("https://api.example.com/v1/", "/models"), "https://api.example.com/v1/models");
++});
++t("base ends with /v1 → /v1/chat/completions", () => {
++  assert.equal(
++    providerEndpoint("https://api.example.com/v1", "/chat/completions"),
++    "https://api.example.com/v1/chat/completions",
++  );
++});
++t("base ends with /v1beta → /v1beta/models", () => {
++  assert.equal(providerEndpoint("https://api.example.com/v1beta", "/models"), "https://api.example.com/v1beta/models");
++});
++t("base with path prefix + /v1 → /v1/models", () => {
++  assert.equal(providerEndpoint("https://api.example.com/openai/v1", "/models"), "https://api.example.com/openai/v1/models");
++});
++t("uppercase V1 is detected", () => {
++  assert.equal(providerEndpoint("https://api.example.com/V1", "/models"), "https://api.example.com/V1/models");
++});
++t("path without leading slash is normalized", () => {
++  assert.equal(providerEndpoint("https://api.example.com", "models"), "https://api.example.com/v1/models");
++});
++t("whitespace is trimmed", () => {
++  assert.equal(providerEndpoint("  https://api.example.com/v1  ", "/models"), "https://api.example.com/v1/models");
++});
++
++console.log(`\n${n} passed`);
+diff --git a/src/app/api/panel/models/probe/route.ts b/src/app/api/panel/models/probe/route.ts
+index fe45787..91e5950 100644
+--- a/src/app/api/panel/models/probe/route.ts
++++ b/src/app/api/panel/models/probe/route.ts
+@@ -15,6 +15,7 @@ import {
+   longPrompt, longPromptHard, probeRequestBody, consumeProbeSSE,
+   type ProbeVerdict, type ProbeRunState,
+ } from "@/lib/modelprobe";
++import { providerEndpoint } from "@/lib/provider-endpoint";
+ 
+ // POST 面板内一键探测模型真实输出上限（对齐 scripts/probe_max_tokens.py，结果落库 ModelProbe）。
+ // body: {model:"cn:glm-5.2"|"artex:xxx", tiers?:[40000,100000], retries?:2, probe_id?:uuid, uid?:string, force?:bool}
+@@ -87,7 +88,7 @@ export async function POST(req: Request) {
+       try {
+         let bodyStream: ReadableStream<Uint8Array> | null = null;
+         if (provider) {
+-          const resp = await fetch(provider.baseUrl.replace(/\/+$/, "") + "/v1/chat/completions", {
++          const resp = await fetch(providerEndpoint(provider.baseUrl, "/chat/completions"), {
+             method: "POST",
+             headers: { "Content-Type": "application/json", Authorization: "Bearer " + provider.apiKey },
+             body: probeRequestBody(bare, tier, prompt),
+diff --git a/src/app/api/panel/models/route.ts b/src/app/api/panel/models/route.ts
+index 715ced9..e269728 100644
+--- a/src/app/api/panel/models/route.ts
++++ b/src/app/api/panel/models/route.ts
+@@ -96,8 +96,9 @@ export async function GET(req: Request) {
+   }
+ 
+   // 供应商通道：name:model 前缀入库（与路由口径一致）。
++  const providerErrs: string[] = [];
+   try {
+-    for (const m of await providerModels()) {
++    for (const m of await providerModels(undefined, providerErrs)) {
+       const name = m.owned_by;
+       const bare = m.id.startsWith(name + ":") ? m.id.slice(name.length + 1) : m.id;
+       out.push({ id: m.id, name: bare, vendor: name, provider: true });
+@@ -107,8 +108,10 @@ export async function GET(req: Request) {
+   }
+ 
+   if (out.length === 0) {
+-    if (fetchErrs.length > 0) return fail(502, "fetch models: " + fetchErrs.join("; "));
++    const errs = [...fetchErrs, ...providerErrs];
++    if (errs.length > 0) return fail(502, "fetch models: " + errs.join("; "));
+     return fail(503, "没有可用账号：请先在面板添加账号再查询");
+   }
+-  return ok({ models: out });
++  // 供应商目录失败时透出原因，避免「探测能拿到模型、模型页却空着」无从排查。
++  return ok({ models: out, ...(providerErrs.length > 0 ? { warnings: providerErrs } : {}) });
+ }
+diff --git a/src/app/api/panel/models/test/route.ts b/src/app/api/panel/models/test/route.ts
+index 783bac7..904039a 100644
+--- a/src/app/api/panel/models/test/route.ts
++++ b/src/app/api/panel/models/test/route.ts
+@@ -11,6 +11,7 @@ import {
+   type ModelTestResult,
+ } from "@/lib/modeltest";
+ import { randomUUID } from "crypto";
++import { providerEndpoint } from "@/lib/provider-endpoint";
+ 
+ // POST 执行一次连通性测试（同步阻塞至完成/超时/取消，最长 45s；对齐 modelTest）。
+ // body: {model:"cn:glm-5.2"|"artex:xxx"|"glm-5.2", test_id?:uuid, uid?:string}
+@@ -47,7 +48,7 @@ export async function POST(req: Request) {
+       // 供应商直连通道。
+       const p = await prisma.provider.findUnique({ where: { name: providerName } });
+       if (!p) return fail(404, "provider not registered: " + providerName);
+-      const resp = await fetch(p.baseUrl.replace(/\/+$/, "") + "/v1/chat/completions", {
++      const resp = await fetch(providerEndpoint(p.baseUrl, "/chat/completions"), {
+         method: "POST",
+         headers: { "Content-Type": "application/json", Authorization: "Bearer " + p.apiKey },
+         body: requestBody(bare),
+diff --git a/src/app/api/panel/providers/probe/route.ts b/src/app/api/panel/providers/probe/route.ts
+index a6bf40b..6b69f2f 100644
+--- a/src/app/api/panel/providers/probe/route.ts
++++ b/src/app/api/panel/providers/probe/route.ts
+@@ -1,4 +1,5 @@
+ import { panelAuth, ok, fail } from "@/lib/panel-auth";
++import { providerEndpoint } from "@/lib/provider-endpoint";
+ export const runtime = "nodejs";
+ export const dynamic = "force-dynamic";
+ 
+@@ -15,7 +16,7 @@ export async function POST(req: Request) {
+   try {
+     const headers: Record<string, string> = {};
+     if (key) headers["Authorization"] = "Bearer " + key;
+-    const url = /\/v\d+[a-z]*$/i.test(baseUrl) ? baseUrl + "/models" : baseUrl + "/v1/models";
++    const url = providerEndpoint(baseUrl, "/models");
+     const resp = await fetch(url, {
+       headers,
+       signal: AbortSignal.timeout(15_000),
+diff --git a/src/app/panel/views/gateway.tsx b/src/app/panel/views/gateway.tsx
+index 917d4ed..545fe2a 100644
+--- a/src/app/panel/views/gateway.tsx
++++ b/src/app/panel/views/gateway.tsx
+@@ -1,7 +1,7 @@
+ "use client";
+ // 供应商与密钥视图（对齐 Go view-gateway：密钥环 + 聚合供应商合一页）。
+ import React, { useCallback, useEffect, useState } from "react";
+-import { req, useAutoRefresh, usePanelRefresh } from "../lib";
++import { req, useAutoRefresh, usePanelRefresh, emitPanelRefresh } from "../lib";
+ import { Box, type Flash } from "../components/ui";
+ 
+ interface KeyRow { name: string; key_mask: string; providers: string[]; created_at: string }
+@@ -180,13 +180,19 @@ function ProvidersBox({ flash }: { flash: Flash }) {
+   const create = async () => {
+     try {
+       await req("providers", { method: "POST", body: form });
+-      setForm({ name: "", base_url: "", key: "", models: "" }); load();
++      setForm({ name: "", base_url: "", key: "", models: "" });
++      // 广播刷新：已挂载的「模型与档位」视图立即重载，不必等 120s 轮询。
++      emitPanelRefresh();
+       flash("ok", "供应商已添加");
+     } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+   };
+   const remove = async (n: string) => {
+     if (!window.confirm("确认删除供应商 " + n + "？")) return;
+-    try { await req("providers/" + encodeURIComponent(n), { method: "DELETE" }); load(); flash("ok", "供应商已删除"); }
++    try {
++      await req("providers/" + encodeURIComponent(n), { method: "DELETE" });
++      emitPanelRefresh();
++      flash("ok", "供应商已删除");
++    }
+     catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+   };
+   const [probing, setProbing] = useState(false);
+diff --git a/src/app/panel/views/models.tsx b/src/app/panel/views/models.tsx
+index c4913b8..3c1f696 100644
+--- a/src/app/panel/views/models.tsx
++++ b/src/app/panel/views/models.tsx
+@@ -209,6 +209,7 @@ function EffortCell({ m }: { m: ModelRow }) {
+ 
+ export function ModelsView({ flash }: { flash: Flash }) {
+   const [models, setModels] = useState<ModelRow[] | null>(null);
++  const [warnings, setWarnings] = useState<string[]>([]);
+   const [loading, setLoading] = useState(false);
+   const [loadedAt, setLoadedAt] = useState<number | null>(null);
+   const [q, setQ] = useState("");
+@@ -222,10 +223,15 @@ export function ModelsView({ flash }: { flash: Flash }) {
+   const load = useCallback(() => {
+     setLoading(true);
+     Promise.all([
+-      req<{ models: ModelRow[] }>("models"),
++      req<{ models: ModelRow[]; warnings?: string[] }>("models"),
+       req<{ probes: Record<string, ProbeRec> }>("model_probes").catch(() => ({ probes: {} })),
+     ])
+-      .then(([r, pr]) => { setModels(r.models); setProbes(pr.probes ?? {}); setLoadedAt(Date.now()); })
++      .then(([r, pr]) => {
++        setModels(r.models);
++        setWarnings(r.warnings ?? []);
++        setProbes(pr.probes ?? {});
++        setLoadedAt(Date.now());
++      })
+       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)))
+       .finally(() => setLoading(false));
+   }, [flash]);
+@@ -317,6 +323,14 @@ export function ModelsView({ flash }: { flash: Flash }) {
+         <div className="pad dim">实时查询上游中…</div>
+       ) : (
+         <>
++          {warnings.length > 0 && (
++            <div className="pad" style={{ paddingBottom: 0 }}>
++              <div className="msg err" style={{ marginBottom: 0 }}>
++                供应商模型获取失败：{warnings.join("；")}
++                <span className="dim">（请检查 Base URL 与 Key 是否正确）</span>
++              </div>
++            </div>
++          )}
+           <div className="pad" style={{ paddingBottom: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+             <span className="dim" style={{ fontSize: 12 }}>筛选</span>
+             {CAP_FILTERS.map((f) => (
+diff --git a/src/lib/aichecker.ts b/src/lib/aichecker.ts
+index 88960b5..fc28e01 100644
+--- a/src/lib/aichecker.ts
++++ b/src/lib/aichecker.ts
+@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
+ import { getConfig } from "@/lib/config";
+ import { authShapeOf } from "@/lib/login";
+ import { chatStream } from "@/lib/upstream/client";
++import { providerEndpoint } from "@/lib/provider-endpoint";
+ 
+ export const DIST_LENGTH = 355;
+ export const BASE_PROMPT =
+@@ -240,7 +241,7 @@ export async function sampleOnce(
+       base = ch.baseUrl; key = ch.apiKey;
+     }
+     if (!base || !key) throw new Error("provider not registered: " + (ch.kind === "provider" ? ch.providerName : ""));
+-    const endpoint = base.replace(/\/+$/, "") + "/v1/chat/completions";
++    const endpoint = providerEndpoint(base, "/chat/completions");
+     const body = remoteBody(ch.bare, prompt, "max_tokens");
+     let resp = await fetch(endpoint, {
+       method: "POST",
+diff --git a/src/lib/provider-endpoint.ts b/src/lib/provider-endpoint.ts
+new file mode 100644
+index 0000000..3d6d2bf
+--- /dev/null
++++ b/src/lib/provider-endpoint.ts
+@@ -0,0 +1,8 @@
++// 供应商端点拼接：面板允许 Base URL 直接填到版本段（如 https://host/v1），
++// 也允许只填主机（https://host）。统一在这里补 /v1，避免出现 /v1/v1/models。
++export function providerEndpoint(baseUrl: string, path: string): string {
++  const base = baseUrl.trim().replace(/\/+$/, "");
++  const suffix = path.startsWith("/") ? path : "/" + path;
++  // 已带版本段（/v1、/v1beta、/v4 ...）时不再重复补 /v1。
++  return /\/v\d+[a-z]*$/i.test(base) ? base + suffix : base + "/v1" + suffix;
++}
+diff --git a/src/lib/provider.ts b/src/lib/provider.ts
+index 81e0b9e..93c1455 100644
+--- a/src/lib/provider.ts
++++ b/src/lib/provider.ts
+@@ -6,6 +6,7 @@ import { openAIError } from "./chat";
+ import { getConfig } from "./config";
+ import { idleMonitorBody } from "./upstream/idle";
+ import { usageTokensFromResponse } from "./upstream/usage";
++import { providerEndpoint } from "./provider-endpoint";
+ 
+ // recordProviderUsage 供应商记账（Go handler.go recordProviderAttempt 同语义）：
+ // realm 记为 "provider:"+名字，uid 记为槽位名。这里 TS 版单 key 直连无槽位
+@@ -61,13 +62,12 @@ export async function providerChat(
+   } catch {
+     // 解析失败按原文转发。
+   }
+-  const base = p.baseUrl.replace(/\/+$/, "");
+   const headers: Record<string, string> = { "Content-Type": "application/json" };
+   if (p.apiKey) headers["Authorization"] = "Bearer " + p.apiKey;
+   let resp: globalThis.Response;
+   const attemptStarted = Date.now();
+   try {
+-    resp = await fetch(base + "/v1/chat/completions", {
++    resp = await fetch(providerEndpoint(p.baseUrl, "/chat/completions"), {
+       method: "POST",
+       headers,
+       body: out,
+@@ -148,20 +148,23 @@ export async function providerChat(
+ // allowed 为 null/undefined 时不限制；传入集合时只探测集合内的供应商。
+ export async function providerModels(
+   allowed?: ReadonlySet<string> | null,
++  errors?: string[],
+ ): Promise<{ id: string; owned_by: string }[]> {
+   const providers = await prisma.provider.findMany();
+   const out: { id: string; owned_by: string }[] = [];
+   for (const p of providers) {
+     if (allowed && !allowed.has(p.name)) continue;
+     try {
+-      const base = p.baseUrl.replace(/\/+$/, "");
+       const headers: Record<string, string> = {};
+       if (p.apiKey) headers["Authorization"] = "Bearer " + p.apiKey;
+-      const resp = await fetch(base + "/v1/models", {
++      const resp = await fetch(providerEndpoint(p.baseUrl, "/models"), {
+         headers,
+         signal: AbortSignal.timeout(15_000),
+       });
+-      if (!resp.ok) continue;
++      if (!resp.ok) {
++        errors?.push(p.name + ": http " + resp.status);
++        continue;
++      }
+       const data = (await resp.json()) as { data?: { id?: string }[] };
+       for (const m of data.data ?? []) {
+         if (!m.id) continue;
+@@ -170,8 +173,9 @@ export async function providerModels(
+         if (allow && !allow.includes(m.id)) continue;
+         out.push({ id: `${p.name}:${m.id}`, owned_by: p.name });
+       }
+-    } catch {
++    } catch (e) {
+       // 单供应商失败不影响其他。
++      errors?.push(p.name + ": " + (e instanceof Error ? e.message : String(e)));
+     }
+   }
+   return out;

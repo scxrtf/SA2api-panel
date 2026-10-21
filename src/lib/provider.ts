@@ -6,6 +6,7 @@ import { openAIError } from "./chat";
 import { getConfig } from "./config";
 import { idleMonitorBody } from "./upstream/idle";
 import { usageTokensFromResponse } from "./upstream/usage";
+import { providerEndpoint } from "./provider-endpoint";
 
 // recordProviderUsage 供应商记账（Go handler.go recordProviderAttempt 同语义）：
 // realm 记为 "provider:"+名字，uid 记为槽位名。这里 TS 版单 key 直连无槽位
@@ -61,13 +62,12 @@ export async function providerChat(
   } catch {
     // 解析失败按原文转发。
   }
-  const base = p.baseUrl.replace(/\/+$/, "");
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (p.apiKey) headers["Authorization"] = "Bearer " + p.apiKey;
   let resp: globalThis.Response;
   const attemptStarted = Date.now();
   try {
-    resp = await fetch(base + "/v1/chat/completions", {
+    resp = await fetch(providerEndpoint(p.baseUrl, "/chat/completions"), {
       method: "POST",
       headers,
       body: out,
@@ -148,20 +148,23 @@ export async function providerChat(
 // allowed 为 null/undefined 时不限制；传入集合时只探测集合内的供应商。
 export async function providerModels(
   allowed?: ReadonlySet<string> | null,
+  errors?: string[],
 ): Promise<{ id: string; owned_by: string }[]> {
   const providers = await prisma.provider.findMany();
   const out: { id: string; owned_by: string }[] = [];
   for (const p of providers) {
     if (allowed && !allowed.has(p.name)) continue;
     try {
-      const base = p.baseUrl.replace(/\/+$/, "");
       const headers: Record<string, string> = {};
       if (p.apiKey) headers["Authorization"] = "Bearer " + p.apiKey;
-      const resp = await fetch(base + "/v1/models", {
+      const resp = await fetch(providerEndpoint(p.baseUrl, "/models"), {
         headers,
         signal: AbortSignal.timeout(15_000),
       });
-      if (!resp.ok) continue;
+      if (!resp.ok) {
+        errors?.push(p.name + ": http " + resp.status);
+        continue;
+      }
       const data = (await resp.json()) as { data?: { id?: string }[] };
       for (const m of data.data ?? []) {
         if (!m.id) continue;
@@ -170,8 +173,9 @@ export async function providerModels(
         if (allow && !allow.includes(m.id)) continue;
         out.push({ id: `${p.name}:${m.id}`, owned_by: p.name });
       }
-    } catch {
+    } catch (e) {
       // 单供应商失败不影响其他。
+      errors?.push(p.name + ": " + (e instanceof Error ? e.message : String(e)));
     }
   }
   return out;

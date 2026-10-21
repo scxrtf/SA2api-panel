@@ -15,6 +15,7 @@ import {
   longPrompt, longPromptHard, probeRequestBody, consumeProbeSSE,
   type ProbeVerdict, type ProbeRunState,
 } from "@/lib/modelprobe";
+import { providerEndpoint } from "@/lib/provider-endpoint";
 
 // POST 面板内一键探测模型真实输出上限（对齐 scripts/probe_max_tokens.py，结果落库 ModelProbe）。
 // body: {model:"cn:glm-5.2"|"artex:xxx", tiers?:[40000,100000], retries?:2, probe_id?:uuid, uid?:string, force?:bool}
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
       try {
         let bodyStream: ReadableStream<Uint8Array> | null = null;
         if (provider) {
-          const resp = await fetch(provider.baseUrl.replace(/\/+$/, "") + "/v1/chat/completions", {
+          const resp = await fetch(providerEndpoint(provider.baseUrl, "/chat/completions"), {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: "Bearer " + provider.apiKey },
             body: probeRequestBody(bare, tier, prompt),

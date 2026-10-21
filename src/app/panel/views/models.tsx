@@ -209,6 +209,7 @@ function EffortCell({ m }: { m: ModelRow }) {
 
 export function ModelsView({ flash }: { flash: Flash }) {
   const [models, setModels] = useState<ModelRow[] | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [q, setQ] = useState("");
@@ -222,10 +223,15 @@ export function ModelsView({ flash }: { flash: Flash }) {
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
-      req<{ models: ModelRow[] }>("models"),
+      req<{ models: ModelRow[]; warnings?: string[] }>("models"),
       req<{ probes: Record<string, ProbeRec> }>("model_probes").catch(() => ({ probes: {} })),
     ])
-      .then(([r, pr]) => { setModels(r.models); setProbes(pr.probes ?? {}); setLoadedAt(Date.now()); })
+      .then(([r, pr]) => {
+        setModels(r.models);
+        setWarnings(r.warnings ?? []);
+        setProbes(pr.probes ?? {});
+        setLoadedAt(Date.now());
+      })
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, [flash]);
@@ -317,6 +323,14 @@ export function ModelsView({ flash }: { flash: Flash }) {
         <div className="pad dim">实时查询上游中…</div>
       ) : (
         <>
+          {warnings.length > 0 && (
+            <div className="pad" style={{ paddingBottom: 0 }}>
+              <div className="msg err" style={{ marginBottom: 0 }}>
+                供应商模型获取失败：{warnings.join("；")}
+                <span className="dim">（请检查 Base URL 与 Key 是否正确）</span>
+              </div>
+            </div>
+          )}
           <div className="pad" style={{ paddingBottom: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span className="dim" style={{ fontSize: 12 }}>筛选</span>
             {CAP_FILTERS.map((f) => (
