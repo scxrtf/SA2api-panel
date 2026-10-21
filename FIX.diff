@@ -1,0 +1,45 @@
+diff --git a/src/app/api/panel/overview/route.ts b/src/app/api/panel/overview/route.ts
+index acfcd9b..d84c9d2 100644
+--- a/src/app/api/panel/overview/route.ts
++++ b/src/app/api/panel/overview/route.ts
+@@ -15,7 +15,12 @@ export async function GET(req: Request) {
+   const cfg = await getConfig();
+   const c = await pool.countsDetailed(cfg);
+   const accounts = await pool.statusList();
+-  const sticky = await prisma.stickySession.count().catch(() => 0);
++  // 只统计 30min TTL 窗口内仍活跃的绑定（与 session.ts STICKY_TTL_MS 一致），
++  // 避免历史累计的过期行把面板数字吹大。过期行由 keepalive cron 末尾的
++  // gcSticky 实际删除。
++  const sticky = await prisma.stickySession
++    .count({ where: { updatedAt: { gte: new Date(Date.now() - 30 * 60_000) } } })
++    .catch(() => 0);
+   const providerCount = await prisma.provider.count().catch(() => 0);
+   const keyCount = await prisma.apiKey.count().catch(() => 0);
+   // model_locks 模型级限流全清单（Go ModelLockView 同口径：哪些模型不能用、
+diff --git a/src/lib/cron.ts b/src/lib/cron.ts
+index ada6305..0d883ff 100644
+--- a/src/lib/cron.ts
++++ b/src/lib/cron.ts
+@@ -23,6 +23,7 @@ import {
+ import { listActiveAccounts, reportGapMs } from "./taskcenter";
+ import { runlog } from "./runlog";
+ import { label } from "./logfmt";
++import { gcSticky } from "./session";
+ 
+ // errMsg 提取错误消息（Error.message 优先，其余 String 化）。
+ function errMsg(e: unknown): string {
+@@ -142,6 +143,14 @@ export async function runKeepalive(): Promise<{ refreshed: number; skipped: numb
+       runlog("keepalive " + lb + " save: " + (e instanceof Error ? e.message : String(e)));
+     }
+   }
++  // 顺手清粘性会话过期绑定（StickySession 表只增不减，否则面板的"粘性会话"
++  // 计数会无限累积；TTL 30min 见 session.ts STICKY_TTL_MS）。
++  try {
++    const n = await gcSticky();
++    if (n > 0) runlog("keepalive gc sticky: 清理过期绑定 " + n + " 条");
++  } catch (e) {
++    runlog("keepalive gc sticky: " + errMsg(e));
++  }
+   return { refreshed, skipped, failed };
+ }
+ 

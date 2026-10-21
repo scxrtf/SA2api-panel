@@ -23,6 +23,7 @@ import {
 import { listActiveAccounts, reportGapMs } from "./taskcenter";
 import { runlog } from "./runlog";
 import { label } from "./logfmt";
+import { gcSticky } from "./session";
 
 // errMsg 提取错误消息（Error.message 优先，其余 String 化）。
 function errMsg(e: unknown): string {
@@ -141,6 +142,14 @@ export async function runKeepalive(): Promise<{ refreshed: number; skipped: numb
       // 对齐 Go RunKeepaliveNow：落盘失败单独记 save 行，不计入刷新失败。
       runlog("keepalive " + lb + " save: " + (e instanceof Error ? e.message : String(e)));
     }
+  }
+  // 顺手清粘性会话过期绑定（StickySession 表只增不减，否则面板的"粘性会话"
+  // 计数会无限累积；TTL 30min 见 session.ts STICKY_TTL_MS）。
+  try {
+    const n = await gcSticky();
+    if (n > 0) runlog("keepalive gc sticky: 清理过期绑定 " + n + " 条");
+  } catch (e) {
+    runlog("keepalive gc sticky: " + errMsg(e));
   }
   return { refreshed, skipped, failed };
 }

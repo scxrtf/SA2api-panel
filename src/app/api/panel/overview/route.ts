@@ -15,7 +15,12 @@ export async function GET(req: Request) {
   const cfg = await getConfig();
   const c = await pool.countsDetailed(cfg);
   const accounts = await pool.statusList();
-  const sticky = await prisma.stickySession.count().catch(() => 0);
+  // 只统计 30min TTL 窗口内仍活跃的绑定（与 session.ts STICKY_TTL_MS 一致），
+  // 避免历史累计的过期行把面板数字吹大。过期行由 keepalive cron 末尾的
+  // gcSticky 实际删除。
+  const sticky = await prisma.stickySession
+    .count({ where: { updatedAt: { gte: new Date(Date.now() - 30 * 60_000) } } })
+    .catch(() => 0);
   const providerCount = await prisma.provider.count().catch(() => 0);
   const keyCount = await prisma.apiKey.count().catch(() => 0);
   // model_locks 模型级限流全清单（Go ModelLockView 同口径：哪些模型不能用、
