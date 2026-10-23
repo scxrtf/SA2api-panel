@@ -8,12 +8,12 @@ let calls = 0;
 let poolReads = 0;
 let provider = { name: "测试商", models: "", apiKey: "fake-upstream", baseUrl: "https://example.invalid/v1" };
 let keyProviders = "测试商";
-let reply: () => Promise<Response> = async () => Response.json({ choices: [], usage: { prompt_tokens: 8, completion_tokens: 2 } });
+let reply: (signal?: AbortSignal | null) => Promise<Response> = async () => Response.json({ choices: [], usage: { prompt_tokens: 8, completion_tokens: 2 } });
 const oldFetch = globalThis.fetch;
 const oldKey = process.env.WB2A_API_KEY;
 delete process.env.WB2A_API_KEY;
 (globalThis as any).prisma = {
-  setting: { findUnique: async () => ({ value: JSON.stringify({ stream_idle_ms: 40 }) }) },
+  setting: { findUnique: async () => ({ value: JSON.stringify({ stream_idle_ms: 40, header_timeout_ms: 100 }) }) },
   apiKey: { findMany: async () => [{ name: "SA", key: "fake-client", providers: keyProviders }] },
   provider: { findUnique: async ({ where }: any) => where.name === provider.name ? provider : null },
   account: { findMany: async () => { poolReads++; throw new Error("provider must not use account pool"); } },
@@ -27,7 +27,7 @@ globalThis.fetch = async (url, init) => {
   assert.equal(body.model, "glm-5.3");
   assert.deepEqual(body.messages, [{ role: "developer", content: "keep unchanged" }]);
   assert.equal((init?.headers as any).Authorization, "Bearer fake-upstream");
-  return reply();
+  return reply(init?.signal);
 };
 const { handleChat, resolveModel } = await import("../src/lib/chat.ts");
 const { ProviderObservation, observeProviderStream } = await import("../src/lib/provider-observation.ts");
@@ -129,6 +129,20 @@ try {
   assert.equal(last().errKind, "provider_error");
   console.log("PASS HTTP/connect/JSON error responses");
 
+  reply = async (signal) => new Promise((_resolve, reject) => {
+    signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  });
+  assert.equal((await chat()).status, 504);
+  assert.equal(last().errKind, "provider_header_timeout");
+  const abort = new AbortController();
+  const cancelledReq = new Request(req, { signal: abort.signal });
+  const pending = handleChat({ body: { model: "测试商:glm-5.3", messages: [{ role: "developer", content: "keep unchanged" }] },
+    req: cancelledReq, clientIP: "", ua: "", path: "/v1/chat/completions", inboundHeaders: req.headers });
+  setTimeout(() => abort.abort(), 20);
+  assert.equal((await pending).status, 499);
+  assert.equal(last().errKind, "client_cancelled");
+  console.log("PASS response-header timeout and request abort");
+
   // A failed audit insert must not turn a successful upstream response into a 500.
   const db = (globalThis as any).prisma;
   const saveLog = db.requestLog.create;
@@ -199,6 +213,13 @@ try {
     assert.equal(resp.status, 400);
   }
   console.log("PASS outcome filtering and reserved provider prefixes");
+
+  const { GET: metrics } = await import("../src/app/api/panel/request_metrics/route.ts");
+  db.requestLog.count = async (query: any) => { queries.push(query); return 0; };
+  db.requestLog.aggregate = async () => ({ _avg: { durationMs: 0 } });
+  await metrics(new Request("https://gateway.invalid/api/panel/request_metrics"));
+  assert.deepEqual(queries.at(-1).where.OR, [{ status: { gte: 400 } }, { errKind: { not: "" } }]);
+  console.log("PASS dashboard error count includes HTTP 200 errors");
 } finally {
   globalThis.fetch = oldFetch;
   if (oldKey === undefined) delete process.env.WB2A_API_KEY;

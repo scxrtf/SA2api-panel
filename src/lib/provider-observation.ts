@@ -78,10 +78,12 @@ export function observeProviderStream(
   finish: () => Promise<void>,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
+  let cancelled = false;
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const { done, value } = await reader.read();
+        if (cancelled) return;
         if (done) {
           stats.end();
           await finish();
@@ -91,16 +93,19 @@ export function observeProviderStream(
           controller.enqueue(value);
         }
       } catch (e) {
+        if (cancelled) return;
         stats.errKind ||= "provider_stream_error";
-        await finish();
         await reader.cancel(e).catch(() => undefined);
+        await finish();
         controller.error(e);
       }
     },
     async cancel(reason) {
+      cancelled = true;
       stats.errKind ||= "client_cancelled";
-      await finish();
+      // 先释放网络连接，不能被慢数据库拖住上游取消。
       await reader.cancel(reason).catch(() => undefined);
+      await finish();
     },
   }, { highWaterMark: 0 });
 }

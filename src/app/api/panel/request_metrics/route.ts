@@ -11,7 +11,9 @@ export async function GET(req: Request) {
   const since = new Date(Date.now() - 24 * 3600_000);
   const [total, errors, avg] = await Promise.all([
     prisma.requestLog.count({ where: { at: { gte: since } } }),
-    prisma.requestLog.count({ where: { at: { gte: since }, status: { gte: 400 } } }),
+    prisma.requestLog.count({ where: { at: { gte: since },
+      OR: [{ status: { gte: 400 } }, { errKind: { not: "" } }],
+    } }),
     prisma.requestLog.aggregate({
       _avg: { durationMs: true },
       where: { at: { gte: since } },

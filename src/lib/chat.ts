@@ -321,7 +321,7 @@ export async function handleChat(opts: {
     }
     const { providerChat } = await import("./provider");
     return providerChat(provider, bare, JSON.stringify(body), stream, keyName, rawModel,
-      { started, clientIP, ua, path });
+      { started, clientIP, ua, path, signal: opts.req?.signal });
   }
 
   // 会话键 / 轮级键 / 粘性解析。
@@ -694,11 +694,24 @@ export async function handleChat(opts: {
           } finally {
             pool.release(uidCaptured);
           }
-        });
+        }, async () => {
+          // 读写中断同样释放租约，且不把客户端取消惩罚为账号错误。
+          try {
+            await recordAttempt({
+              uid: uidCaptured, model: bare, realm, provider: "", ok: false,
+              errKind: "stream_interrupted", latencyMs: Date.now() - attemptStarted,
+              keyName, modelRate,
+            });
+          } finally {
+            pool.release(uidCaptured);
+          }
+        }).catch(() => runlog("WARN: stream accounting failed"));
         // RequestLog 的 token/TTFB 维度与 Go 的 defer st.done() 同语义：流式
         // 下等流真正结束、末帧 usage 可得时才落日志（响应本身已可先返回）。
         void statsPromise.then((stats) => finishLog(200, uidCaptured,
-          stats.errorFrame ? "upstream_error" : "", stats));
+          stats.errorFrame ? "upstream_error" : "", stats),
+          () => finishLog(200, uidCaptured, "stream_interrupted"))
+          .catch(() => runlog("WARN: stream request log failed"));
         return new Response(readable, {
           status: 200,
           headers: {

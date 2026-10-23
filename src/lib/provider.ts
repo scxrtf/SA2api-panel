@@ -12,6 +12,7 @@ interface ProviderRequestContext {
   clientIP: string;
   ua: string;
   path: string;
+  signal?: AbortSignal;
 }
 
 export async function providerChat(
@@ -84,17 +85,27 @@ export async function providerChat(
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (p.apiKey) headers.Authorization = "Bearer " + p.apiKey;
   let resp: Response;
+  const cfg = await getConfig();
+  const controller = new AbortController();
+  // 响应头超时不限制长时间正常输出；客户端取消在整个响应生命周期生效。
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, cfg.header_timeout_ms || 30_000));
+  const signal = context?.signal
+    ? AbortSignal.any([controller.signal, context.signal]) : controller.signal;
   attempts = 1;
   try {
     resp = await fetch(providerEndpoint(p.baseUrl, "/chat/completions"), {
-      method: "POST", headers, body: out,
+      method: "POST", headers, body: out, signal,
     });
   } catch (e) {
+    if (context?.signal?.aborted) return fail(499, "client_cancelled", "client cancelled request");
+    if (controller.signal.aborted) return fail(504, "provider_header_timeout", "provider response headers timed out");
     return fail(502, "upstream_connect", e instanceof Error ? e.message : "provider connect failed");
+  } finally {
+    clearTimeout(timeout);
   }
   const contentType = resp.headers.get("content-type") ?? "application/json";
   if (stream && resp.ok && resp.body && /text\/event-stream/i.test(contentType)) {
-    const cfgIdle = (await getConfig()).stream_idle_ms;
+    const cfgIdle = cfg.stream_idle_ms;
     const monitored = idleMonitorBody(resp.body, cfgIdle > 0 ? cfgIdle : 300_000,
       () => { stats.errKind ||= "provider_stream_timeout"; });
     return new Response(observeProviderStream(monitored, stats, () => finish(resp.status)), {
