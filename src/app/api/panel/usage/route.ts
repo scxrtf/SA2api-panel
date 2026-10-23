@@ -230,6 +230,7 @@ export async function GET(req: Request) {
   const modelAgg = new Map<string, AggAcc>();
   const keyAgg = new Map<string, AggAcc>();
   const keyRealm = new Map<string, string>();
+  const keyModelAgg = new Map<string, AggAcc>();
   const providerAgg = new Map<string, AggAcc>();
   const providerModelAgg = new Map<string, AggAcc>();
   const hourSeries = new Map<string, AggAcc>();
@@ -258,6 +259,10 @@ export async function GET(req: Request) {
     if (!keyAgg.has(kn)) keyAgg.set(kn, new AggAcc());
     keyAgg.get(kn)!.add(e);
     if (!keyRealm.has(kn)) keyRealm.set(kn, realm);
+    // key × 模型第二层：展开 key 行时显示该 key 各模型的用量构成。
+    const kmKey = kn + "\x00" + model;
+    if (!keyModelAgg.has(kmKey)) keyModelAgg.set(kmKey, new AggAcc());
+    keyModelAgg.get(kmKey)!.add(e);
     // 供应商维度：realm 形如 "provider:名字"；第二层按供应商×裸模型名。
     // 兜底：旧记录 realm 未带前缀但 provider 列非空时也归入供应商桶（防明细缺失）。
     const prov = providerNameFromRealm(realm) || (e.provider ?? "");
@@ -349,6 +354,20 @@ export async function GET(req: Request) {
       a.key.localeCompare(b.key),
     );
 
+  // 以 \x00 分隔避免与模型/密钥名里的冒号、空格混淆；realm 记录 key 名供前端分组。
+  const byKeyModel = [...keyModelAgg.entries()]
+    .map(([k, acc]) => {
+      const idx = k.indexOf("\x00");
+      const keyName = k.slice(0, idx);
+      const model = k.slice(idx + 1);
+      return { key: k, realm: keyName, extra: model, agg: acc.finish() };
+    })
+    .sort((a, b) =>
+      (a.realm ?? "").localeCompare(b.realm ?? "") ||
+      b.agg.total_tokens - a.agg.total_tokens ||
+      a.key.localeCompare(b.key),
+    );
+
   const creditByAccount = creditFinish(creditAcctAgg);
   for (const r of creditByAccount) r.nickname = nicks.get(r.key) ?? "";
 
@@ -397,14 +416,34 @@ export async function GET(req: Request) {
   } : null;
 
   const sinceRow = events.length > 0 ? events[0].at : null;
+  // 供应商合计 = 所有供应商桶之和；内置池 = 总量 - 供应商。
+  const provAggTotal = new AggAcc();
+  for (const acc of providerAgg.values()) {
+    provAggTotal.requests += acc.requests;
+    provAggTotal.errors += acc.errors;
+    provAggTotal.prompt += acc.prompt;
+    provAggTotal.completion += acc.completion;
+    provAggTotal.total += acc.total;
+    provAggTotal.credits += acc.credits;
+    provAggTotal.creditSamples += acc.creditSamples;
+    provAggTotal.creditTokens += acc.creditTokens;
+    provAggTotal.cacheHit += acc.cacheHit;
+    provAggTotal.cacheMiss += acc.cacheMiss;
+    provAggTotal.latSum += acc.latSum;
+    provAggTotal.latSamples += acc.latSamples;
+    provAggTotal.tpsSum += acc.tpsSum;
+    provAggTotal.tpsSamples += acc.tpsSamples;
+  }
   return ok({
     totals: total.finish(),
+    provider_totals: provAggTotal.finish(),
     by_realm: keyedFinish(realmAgg, () => ({})),
     by_account: byAccount,
     by_model: keyedFinish(modelAgg, () => ({})),
     by_key: keyedFinish(keyAgg, (k) => ({ realm: keyRealm.get(k) ?? "" })),
     by_provider: keyedFinish(providerAgg, () => ({})),
     by_provider_model: byProviderModel,
+    by_key_model: byKeyModel,
     credit_by_account: creditByAccount,
     credit_by_model: creditFinish(creditModelAgg),
     credit_by_key: creditFinish(creditKeyAgg),

@@ -29,24 +29,29 @@ const fmtTok = (n: number) =>
   : n >= 1000 ? (n / 1000).toFixed(1) + "k"
   : String(Math.round(n));
 
+// 分组调色板刻意避开蓝/绿：蓝=prompt、绿=completion 是全局口径，
+// 供应商等分组分段使用橙/紫/红/黄等色，避免与 prompt/completion 混淆。
 const GROUP_COLORS = [
-  "#e8741c", "#2f9e6e", "#3b82f6", "#a855f7",
-  "#ef4444", "#14b8a6", "#eab308", "#64748b",
+  "#e8741c", "#a855f7", "#ef4444", "#eab308",
+  "#ec4899", "#8b5cf6", "#64748b", "#f97316",
+  "#f43f5e", "#d946ef", "#78716c", "#c026d3",
+  "#fb7185", "#a16207", "#7c3aed", "#db2777",
 ];
-const MAX_GROUPS = 8;
+const MAX_GROUPS = 16;
 const OTHER_KEY = "__other__";
 
 // Top N 直接展示，其余按时间桶合并成「其它」，避免图例和分段无限膨胀。
-function mergeGroups(groups: ChartGroup[]): ChartGroup[] {
+// maxGroups=Infinity 时不合并（例如供应商维度，数量本来就少）。
+function mergeGroups(groups: ChartGroup[], maxGroups: number = MAX_GROUPS): ChartGroup[] {
   const sorted = [...groups].sort((a, b) =>
     b.total_tokens - a.total_tokens ||
     b.requests - a.requests ||
     a.label.localeCompare(b.label),
   );
-  if (sorted.length <= MAX_GROUPS) return sorted;
+  if (sorted.length <= maxGroups) return sorted;
 
-  const head = sorted.slice(0, MAX_GROUPS - 1);
-  const tail = sorted.slice(MAX_GROUPS - 1);
+  const head = sorted.slice(0, maxGroups - 1);
+  const tail = sorted.slice(maxGroups - 1);
   const byT = new Map<number, SeriesPoint>();
   let prompt = 0, completion = 0, total = 0, requests = 0;
   for (const g of tail) {
@@ -80,15 +85,16 @@ function mergeGroups(groups: ChartGroup[]): ChartGroup[] {
   ];
 }
 
-export function UsageChart({ series, groups, dimLabel }: {
+export function UsageChart({ series, groups, dimLabel, maxGroups = MAX_GROUPS }: {
   series: SeriesPoint[];
   groups?: ChartGroup[];
   dimLabel?: string;
+  maxGroups?: number;
 }) {
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const displayGroups = useMemo(
-    () => (groups && groups.length > 0 ? mergeGroups(groups) : []),
-    [groups],
+    () => (groups && groups.length > 0 ? mergeGroups(groups, maxGroups) : []),
+    [groups, maxGroups],
   );
   const grouped = displayGroups.length > 0;
 
@@ -157,7 +163,7 @@ export function UsageChart({ series, groups, dimLabel }: {
   };
 
   const visibleTotal = drawGroups.reduce((s, g) => s + g.total_tokens, 0);
-  const merged = groups && groups.length > MAX_GROUPS ? groups.length - (MAX_GROUPS - 1) : 0;
+  const merged = groups && groups.length > maxGroups ? groups.length - (maxGroups - 1) : 0;
 
   return (
     <>
@@ -177,6 +183,12 @@ export function UsageChart({ series, groups, dimLabel }: {
           })}
           <span className="note">可见合计 {fmtTok(visibleTotal)}</span>
           {merged > 0 && <span className="note">其余 {merged} 项已合并</span>}
+        </div>
+      )}
+      {!grouped && (
+        <div className="uschart-legend">
+          <span><i style={{ background: "var(--us-prompt)", display: "inline-block", width: 10, height: 10, borderRadius: 2, marginRight: 4 }} />prompt</span>
+          <span style={{ marginLeft: 10 }}><i style={{ background: "var(--ok)", display: "inline-block", width: 10, height: 10, borderRadius: 2, marginRight: 4 }} />completion</span>
         </div>
       )}
       <div className="uschart-body">

@@ -36,6 +36,7 @@ const CHART_RIGHT = 12;
 
 export function AiCheckerView({ flash }: { flash: Flash }) {
   const [models, setModels] = useState<ModelRow[]>([]);
+  const [modelWarnings, setModelWarnings] = useState<string[]>([]);
   const [baselines, setBaselines] = useState<BaselineItem[]>([]);
   const [src, setSrc] = useState<Source>("pool");
   const [model, setModel] = useState("");
@@ -75,8 +76,11 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
 
   // 模型目录 + 基准列表。
   useEffect(() => {
-    req<{ models: ModelRow[] }>("models")
-      .then((r) => setModels(r.models ?? []))
+    req<{ models: ModelRow[]; warnings?: string[] }>("models")
+      .then((r) => {
+        setModels(r.models ?? []);
+        setModelWarnings(r.warnings ?? []);
+      })
       .catch((e) => {
         setModels([]);
         flash("err", "加载模型目录失败：" + (e instanceof Error ? e.message : String(e)));
@@ -296,12 +300,20 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
     <>
       <Box title="指纹采样" hint="反复请求模型输出 1-355 随机数，形成统计指纹（鉴别期间会持续消耗该模型额度）">
         <div className="pad">
+          {modelWarnings.length > 0 && (
+            <div className="msg err" style={{ marginBottom: 10 }}>
+              供应商模型目录获取失败：{modelWarnings.join("；")}
+              <span className="dim">（「供应商」通道只显示拉取成功的目录，请检查供应商 Base URL 与 Key）</span>
+            </div>
+          )}
           <div className="form-grid">
             <div className="form-row">
               <div className="form-label">通道</div>
               <div className="ustabs">
                 <button className={src === "pool" ? "on" : ""} onClick={() => switchSrc("pool")}>池模型</button>
-                <button className={src === "provider" ? "on" : ""} onClick={() => switchSrc("provider")}>供应商</button>
+                <button className={src === "provider" ? "on" : ""} onClick={() => switchSrc("provider")}>
+                  供应商{providerModels.length > 0 && <span className="cnt">{providerModels.length}</span>}
+                </button>
                 <button className={src === "custom" ? "on" : ""} onClick={() => switchSrc("custom")}>自定义外站</button>
               </div>
             </div>

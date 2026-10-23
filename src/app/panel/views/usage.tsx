@@ -43,12 +43,14 @@ interface SeriesGroupResp {
 
 interface UsageResp {
   totals: Agg;
+  provider_totals?: Agg;
   by_realm: KeyedRow[];
   by_account: KeyedRow[];
   by_model: KeyedRow[];
   by_key: KeyedRow[];
   by_provider: KeyedRow[];
   by_provider_model: KeyedRow[];
+  by_key_model: KeyedRow[];
   credit_by_account: CreditRow[];
   credit_by_model: CreditRow[];
   credit_by_key: CreditRow[];
@@ -235,6 +237,7 @@ export function UsageView({ flash }: { flash: Flash }) {
   const [sort, setSort] = useState<SortKey>("total");
   const [creditDim, setCreditDim] = useState<"account" | "model" | "key">("account");
   const [provOpen, setProvOpen] = useState<string | null>(null);
+  const [keyOpen, setKeyOpen] = useState<string | null>(null);
 
   const load = useCallback(() => {
     const query = "usage?hours=" + hours + (chartDim === "total" ? "" : "&group=" + chartDim);
@@ -263,13 +266,32 @@ export function UsageView({ flash }: { flash: Flash }) {
     return m;
   }, [u]);
 
+  // Key 维度：行下展开该 key 各模型的用量构成（by_key_model，\x00 分隔键）。
+  const keySubs = useMemo(() => {
+    const m = new Map<string, KeyedRow[]>();
+    if (!u) return m;
+    for (const p of u.by_key_model ?? []) {
+      const k = p.realm ?? "";
+      if (!m.has(k)) m.set(k, []);
+      m.get(k)!.push(p);
+    }
+    return m;
+  }, [u]);
+
   if (!u) return <Box title="用量统计" pad><div className="dim">加载用量…</div></Box>;
 
   const t = u.totals;
   const total = t.total_tokens, pt = t.prompt_tokens, ct = t.completion_tokens;
   const reqs = t.requests, errs = t.errors;
   const okRate = reqs ? (reqs - errs) / reqs * 100 : null;
-  const m = DIMS[dim];
+  // 总 / 池 / 供应商 三口径：池 = 总量 - 供应商合计（无供应商数据时池=总）。
+  const pv = u.provider_totals;
+  const hasProv = !!pv && pv.total_tokens > 0;
+  const provTotal = pv?.total_tokens ?? 0, provP = pv?.prompt_tokens ?? 0, provC = pv?.completion_tokens ?? 0;
+  const poolTotal = total - provTotal, poolP = pt - provP, poolC = ct - provC;
+  // 显式标注为非窄化类型：rows.map 闭包里 dim 若被窄化（如 provider 分支 return 后），
+  // 后续 dim === "key" 会被 TS 判成无重叠比较。
+  const m: { key: keyof UsageResp; title: string; withRealm: boolean; withPerf: boolean; span: number } = DIMS[dim];
 
   const dimTabs = (
     <div className="ustabs">
@@ -305,8 +327,18 @@ export function UsageView({ flash }: { flash: Flash }) {
                 <i style={{ width: pctWidth(pt, total), background: "var(--us-prompt)" }}></i>
                 <i style={{ width: pctWidth(ct, total), background: "var(--ok)" }}></i>
               </div>} />
-            <Kpi value={fmtTok(pt)} label="prompt" color="var(--us-prompt)" sub={"占比 " + usPct(pt, total)} />
-            <Kpi value={fmtTok(ct)} label="completion" color="var(--ok)" sub={"占比 " + usPct(ct, total)} />
+            <Kpi value={fmtTok(poolTotal)} label="池 token" color="var(--us-prompt)"
+              sub={hasProv ? "内置池 · 占总 " + usPct(poolTotal, total) : "全部来自内置池"}
+              bar={<div className="kbar">
+                <i style={{ width: pctWidth(poolP, poolTotal), background: "var(--us-prompt)" }}></i>
+                <i style={{ width: pctWidth(poolC, poolTotal), background: "var(--ok)" }}></i>
+              </div>} />
+            <Kpi value={fmtTok(provTotal)} label="供应商 token" color="#e8741c"
+              sub={hasProv ? "占总 " + usPct(provTotal, total) : "暂无供应商用量"}
+              bar={<div className="kbar">
+                <i style={{ width: pctWidth(provP, provTotal), background: "var(--us-prompt)" }}></i>
+                <i style={{ width: pctWidth(provC, provTotal), background: "var(--ok)" }}></i>
+              </div>} />
             <Kpi value={String(errs)} label="失败尝试" color={errs ? "var(--warn)" : undefined}
               sub={okRate == null ? "—" : errs ? "成功率 " + okRate.toFixed(1) + "%" : "成功率 100%"} />
             <Kpi value={fmtMs(t.avg_latency_ms)} label="平均延迟"
@@ -335,6 +367,7 @@ export function UsageView({ flash }: { flash: Flash }) {
           series={u.series}
           groups={chartDim === "total" ? undefined : (u.series_group?.dim === chartDim ? u.series_group.groups : undefined)}
           dimLabel={CHART_DIMS.find(([k]) => k === chartDim)?.[1] ?? ""}
+          maxGroups={chartDim === "provider" || chartDim === "realm" ? Number.POSITIVE_INFINITY : undefined}
         />
       </Box>
 
@@ -400,9 +433,65 @@ export function UsageView({ flash }: { flash: Flash }) {
                       </React.Fragment>
                     );
                   }
+                  if (dim === "key") {
+                    // Key 行可展开：显示该 key 的各模型用量构成（点行头箭头开合）。
+                    const open = keyOpen === x.key;
+                    const subs = keySubs.get(x.key) ?? [];
+                    return (
+                      <React.Fragment key={x.key}>
+                        <tr className={open ? "exp open" : "exp"} onClick={() => setKeyOpen(open ? null : x.key)}
+                          title="点击查看该 Key 的模型构成">
+                          <td className="mark" aria-hidden="true"><span className="expv">{open ? "▾" : "▸"}</span></td>
+                          <td>
+                            {x.key}
+                            {(x.extra || "") && <div className="note">{x.extra}</div>}
+                          </td>
+                          <td className="num">{realmLabel(x.realm)}</td>
+                          <td className="num">{fmtTok(x.agg.requests)}</td>
+                          <td className="num">{x.agg.errors
+                            ? <span style={{ color: "var(--warn)" }}>{fmtTok(x.agg.errors)}</span>
+                            : "—"}</td>
+                          <td className="num">{fmtTok(x.agg.prompt_tokens)}</td>
+                          <td className="num">{fmtTok(x.agg.completion_tokens)}</td>
+                          <td className="num">
+                            {fmtTok(x.agg.total_tokens)}
+                            <MixBar prompt={x.agg.prompt_tokens} completion={x.agg.completion_tokens} total={x.agg.total_tokens} />
+                          </td>
+                          <td className="num">{fmtMs(x.agg.avg_latency_ms)}</td>
+                          <td className="num">{fmtRate(x.agg.avg_tokens_per_second)}</td>
+                        </tr>
+                        {open && subs.length === 0 && (
+                          <tr className="sub" style={{ ["--depth" as string]: 1 } as React.CSSProperties}>
+                            <td className="mark" aria-hidden="true"></td>
+                            <td colSpan={m.span - 1} className="dim">无模型构成数据（该窗口内无样本）</td>
+                          </tr>
+                        )}
+                        {open && subs.map((p) => (
+                          <tr key={p.key} className="sub" style={{ ["--depth" as string]: 1 } as React.CSSProperties}>
+                            <td className="mark" aria-hidden="true"></td>
+                            <td className="mono">{"└ " + (p.extra || p.key)}</td>
+                            <td className="num"></td>
+                            <td className="num">{fmtTok(p.agg.requests)}</td>
+                            <td className="num">{p.agg.errors
+                              ? <span style={{ color: "var(--warn)" }}>{fmtTok(p.agg.errors)}</span>
+                              : "—"}</td>
+                            <td className="num">{fmtTok(p.agg.prompt_tokens)}</td>
+                            <td className="num">{fmtTok(p.agg.completion_tokens)}</td>
+                            <td className="num">
+                              {fmtTok(p.agg.total_tokens)}
+                              <MixBar prompt={p.agg.prompt_tokens} completion={p.agg.completion_tokens} total={p.agg.total_tokens} />
+                            </td>
+                            <td className="num">{fmtMs(p.agg.avg_latency_ms)}</td>
+                            <td className="num">{fmtRate(p.agg.avg_tokens_per_second)}</td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  }
+                  // dim 此处已被控制流窄化（provider/key 分支均已 return）；account 分支用原始值。
                   const name = dim === "account" ? String(x.key || "").slice(0, 8)
                     : dim === "realm" ? realmLabel(x.key) : x.key;
-                  const sub = dim === "account" || dim === "key" ? (x.extra || "") : undefined;
+                  const sub = dim === "account" ? (x.extra || "") : undefined;
                   return (
                     <DimRow key={x.key} name={name} sub={sub} a={x.agg}
                       realm={m.withRealm ? x.realm : undefined} withPerf={m.withPerf} />
@@ -414,6 +503,8 @@ export function UsageView({ flash }: { flash: Flash }) {
           <div className="note">
             {dim === "provider"
               ? rows.length + " 个供应商 · " + (u.by_provider_model ?? []).length + " 个模型 · 请求数含失败尝试"
+              : dim === "key"
+              ? rows.length + " 个 Key · 点行可展开各模型用量构成 · 请求数含失败尝试"
               : rows.length + " 行 · 请求数含失败尝试"}
           </div>
         </div>
