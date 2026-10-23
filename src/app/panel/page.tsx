@@ -9,6 +9,7 @@ import { LoginScreen } from "./components/login";
 import type { View } from "./nav";
 import { AccountsView } from "./views/accounts";
 import { UsageView } from "./views/usage";
+import { AnalyticsView } from "./views/analytics";
 import { PackagesView } from "./views/packages";
 import { TasksCenterView } from "./views/taskscenter";
 import { ModelsView } from "./views/models";
@@ -81,6 +82,7 @@ export default function PanelPage() {
         </ViewPane>
       )}
       {visited.has("usage") && <ViewPane active={view === "usage"}><UsageView flash={flash} /></ViewPane>}
+      {visited.has("analytics") && <ViewPane active={view === "analytics"}><AnalyticsView flash={flash} /></ViewPane>}
       {visited.has("packages") && <ViewPane active={view === "packages"}><PackagesView flash={flash} /></ViewPane>}
       {visited.has("taskscenter") && <ViewPane active={view === "taskscenter"}><TasksCenterView flash={flash} /></ViewPane>}
       {visited.has("models") && <ViewPane active={view === "models"}><ModelsView flash={flash} /></ViewPane>}

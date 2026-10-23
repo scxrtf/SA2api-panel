@@ -187,9 +187,13 @@ function ProvidersBox({ flash }: { flash: Flash }) {
     } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   };
   const remove = async (n: string) => {
-    if (!window.confirm("确认删除供应商 " + n + "？")) return;
+    // 删除供应商为权限级操作：与密钥授权同口径，超级密码二次确认。
+    // 服务端会同事务从所有密钥授权里剔除该供应商名，避免幽灵授权。
+    const password = window.prompt("删除供应商 " + n + " 需输入超级密码：");
+    if (password === null) return;
+    if (!password) { flash("err", "超级密码不能为空"); return; }
     try {
-      await req("providers/" + encodeURIComponent(n), { method: "DELETE" });
+      await req("providers/" + encodeURIComponent(n), { method: "DELETE", body: { super_password: password } });
       emitPanelRefresh();
       flash("ok", "供应商已删除");
     }

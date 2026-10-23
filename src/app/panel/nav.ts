@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import React from "react";
 
-export type View = "accounts" | "usage" | "packages" | "taskscenter" | "models" | "aichecker" | "gateway" | "connect" | "config" | "logs";
+export type View = "accounts" | "usage" | "analytics" | "packages" | "taskscenter" | "models" | "aichecker" | "gateway" | "connect" | "config" | "logs";
 
 export interface NavItem {
   id: View;
@@ -20,6 +20,13 @@ export const NAV: NavItem[] = [
     icon: React.createElement("svg", svgProps, React.createElement("circle", { cx: 8, cy: 5.5, r: 2.6 }), React.createElement("path", { d: "M2.8 13.5c.6-2.6 2.7-4 5.2-4s4.6 1.4 5.2 4" })) },
   { id: "usage", label: "用量", code: "USAGE", title: "用量", sub: "请求与积分消耗统计",
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M2 13.5h12" }), React.createElement("path", { d: "M4.5 13.5V8.2M8 13.5V3.5M11.5 13.5v-3" })) },
+  { id: "analytics", label: "数据看板", code: "ANLY", title: "数据看板", sub: "模型调用分流与模型状态一览",
+    icon: React.createElement("svg", svgProps,
+      React.createElement("path", { d: "M2 8c2 0 2-4.5 4-4.5S8 8 10 8s2 4.5 4 4.5" }),
+      React.createElement("circle", { cx: 2, cy: 8, r: 1.1 }),
+      React.createElement("circle", { cx: 6, cy: 3.5, r: 1.1 }),
+      React.createElement("circle", { cx: 10, cy: 8, r: 1.1 }),
+      React.createElement("circle", { cx: 14, cy: 12.5, r: 1.1 })) },
   { id: "packages", label: "积分构成", code: "PKG", title: "积分构成", sub: "各账号套餐包与到期分布",
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M2.2 5.4 8 2.5l5.8 2.9v5.2L8 13.5l-5.8-2.9z" }), React.createElement("path", { d: "M2.2 5.4 8 8.3l5.8-2.9M8 8.3v5.2" })) },
   { id: "taskscenter", label: "任务中心", code: "TASK", title: "任务中心", sub: "成长任务扫描与队列执行",
