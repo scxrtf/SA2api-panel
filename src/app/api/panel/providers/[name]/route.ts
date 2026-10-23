@@ -1,4 +1,4 @@
-// DELETE /api/panel/providers/{name} — 删除聚合供应商。
+// PATCH/DELETE /api/panel/providers/{name} — 修改 / 删除聚合供应商。
 // 权限级操作：必须携带超级密码；同事务内从所有网关密钥的 providers 白名单里
 // 剔除该供应商，避免密钥残留指向已不存在供应商的幽灵授权（重新保存时 400）。
 import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
@@ -8,6 +8,35 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ name: string }> };
+
+// PATCH 修改供应商的可编辑字段（models 白名单 / base_url / key）。
+// key 留空 = 不更换；name 为主键不可改（改名等于新建+删旧）。
+export async function PATCH(req: Request, ctx: Ctx) {
+  const auth = await panelAuth(req);
+  if (auth) return auth;
+  const { name } = await ctx.params;
+  let body: { models?: string; base_url?: string; key?: string };
+  try {
+    body = (await req.json()) as { models?: string; base_url?: string; key?: string };
+  } catch {
+    return fail(400, "invalid json body");
+  }
+  const existing = await prisma.provider.findUnique({ where: { name } });
+  if (!existing) return fail(404, "未找到供应商：" + name);
+
+  const data: { models?: string; baseUrl?: string; apiKey?: string } = {};
+  if (body.models !== undefined) data.models = body.models.trim();
+  if (body.base_url !== undefined) {
+    const baseUrl = body.base_url.trim().replace(/\/+$/, "");
+    if (!baseUrl || !/^https?:\/\//.test(baseUrl)) return fail(400, "base_url 必须是 http(s) URL");
+    data.baseUrl = baseUrl;
+  }
+  if (body.key !== undefined && body.key.trim()) data.apiKey = body.key.trim();
+  if (Object.keys(data).length === 0) return fail(400, "没有可更新的字段");
+
+  await prisma.provider.update({ where: { name }, data });
+  return ok({ name });
+}
 
 // stripProvider 从逗号分隔的授权串里移除目标供应商；"*" 保持不变（不含具体名）。
 function stripProvider(stored: string, target: string): string {

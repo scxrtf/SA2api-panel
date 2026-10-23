@@ -5,7 +5,7 @@ import { req, useAutoRefresh, usePanelRefresh, emitPanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
 interface KeyRow { name: string; key_mask: string; providers: string[]; created_at: string }
-interface ProviderRow { name: string; base_url: string; key_mask: string; created_at: string }
+interface ProviderRow { name: string; base_url: string; key_mask: string; models: string; created_at: string }
 
 export function GatewayView({ flash }: { flash: Flash }) {
   return (
@@ -223,6 +223,55 @@ function ProvidersBox({ flash }: { flash: Flash }) {
     setForm({ ...form, models: next.join(", ") });
   };
 
+  // 模型白名单编辑器：编辑已有供应商的暴露模型集合（PATCH 落库，名称不可改）。
+  // editor.name 记录目标供应商；models 为逗号分隔原文；probeModels 供勾选。
+  const [editor, setEditor] = useState<{ name: string; models: string } | null>(null);
+  const [editorProbe, setEditorProbe] = useState("");
+  const [editorProbeErr, setEditorProbeErr] = useState(false);
+  const [editorProbeModels, setEditorProbeModels] = useState<string[]>([]);
+  const [editorProbing, setEditorProbing] = useState(false);
+  const editorPicked = editor ? editor.models.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
+  const openEditor = (p: ProviderRow) => {
+    setEditor({ name: p.name, models: p.models ?? "" });
+    setEditorProbe("");
+    setEditorProbeErr(false);
+    setEditorProbeModels([]);
+  };
+  const editorToggle = (m: string) => {
+    if (!editor) return;
+    const next = editorPicked.includes(m) ? editorPicked.filter((x) => x !== m) : [...editorPicked, m];
+    setEditor({ ...editor, models: next.join(", ") });
+  };
+  // 编辑探测用供应商当前 base_url + 已存 key 走服务端代理（前端拿不到原文 key，
+  // 由 PATCH 前的 GET /providers/{name}/probe-models 接口代发，见下方接口）。
+  const editorProbeNow = async () => {
+    if (!editor) return;
+    setEditorProbing(true);
+    setEditorProbe("探测中…");
+    setEditorProbeErr(false);
+    try {
+      const r = await req<{ models?: string[] }>("providers/" + encodeURIComponent(editor.name) + "/probe-models", { method: "POST" });
+      const models = r.models ?? [];
+      setEditorProbeModels(models);
+      setEditorProbe(models.length > 0 ? models.length + " 个模型" : "上游返回 0 个模型");
+    } catch (e) {
+      setEditorProbeErr(true);
+      setEditorProbeModels([]);
+      setEditorProbe(e instanceof Error ? e.message : String(e));
+    } finally { setEditorProbing(false); }
+  };
+  const saveEditor = async () => {
+    if (!editor) return;
+    try {
+      await req("providers/" + encodeURIComponent(editor.name), { method: "PATCH", body: { models: editor.models } });
+      setEditor(null);
+      emitPanelRefresh();
+      load();
+      flash("ok", "供应商 " + editor.name + " 的模型白名单已更新");
+    } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+  };
+
   return (
     <Box title="聚合供应商" hint="OpenAI 兼容上游，模型以「供应商名:模型」暴露">
       <div className="pad">
@@ -265,18 +314,59 @@ function ProvidersBox({ flash }: { flash: Flash }) {
         )}
         <div className="tbl-wrap" style={{ marginTop: 14 }}>
           <table className="tbl tbl-gateway">
-            <thead><tr><th>名称</th><th>Base URL</th><th>Key 掩码</th><th></th></tr></thead>
+            <thead><tr><th>名称</th><th>Base URL</th><th>Key 掩码</th><th>模型白名单</th><th></th></tr></thead>
             <tbody>
               {(rows ?? []).map((p) => (
                 <tr key={p.name}>
                   <td>{p.name}</td><td className="mono">{p.base_url}</td><td className="mono">{p.key_mask}</td>
-                  <td><button className="btn small danger" onClick={() => remove(p.name)}>删除</button></td>
+                  <td className="dim" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    title={p.models || "全部"}>{p.models ? p.models.split(",").length + " 个：" + p.models : "全部"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <button className="btn small" onClick={() => openEditor(p)}>修改模型</button>{" "}
+                    <button className="btn small danger" onClick={() => remove(p.name)}>删除</button>
+                  </td>
                 </tr>
               ))}
-              {(rows ?? []).length === 0 && <tr><td colSpan={4} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无供应商</td></tr>}
+              {(rows ?? []).length === 0 && <tr><td colSpan={5} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无供应商</td></tr>}
             </tbody>
           </table>
         </div>
+        {editor && (
+          <div style={{ marginTop: 12, padding: 12, border: "1px solid rgba(128,128,128,.35)", borderRadius: 8 }}>
+            <div style={{ marginBottom: 8 }}>
+              修改 <b>{editor.name}</b> 的模型白名单：<span className="dim">留空 = 暴露上游全部模型</span>
+            </div>
+            <div className="form-row" style={{ marginBottom: 8 }}>
+              <input className="input" placeholder="留空 = 全部模型；逗号分隔 = 只暴露白名单"
+                value={editor.models}
+                onChange={(e) => setEditor({ ...editor, models: e.target.value })} />
+            </div>
+            <div className="btn-row" style={{ marginBottom: editorProbeModels.length ? 8 : 0 }}>
+              <button className="btn" onClick={editorProbeNow} disabled={editorProbing}>
+                {editorProbing ? "探测中…" : "获取上游模型列表"}
+              </button>
+              {editorProbeModels.length > 0 && (<>
+                <button className="btn xs" onClick={() => setEditor({ ...editor, models: editorProbeModels.join(", ") })}>全选</button>
+                <button className="btn xs" onClick={() => setEditor({ ...editor, models: "" })}>清空勾选</button>
+              </>)}
+              {editorProbe && <span className={editorProbeErr ? "" : "dim"} style={{ alignSelf: "center", ...(editorProbeErr ? { color: "var(--err)", fontSize: 12 } : {}) }}>{editorProbe}</span>}
+            </div>
+            {editorProbeModels.length > 0 && (
+              <div className="probe-models" style={{ marginBottom: 8 }}>
+                {editorProbeModels.map((m) => (
+                  <label key={m}>
+                    <input type="checkbox" checked={editorPicked.includes(m)} onChange={() => editorToggle(m)} />
+                    <span title={m}>{m}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="btn-row">
+              <button className="btn primary" onClick={saveEditor}>保存</button>
+              <button className="btn" onClick={() => setEditor(null)}>取消</button>
+            </div>
+          </div>
+        )}
       </div>
     </Box>
   );
