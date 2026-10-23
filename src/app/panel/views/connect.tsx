@@ -485,6 +485,64 @@ resp = client.chat.completions.create(
         </div>
       </Box>
 
+      <Box title="供应商模型怎么接" hint="把第三方 OpenAI 兼容服务挂到本网关，模型名带供应商前缀" pad>
+        <div className="connect-grid">
+          <div className="connect-card">
+            <h4>① 添加供应商</h4>
+            <pre>{`curl -X POST ${origin}/api/panel/providers \\
+  -H "Authorization: Bearer ${k}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "name": "myvendor",
+    "base_url": "https://api.example.com/v1",
+    "key": "sk-xxxx",
+    "models": ""
+  }'`}</pre>
+            <CtrlHint>
+              也可在面板「供应商与密钥」页表单添加。<code>name</code> 即调用前缀（中文/字母/数字/
+              下划线/连字符）；<code>base_url</code> 只填主机也行，网关自动补 <code>/v1</code>；
+              <code>models</code> 留空 = 暴露供应商全部模型，逗号分隔 = 只暴露白名单。
+            </CtrlHint>
+          </div>
+
+          <div className="connect-card">
+            <h4>② 用供应商前缀调用</h4>
+            <pre>{`curl ${chatUrl} \\
+  -H "Authorization: Bearer ${k}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "myvendor:模型名",
+    "messages": [{"role":"user","content":"你好"}]
+  }'`}</pre>
+            <CtrlHint>
+              命中供应商时<b>完全旁路账号池</b>（无粘性/无积分台账），请求原样转发、响应原样回传；
+              流式受 <code>stream_idle_ms</code> 看门狗保护（默认 300s）。
+              用量记入 <code>provider:myvendor</code> realm，用量视图可筛。
+            </CtrlHint>
+          </div>
+
+          <div className="connect-card">
+            <h4>③ 实测与子密钥授权</h4>
+            <pre>{`curl -X POST ${origin}/api/panel/models/test \\
+  -H "Authorization: Bearer ${k}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model": "myvendor:模型名"}'`}</pre>
+            <CtrlHint>
+              面板「模型」页的「实测」按钮同效果（最长 45s，返回 HTTP 状态与首条回复）。
+              子密钥可在「供应商与密钥」页勾选供应商白名单：绑定后该密钥只能调用已勾选供应商，
+              显式 <code>*</code> = 全部，留空 = 不限制。
+            </CtrlHint>
+          </div>
+        </div>
+
+        <div className="connect-verify">
+          <b>供应商验收</b>
+          <span>① <code>GET /api/v1/models</code> 出现 <code>myvendor:xxx</code> 条目</span>
+          <span>② 带前缀的 <code>chat/completions</code> 返回 <code>choices[0]</code></span>
+          <span>③ 面板「模型」页筛选「供应商」可看到目录；单个供应商失败不拖垮整表（错误进 warnings）</span>
+        </div>
+      </Box>
+
       <Box title="排错速查" hint="接入时最常见的四类问题" pad>
         <div className="connect-faq">
           <div className="faq-item">
