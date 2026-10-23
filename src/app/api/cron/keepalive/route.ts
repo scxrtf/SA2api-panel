@@ -17,7 +17,9 @@ async function run(req: Request): Promise<Response> {
   if (!verifyBearer(req, cfg.api_key)) {
     return jsonify({ ok: false, error: "invalid_api_key" }, 401);
   }
-  const result = await runKeepalive();
+  const url = new URL(req.url);
+  const force = url.searchParams.get("force") === "1";
+  const result = await runKeepalive({ force, source: "cron" });
   return jsonify({ ok: true, ...result });
 }
 

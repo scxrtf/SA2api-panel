@@ -27,12 +27,23 @@ const SCHEDULE: Field[] = [
   { key: "schedule_travel_disabled", label: "关闭猫猫旅行", type: "bool", hint: "" },
   { key: "schedule_activity_hours", label: "上报时点（小时，逗号分隔）", type: "hours", hint: "点亮连登 + 解锁领养前置" },
   { key: "schedule_activity_disabled", label: "关闭活跃上报", type: "bool", hint: "" },
-  { key: "schedule_keepalive_hours", label: "保活时点（小时，逗号分隔）", type: "hours", hint: "" },
+  { key: "schedule_keepalive_hours", label: "保活时点（小时，逗号分隔）", type: "hours", hint: "自动与外部触发共用 DB 租约，不会并发送死" },
+  { key: "schedule_keepalive_refresh_before_hours", label: "临期刷新窗口（小时）", type: "number",
+    hint: "已知有效期按该窗口提前续期；过期时间未知时至少每天续期一次，0=不提前刷新" },
+  { key: "schedule_keepalive_concurrency", label: "保活并发数", type: "number", hint: "1-10；建议 3-4，避免上游风控" },
+  { key: "schedule_keepalive_time_budget_ms", label: "单轮时间预算（秒）", type: "number",
+    hint: "10-240 秒；预算耗尽后剩余账号留给下一轮，避免接口超时" },
   { key: "schedule_keepalive_disabled", label: "关闭 Token 保活", type: "bool", hint: "" },
   { key: "schedule_growth_hours", label: "成长任务执行时点（小时）", type: "hours", hint: "每日到点自动扫描 + 执行全部待办；建议零点后" },
   { key: "schedule_growth_disabled", label: "关闭成长任务自动执行", type: "bool", hint: "" },
   { key: "schedule_balance_refresh_enabled", label: "后台刷新余额", type: "bool", hint: "" },
   { key: "schedule_balance_refresh_minutes", label: "余额刷新间隔（分钟）", type: "number", hint: "" },
+  { key: "schedule_model_health_enabled", label: "自动探测模型可用率", type: "bool",
+    hint: "对所有目录模型发送最小真实聊天请求；结果逐次落库，用于状态卡可用率与心跳" },
+  { key: "schedule_model_health_minutes", label: "模型探测间隔（分钟）", type: "number",
+    hint: "默认 15 分钟；关闭自动探测后不执行" },
+  { key: "schedule_model_health_every_calls", label: "每 N 次调用探测一次", type: "number",
+    hint: "按模型统计真实调用次数；达到阈值后探测该模型一次，0=关闭" },
   { key: "schedule_include_disabled_in_tasks", label: "保号任务覆盖已禁用账号", type: "bool",
     hint: "禁用只关选号：打开后已禁用账号仍会签到/活跃上报/保活/刷新余额（依旧不参与选号）。若只想让单个账号临时退出选号但保留保号，用账号行的暂停选号按钮。" },
 ];
@@ -70,6 +81,7 @@ const UPSTREAM: Field[] = [
 const MS_FIELDS = new Set([
   "breaker_cooldown_ms", "breaker_cooldown_max_ms", "cost_explore_interval_ms",
   "header_timeout_ms", "stream_idle_ms", "soft_cooldown_ms", "soft_rate_max_ms",
+  "schedule_keepalive_time_budget_ms",
 ]);
 
 export function ConfigView({ flash }: { flash: Flash }) {

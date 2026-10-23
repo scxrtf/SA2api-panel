@@ -82,7 +82,7 @@ export function extractKey(body: Obj): string {
 }
 
 // deriveKey SHA-256(system 文本 + 首条 user 签名) 前 16 字节 hex，前缀 d-。
-function deriveKey(body: Obj): string {
+export function deriveKey(body: Obj): string {
   const msgs = body["messages"];
   if (!Array.isArray(msgs) || msgs.length === 0) return "";
   let systemText = "";
@@ -115,10 +115,10 @@ function hashIndex(key: string, n: number): number {
 
 // resolveSticky 返回会话 key 在该模型上应绑定的 uid；绑定号不可用则重分配
 //（双段：空闲号优先，其次全池哈希）。无可用 → null。
-export async function resolveSticky(key: string, model: string): Promise<string | null> {
+export async function resolveSticky(key: string, model: string, realm = ""): Promise<string | null> {
   if (!key) return null;
   const now = Date.now();
-  const avail = new Set(await availableUIDsForModel(model));
+  const avail = new Set(await availableUIDsForModel(model, realm));
   const existing = await prisma.stickySession.findUnique({ where: { key } });
   if (
     existing &&

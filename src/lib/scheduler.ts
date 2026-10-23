@@ -7,6 +7,7 @@
 // 单调时钟导致错过时点）；迟到唤醒先等 wakeupGrace 网络宽限再派发。
 import { getConfig } from "./config";
 import * as cron from "./cron";
+import { latestModelHealthAt, runModelHealthProbe } from "./modelhealth";
 import { startGrowthQueue, listActiveAccounts } from "./taskcenter";
 
 type TaskKind = "checkin" | "travel" | "activity" | "keepalive" | "blackcat" | "growth";
@@ -15,12 +16,12 @@ type TaskKind = "checkin" | "travel" | "activity" | "keepalive" | "blackcat" | "
 interface SchedState {
   started: boolean;       // 主循环是否已启动
   stop: boolean;          // 优雅停机标志
-  rearm: boolean;         // Reconfigure 触发的重排通知
+  rearmSeq: number;       // Reconfigure 触发的重排代数（各循环独立消费）
   running: Promise<void> | null;
 }
 const g = globalThis as unknown as { __wbSched?: SchedState };
 const st: SchedState = g.__wbSched ?? (g.__wbSched = {
-  started: false, stop: false, rearm: false, running: null,
+  started: false, stop: false, rearmSeq: 0, running: null,
 });
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -81,10 +82,10 @@ type SlotWake = "fired" | "rearm" | "stop";
 
 // waitSlot 分段等到墙钟到达 next：每段 setTimeout 上限 60s，段末回到循环顶用墙钟重判。
 // rearm（在线改配置重排）/stop 在每段间随时被检查。
-async function waitSlot(next: number): Promise<SlotWake> {
+async function waitSlot(next: number, seenRearm: number): Promise<SlotWake> {
   for (;;) {
     if (st.stop) return "stop";
-    if (st.rearm) { st.rearm = false; return "rearm"; }
+    if (st.rearmSeq !== seenRearm) return "rearm";
     const wallRemain = next - shanghaiNow().getTime();
     if (wallRemain <= 0) return "fired";
     await sleep(Math.min(wallRemain, WALLCLOCK_CHECK_STEP_MS));
@@ -114,7 +115,7 @@ async function execActivity(): Promise<void> {
 }
 
 async function execKeepalive(): Promise<void> {
-  await cron.runKeepalive();
+  await cron.runKeepalive({ source: "scheduler" });
 }
 
 // 夜猫子：23:00–08:00 窗口内对池内账号补足 glm-5.2 真实对话并上报事件链。
@@ -190,6 +191,7 @@ async function runBatch(kinds: TaskKind[]): Promise<void> {
 
 // ─── 主循环 ─────────────────────────────────────────────────────────────────
 async function mainLoop(): Promise<void> {
+  let seenRearm = st.rearmSeq;
   for (;;) {
     if (st.stop) return;
     const { at, kinds } = await nextWake(shanghaiNow());
@@ -197,14 +199,14 @@ async function mainLoop(): Promise<void> {
       // 全部禁用：不空转，等重排通知或停机。每分钟醒一次检查 rearm/stop。
       for (;;) {
         if (st.stop) return;
-        if (st.rearm) { st.rearm = false; break; }
+        if (st.rearmSeq !== seenRearm) { seenRearm = st.rearmSeq; break; }
         await sleep(WALLCLOCK_CHECK_STEP_MS);
       }
       continue;
     }
-    const wake = await waitSlot(at);
+    const wake = await waitSlot(at, seenRearm);
     if (wake === "stop") return;
-    if (wake === "rearm") continue;
+    if (wake === "rearm") { seenRearm = st.rearmSeq; continue; }
     // 迟到唤醒先等网络宽限（容器休眠唤醒瞬间网络未就绪）。
     if (shanghaiNow().getTime() - at > WAKEUP_LATE_THRESHOLD_MS) {
       console.log("[scheduler] wakeup grace " + WAKEUP_GRACE_MS + "ms: late catch-up for slot");
@@ -212,11 +214,13 @@ async function mainLoop(): Promise<void> {
       if (st.stop) return;
     }
     await runBatch(kinds);
+    seenRearm = st.rearmSeq;
   }
 }
 
 // ─── 余额刷新独立循环 ────────────────────────────────────────────────────────
 async function balanceLoop(): Promise<void> {
+  let seenRearm = st.rearmSeq;
   for (;;) {
     if (st.stop) return;
     const cfg = await getConfig();
@@ -226,7 +230,7 @@ async function balanceLoop(): Promise<void> {
       // 暂停：每分钟醒一次等重排/停机。
       for (;;) {
         if (st.stop) return;
-        if (st.rearm) { st.rearm = false; break; }
+        if (st.rearmSeq !== seenRearm) { seenRearm = st.rearmSeq; break; }
         await sleep(WALLCLOCK_CHECK_STEP_MS);
       }
       continue;
@@ -235,36 +239,85 @@ async function balanceLoop(): Promise<void> {
     let waited = 0;
     while (waited < intervalMs) {
       if (st.stop) return;
-      if (st.rearm) { st.rearm = false; break; }
+      if (st.rearmSeq !== seenRearm) break;
       const step = Math.min(intervalMs - waited, WALLCLOCK_CHECK_STEP_MS);
       await sleep(step);
       waited += step;
     }
     if (st.stop) return;
-    if (waited < intervalMs) continue; // 被 rearm 打断：重算间隔
+    if (waited < intervalMs) { seenRearm = st.rearmSeq; continue; } // 被 rearm 打断：重算间隔
     try {
       await cron.runBalanceRefresh();
     } catch (e) {
       console.log("[scheduler] balance error: " + (e instanceof Error ? e.message : String(e)));
     }
+    seenRearm = st.rearmSeq;
+  }
+}
+
+// ─── 模型健康探测独立循环 ────────────────────────────────────────────────────
+// 上次检查记录仍在有效间隔内则等下一次；重启不会立刻重复请求，手动触发的外部
+// cron 写入新记录后也会自然顺延。
+async function healthLoop(): Promise<void> {
+  let seenRearm = st.rearmSeq;
+  for (;;) {
+    if (st.stop) return;
+    const cfg = await getConfig();
+    const intervalMs = cfg.schedule_model_health_enabled
+      ? cfg.schedule_model_health_minutes * 60_000 : 0;
+    if (intervalMs <= 0) {
+      for (;;) {
+        if (st.stop) return;
+        if (st.rearmSeq !== seenRearm) { seenRearm = st.rearmSeq; break; }
+        await sleep(WALLCLOCK_CHECK_STEP_MS);
+      }
+      continue;
+    }
+
+    let dueAt = Date.now();
+    try {
+      const latest = await latestModelHealthAt();
+      if (latest) dueAt = latest.getTime() + intervalMs;
+    } catch (e) {
+      console.log("[scheduler] model health latest error: " + (e instanceof Error ? e.message : String(e)));
+      await sleep(WALLCLOCK_CHECK_STEP_MS);
+      continue;
+    }
+
+    let interrupted = false;
+    while (Date.now() < dueAt) {
+      if (st.stop) return;
+      if (st.rearmSeq !== seenRearm) { interrupted = true; break; }
+      await sleep(Math.min(dueAt - Date.now(), WALLCLOCK_CHECK_STEP_MS));
+    }
+    if (st.stop) return;
+    if (interrupted) { seenRearm = st.rearmSeq; continue; }
+    try {
+      await runModelHealthProbe("scheduler");
+    } catch (e) {
+      console.log("[scheduler] model health error: " + (e instanceof Error ? e.message : String(e)));
+      await sleep(WALLCLOCK_CHECK_STEP_MS);
+    }
+    seenRearm = st.rearmSeq;
   }
 }
 
 // ─── 对外接口 ────────────────────────────────────────────────────────────────
-// startScheduler 幂等启动主循环 + 余额循环（instrumentation register 调用一次）。
+// startScheduler 幂等启动主循环 + 余额循环 + 模型健康循环（instrumentation register 调用一次）。
 export function startScheduler(): void {
   if (st.started) return;
   st.started = true;
   st.stop = false;
   void mainLoop();
   void balanceLoop();
+  void healthLoop();
   console.log("[scheduler] started (Asia/Shanghai 整点时口径)");
 }
 
-// reconfigure 热更新排程参数：置重排标志，两个循环在下一段睡眠边界消费重算。
+// reconfigure 热更新排程参数：推进重排代数，各循环在下一段睡眠边界独立消费。
 // 对齐 Go Reconfigure + SetBalanceInterval（面板保存配置后调用）。
 export function reconfigure(): void {
-  st.rearm = true;
+  st.rearmSeq++;
 }
 
 // stopScheduler 优雅停机（测试/调试；生产容器靠进程退出）。

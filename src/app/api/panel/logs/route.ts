@@ -1,6 +1,6 @@
-// GET /api/panel/logs — 进程内运行日志环形缓冲（对齐 Go /panel/api/logs）。
+// GET /api/panel/logs — 运行日志：进程内任务/系统日志 + 持久化调用/探测状态日志。
 import { panelAuth, ok } from "@/lib/panel-auth";
-import { runlogSnapshot } from "@/lib/runlog";
+import { listStatusLog } from "@/lib/status-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,5 +8,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
-  return ok({ entries: runlogSnapshot() });
+  let limit = parseInt(new URL(req.url).searchParams.get("limit") ?? "", 10);
+  if (!Number.isFinite(limit) || limit <= 0) limit = 500;
+  if (limit > 1000) limit = 1000;
+  return ok({ entries: await listStatusLog(limit), limit });
 }

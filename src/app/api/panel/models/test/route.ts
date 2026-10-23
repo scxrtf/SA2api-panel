@@ -65,7 +65,7 @@ export async function POST(req: Request) {
 
     // CodeBuddy 池通道：指定 uid 或按 realm 取第一个可用号。
     const where = body.uid
-      ? { uid: body.uid }
+      ? { uid: body.uid, realm }
       : { realm, accessToken: { not: "" }, state: { is: { disabled: false, paused: false } } };
     const acct = await prisma.account.findFirst({ where, include: { state: true } });
     if (!acct || acct.accessToken === "") {
@@ -74,7 +74,12 @@ export async function POST(req: Request) {
     const cfg = await getConfig();
     const res = await chatStream(
       cfg, authShapeOf(acct), requestBody(bare), "",
-      { conversationID: "modeltest-" + testID, conversationRequestID: "modeltest:" + testID, traceID: "modeltest:" + testID },
+      {
+        conversationID: "modeltest-" + testID,
+        cacheKeyID: "",
+        conversationRequestID: "modeltest:" + testID,
+        traceID: "modeltest:" + testID,
+      },
       controller.signal,
     );
     if (res.status >= 400) {

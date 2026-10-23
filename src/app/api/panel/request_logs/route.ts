@@ -5,6 +5,36 @@ import { prisma } from "@/lib/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// 列表只取表格与展开摘要需要的字段。对话、错误原文、参数覆盖和尝试明细
+// 可能很大，统一由 GET /api/panel/request_logs/[id] 按需读取。
+const listSelect = {
+  id: true,
+  at: true,
+  uid: true,
+  model: true,
+  realm: true,
+  provider: true,
+  status: true,
+  errKind: true,
+  stream: true,
+  durationMs: true,
+  ttfbMs: true,
+  attempts: true,
+  promptTokens: true,
+  completionTok: true,
+  totalTokens: true,
+  credit: true,
+  hasCredit: true,
+  cacheHitTok: true,
+  cacheMissTok: true,
+  clientIp: true,
+  ua: true,
+  keyName: true,
+  slot: true,
+  machineId: true,
+  path: true,
+} as const;
+
 export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
@@ -43,6 +73,7 @@ export async function GET(req: Request) {
 
   const rows = await prisma.requestLog.findMany({
     where,
+    select: listSelect,
     orderBy: { id: "desc" },
     take: limit,
   });

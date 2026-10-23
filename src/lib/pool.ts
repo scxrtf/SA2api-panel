@@ -393,11 +393,12 @@ export async function pickByUIDForModel(
 }
 
 // availableUIDsForModel 粘性路由的可用集（healthy 且未占满，按 uid 排序）。
-export async function availableUIDsForModel(model: string): Promise<string[]> {
+export async function availableUIDsForModel(model: string, realm = ""): Promise<string[]> {
   const now = Date.now();
   const all = await loadEntries();
   const out: string[] = [];
   for (const e of all) {
+    if (realm !== "" && e.account.realm !== realm) continue;
     if (!healthyForModel(e, now, model)) continue;
     out.push(e.account.uid);
   }

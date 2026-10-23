@@ -9,7 +9,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:keepalive": "tsx --test src/lib/cron.keepalive.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^6.0.0",

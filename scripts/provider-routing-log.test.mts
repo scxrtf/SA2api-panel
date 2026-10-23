@@ -17,7 +17,10 @@ delete process.env.WB2A_API_KEY;
   apiKey: { findMany: async () => [{ name: "SA", key: "fake-client", providers: keyProviders }] },
   provider: { findUnique: async ({ where }: any) => where.name === provider.name ? provider : null },
   account: { findMany: async () => { poolReads++; throw new Error("provider must not use account pool"); } },
-  requestLog: { create: async ({ data }: any) => { requests.push(data); return data; } },
+  requestLog: {
+    create: async ({ data }: any) => { requests.push(data); return data; },
+    findUnique: async () => null,
+  },
   usageEvent: { create: async ({ data }: any) => { usages.push(data); return data; } },
 };
 globalThis.fetch = async (url, init) => {
@@ -102,6 +105,18 @@ try {
   assert.ok(last().ttfbMs >= 25, "TTFB includes fetch/header delay");
   assert.ok(last().durationMs >= last().ttfbMs);
   assert.equal(last().errKind, "");
+  assert.deepEqual(last().requestMessages, [{ role: "developer", content: "keep unchanged" }]);
+  assert.equal(last().responseMessage?.role, "assistant");
+  assert.equal(last().responseMessage?.content, "你好");
+  assert.equal(last().attempts, 1);
+  assert.equal(last().attemptDetails?.length, 1);
+  assert.equal(last().attemptDetails?.[0]?.ok, true);
+  assert.equal(last().attemptDetails?.[0]?.provider, "测试商");
+  assert.deepEqual(last().parameterOverrides, [{
+    path: "$.model",
+    before: "测试商:glm-5.3",
+    after: "glm-5.3",
+  }]);
   console.log("PASS SSE passthrough, trailing DONE, usage/cache and end-to-end TTFB");
 
   reply = async () => sse('data: {"error":{"message":"failed"}}\n\ndata: [DONE]\n\n');
@@ -109,6 +124,8 @@ try {
   await response.text();
   assert.equal(last().status, 200, "HTTP status remains actual header status");
   assert.equal(last().errKind, "provider_error");
+  assert.match(last().errorDetail, /failed/);
+  assert.match(last().errorDetail, /上游原始响应/);
   assert.equal(usages.at(-1)!.ok, false);
   reply = async () => sse("");
   await (await chat("测试商:glm-5.3", true)).text();
@@ -121,9 +138,11 @@ try {
   reply = async () => new Response('denied', { status: 429 });
   assert.equal((await chat()).status, 429);
   assert.equal(last().errKind, "provider_http_error");
+  assert.match(last().errorDetail, /denied/);
   reply = async () => { throw new Error("offline test failure"); };
   assert.equal((await chat()).status, 502);
   assert.equal(last().errKind, "upstream_connect");
+  assert.match(last().errorDetail, /offline test failure/);
   reply = async () => Response.json({ error: { message: "bad request" } });
   await (await chat("测试商:glm-5.3", true)).text();
   assert.equal(last().errKind, "provider_error");
@@ -174,6 +193,7 @@ try {
   response = await chat("测试商:glm-5.3", true);
   await assert.rejects(response.text());
   assert.equal(last().errKind, "provider_stream_error");
+  assert.match(last().errorDetail, /broken stream/);
   console.log("PASS stream read failure");
 
   // Chunk boundaries may split UTF-8 and JSON, including the final unterminated line.
@@ -203,8 +223,45 @@ try {
   db.requestLog.findMany = async (q: any) => { queries.push(q); return []; };
   await getLogs(new Request("https://gateway.invalid/api/panel/request_logs?outcome=ok"));
   assert.deepEqual(queries.at(-1).where, { status: { lt: 400 }, errKind: "" });
+  const listSelect = queries.at(-1).select;
+  for (const field of [
+    "requestMessages", "responseMessage", "errorDetail", "parameterOverrides", "attemptDetails",
+  ]) {
+    assert.equal(listSelect[field], undefined, `list payload must omit ${field}`);
+  }
   await getLogs(new Request("https://gateway.invalid/api/panel/request_logs?outcome=error"));
   assert.deepEqual(queries.at(-1).where.OR, [{ status: { gte: 400 } }, { errKind: { not: "" } }]);
+
+  const detailEntry = {
+    id: "log-detail-1",
+    status: 200,
+    requestMessages: [{ role: "user", content: "详情测试" }],
+    responseMessage: { role: "assistant", content: "已完成" },
+    errorDetail: "failure detail",
+    parameterOverrides: [{ path: "$.model", before: "a", after: "b" }],
+    attemptDetails: [{ attempt: 1, status: 200, ok: true, errKind: "", durationMs: 12 }],
+  };
+  db.requestLog.findUnique = async ({ where }: any) =>
+    where.id === detailEntry.id ? detailEntry : null;
+  const { GET: getLogDetail } = await import(
+    "../src/app/api/panel/request_logs/[id]/route.ts"
+  );
+  let detailResp = await getLogDetail(
+    new Request("https://gateway.invalid/api/panel/request_logs/log-detail-1"),
+    { params: Promise.resolve({ id: detailEntry.id }) },
+  );
+  assert.equal(detailResp.status, 200);
+  const detailBody = await detailResp.json() as any;
+  assert.equal(detailBody.ok, true);
+  assert.deepEqual(detailBody.entry.requestMessages, detailEntry.requestMessages);
+  assert.deepEqual(detailBody.entry.parameterOverrides, detailEntry.parameterOverrides);
+  assert.deepEqual(detailBody.entry.attemptDetails, detailEntry.attemptDetails);
+  detailResp = await getLogDetail(
+    new Request("https://gateway.invalid/api/panel/request_logs/missing"),
+    { params: Promise.resolve({ id: "missing" }) },
+  );
+  assert.equal(detailResp.status, 404);
+  assert.equal((await detailResp.json() as any).error, "request_log_not_found");
   const { POST: createProvider } = await import("../src/app/api/panel/providers/route.ts");
   for (const name of ["cn", "global"]) {
     const resp = await createProvider(new Request("https://gateway.invalid/api/panel/providers", {
@@ -212,7 +269,7 @@ try {
     }));
     assert.equal(resp.status, 400);
   }
-  console.log("PASS outcome filtering and reserved provider prefixes");
+  console.log("PASS log list/detail payloads and reserved provider prefixes");
 
   const { GET: metrics } = await import("../src/app/api/panel/request_metrics/route.ts");
   db.requestLog.count = async (query: any) => { queries.push(query); return 0; };

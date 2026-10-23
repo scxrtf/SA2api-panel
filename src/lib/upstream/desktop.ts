@@ -2,11 +2,48 @@
 // 桌面端点亮「需电脑端」类任务的关键：同一 POST /v2/report 通道上的不同客户端指纹
 // （WorkBuddy Desktop 5.5.6 内嵌 CLI 2.137.1，extName=workbuddy-desktop）。
 // 事件形状全部按 Go 版逐字对齐（2026-09-12 Sunny 抓包 + asar 逆向实测，勿改字段）。
-import { createHash, randomUUID } from "crypto";
+import { createHash } from "crypto";
 import type { AppConfig } from "../config";
-import { chatBase, webBaseOf, type AuthShape } from "./client";
+import {
+  chatBase,
+  chatHeaders,
+  newConversationID,
+  newMessageID,
+  webBaseOf,
+  type AuthShape,
+} from "./client";
 
-export const DESKTOP_UA = "WorkBuddy/5.5.6 WorkBuddy/5.5.6 CLI/2.137.1";
+const DESKTOP_CLI_VERSION = "2.161.0";
+
+function desktopTriple(a: AuthShape): { version: string; commit: string; releaseDate: number } {
+  if (a.realm === "global") {
+    return {
+      version: "5.8.4",
+      commit: "73952edb48da46bd0b244661efe22f4f247c4977",
+      releaseDate: 1792063084107,
+    };
+  }
+  return {
+    version: "5.8.3",
+    commit: "db0e9b51b7fa0b383f41f5b0b83dd442c8557918",
+    releaseDate: 1792029498676,
+  };
+}
+
+function desktopUAFor(a: AuthShape): string {
+  const { version } = desktopTriple(a);
+  const brand = a.realm === "global" ? "workbuddy-ai" : "WorkBuddy";
+  return `${brand}/${version} ${brand}/${version} CLI/${DESKTOP_CLI_VERSION}`;
+}
+
+function desktopHost(a: AuthShape): string {
+  const base = chatBase(a);
+  try {
+    return new URL(base).hostname || base;
+  } catch {
+    return base.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  }
+}
 
 // deriveID 由 uid 稳定派生 36 位 hex 设备/会话标识（同盐幂等，模拟固定设备）。
 export function deriveID(a: { uid: string }, salt: string): string {
@@ -18,6 +55,7 @@ export type DesktopEvent = Record<string, unknown>;
 // desktopFingerprint 每个桌面事件的公共指纹（业务字段优先，覆盖同名键）。
 function desktopFingerprint(a: AuthShape): DesktopEvent {
   const now = Date.now();
+  const { version, commit, releaseDate } = desktopTriple(a);
   return {
     timezone: "Asia/Shanghai",
     reportDelay: 2000,
@@ -25,22 +63,24 @@ function desktopFingerprint(a: AuthShape): DesktopEvent {
     username: a.nickname,
     userNickname: a.nickname,
     product: "SaaS",
-    releaseDate: 1789036585355,
-    commit: "5f9692923c93033111c51ad7b003eb80204a9b75",
+    releaseDate,
+    commit,
     ideName: "WorkBuddy",
     ideType: "WorkBuddy",
-    ideVersion: "5.5.6",
+    ideVersion: version,
     machineId: deriveID(a, "machine"),
     sessionId: deriveID(a, "session"),
     extName: "workbuddy-desktop",
-    extVersion: "5.5.6",
+    extVersion: version,
     os: "win32",
     arch: "x64",
-    osVersion: "10.0.26220",
-    cpuCores: 20,
-    memorySize: 24,
+    osVersion: "10.0.28000",
+    cpuModel: "11th Gen Intel(R) Core(TM) i5-11320H @ 3.20GHz",
+    cpuCores: 8,
+    memorySize: 16,
     timestamp: now,
     presentAt: now,
+    ...(a.realm === "global" ? {} : { qimei36: deriveID(a, "qimei") }),
   };
 }
 
@@ -73,10 +113,10 @@ export async function reportDesktopEvent(
     Authorization: "Bearer " + a.accessToken,
     Accept: "application/json, text/plain, */*",
     "Content-Type": "application/json;charset=UTF-8",
-    "User-Agent": DESKTOP_UA,
-    "X-Domain": base,
+    "User-Agent": desktopUAFor(a),
+    "X-Domain": desktopHost(a),
     "X-Product": "SaaS",
-    "X-Request-ID": deriveID(a, "req") + String(Date.now() % 1_000_000),
+    "X-Request-ID": newMessageID(),
   };
   if (a.uid) headers["X-User-Id"] = a.uid;
   await reportJSON(base + "/v2/report", headers, arr, 30_000);
@@ -91,7 +131,7 @@ export async function setAppearanceTheme(cfg: AppConfig, a: AuthShape, resourceK
     Authorization: "Bearer " + a.accessToken,
     Accept: "application/json, text/plain, */*",
     "Content-Type": "application/json;charset=UTF-8",
-    "User-Agent": DESKTOP_UA,
+    "User-Agent": desktopUAFor(a),
     "X-Product": "SaaS",
   };
   if (a.uid) headers["X-User-Id"] = a.uid;
@@ -293,7 +333,7 @@ export async function marketExpertList(cfg: AppConfig, a: AuthShape, expertType:
   const headers: Record<string, string> = {
     Authorization: "Bearer " + a.accessToken,
     "Content-Type": "application/json",
-    "User-Agent": DESKTOP_UA,
+    "User-Agent": desktopUAFor(a),
     "X-Domain": base,
     "X-Product": "SaaS",
   };
@@ -318,7 +358,7 @@ const serverIDRegex = /^(cmb-)?[0-9a-f]{32}$/;
 export async function desktopChatWithExpert(
   cfg: AppConfig, a: AuthShape, expertID: string,
 ): Promise<{ conversationID: string; requestID: string }> {
-  const conversationID = "wb2api-conv-" + Date.now();
+  const conversationID = newConversationID();
   const body = {
     model: "fast-model",
     messages: [
@@ -331,23 +371,13 @@ export async function desktopChatWithExpert(
     stream_options: { include_usage: true },
   };
   const base = chatBase(a);
-  const h: Record<string, string> = {
-    Authorization: "Bearer " + a.accessToken,
-    "Content-Type": "application/json",
-    Accept: "text/event-stream",
-    "User-Agent": DESKTOP_UA,
-    "X-Domain": base,
-    "X-Product": "SaaS",
-    "X-User-Id": a.uid,
-    "X-Conversation-ID": conversationID,
-    "X-Request-ID": String(Date.now()),
-    "X-Agent-Intent": "craft",
-    "X-Agent-Type": "main",
-    "X-IDE-Name": "WorkBuddy",
-    "X-IDE-Type": "WorkBuddy",
-    "X-IDE-Version": "5.5.6",
-    "x-codebuddy-request": "1",
-  };
+  const h = chatHeaders(cfg, a, "", {
+    conversationID,
+    cacheKeyID: conversationID,
+    conversationRequestID: newMessageID(),
+    traceID: "",
+  });
+  h.Accept = "text/event-stream";
   if (expertID) h["X-Expert-Id"] = expertID;
   const resp = await fetch(base + "/v2/chat/completions", {
     method: "POST", headers: h, body: JSON.stringify(body),
@@ -478,7 +508,7 @@ export async function reportMPEvent(
 
 // schoolChatTimesEvents mp 对话事件（chat_3_times / Sequential_Tasks_1/3/6 判据）。
 export function schoolChatTimesEvents(conversationID: string): Record<string, unknown> {
-  const rid = "wb2api-" + randomUUID();
+  const rid = newMessageID();
   return {
     eventCode: "chat_request_send",
     inputLength: 14, isPlan: false, isAutoExecuteTerminal: false,
@@ -530,7 +560,7 @@ export function miniPlaybookEvents(caseID: string, caseName: string): Record<str
     {
       eventCode: "playbook_prompt_send", source: "discover",
       promptLength: 96, isOfficial: 1,
-      conversationId: "wb2api-mp-pb-" + randomUUID(), extVersion: "2.2.8", ...base,
+      conversationId: newConversationID(), extVersion: "2.2.8", ...base,
     },
   ];
 }

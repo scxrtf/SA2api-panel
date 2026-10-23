@@ -1,7 +1,8 @@
 // GET /api/panel/usage — 用量聚合（对齐 Go usage.SnapshotWindow 的同构输出）。
 // 口径：hours 滚动窗口（默认 72）/ from-to 显式区间 / 全部历史（hours=0）。
-// 聚合维度：totals / by_realm / by_account / by_model / by_key / by_provider /
-// by_provider_model / series / series_group / credit_by_account / credit_by_model。
+// 聚合维度：totals / by_realm / by_account / by_model / by_key / by_pool_key /
+// by_pool_model / by_pool_key_model / by_provider / by_provider_model / series /
+// series_group / credit_by_account / credit_by_model。
 // 另含 credit_by_key：按 API Key 归属的积分扣除明细。
 // series_group 仅在请求带 group=key|model|account|provider|realm 时返回，
 // 供面板把「用量时序」拆成可选维度的堆叠图；不传 group 时保持轻量旧响应。
@@ -231,6 +232,9 @@ export async function GET(req: Request) {
   const keyAgg = new Map<string, AggAcc>();
   const keyRealm = new Map<string, string>();
   const keyModelAgg = new Map<string, AggAcc>();
+  const poolModelAgg = new Map<string, AggAcc>();
+  const poolKeyAgg = new Map<string, AggAcc>();
+  const poolKeyModelAgg = new Map<string, AggAcc>();
   const providerAgg = new Map<string, AggAcc>();
   const providerModelAgg = new Map<string, AggAcc>();
   const hourSeries = new Map<string, AggAcc>();
@@ -273,6 +277,14 @@ export async function GET(req: Request) {
       const pmKey = prov + ":" + canonicalUsageModel(model);
       if (!providerModelAgg.has(pmKey)) providerModelAgg.set(pmKey, new AggAcc());
       providerModelAgg.get(pmKey)!.add(e);
+    } else {
+      // 分流图需要独立的池口径，避免供应商请求同时混入 KEY→模型链路。
+      if (!poolModelAgg.has(model)) poolModelAgg.set(model, new AggAcc());
+      poolModelAgg.get(model)!.add(e);
+      if (!poolKeyAgg.has(kn)) poolKeyAgg.set(kn, new AggAcc());
+      poolKeyAgg.get(kn)!.add(e);
+      if (!poolKeyModelAgg.has(kmKey)) poolKeyModelAgg.set(kmKey, new AggAcc());
+      poolKeyModelAgg.get(kmKey)!.add(e);
     }
     const { hour, day } = beijingParts(new Date(e.at));
     const scopeKey = dayScope ? day : hour;
@@ -368,6 +380,19 @@ export async function GET(req: Request) {
       a.key.localeCompare(b.key),
     );
 
+  const byPoolKeyModel = [...poolKeyModelAgg.entries()]
+    .map(([k, acc]) => {
+      const idx = k.indexOf("\x00");
+      const keyName = k.slice(0, idx);
+      const model = k.slice(idx + 1);
+      return { key: k, realm: keyName, extra: model, agg: acc.finish() };
+    })
+    .sort((a, b) =>
+      (a.realm ?? "").localeCompare(b.realm ?? "") ||
+      b.agg.total_tokens - a.agg.total_tokens ||
+      a.key.localeCompare(b.key),
+    );
+
   const creditByAccount = creditFinish(creditAcctAgg);
   for (const r of creditByAccount) r.nickname = nicks.get(r.key) ?? "";
 
@@ -441,6 +466,9 @@ export async function GET(req: Request) {
     by_account: byAccount,
     by_model: keyedFinish(modelAgg, () => ({})),
     by_key: keyedFinish(keyAgg, (k) => ({ realm: keyRealm.get(k) ?? "" })),
+    by_pool_model: keyedFinish(poolModelAgg, () => ({})),
+    by_pool_key: keyedFinish(poolKeyAgg, () => ({})),
+    by_pool_key_model: byPoolKeyModel,
     by_provider: keyedFinish(providerAgg, () => ({})),
     by_provider_model: byProviderModel,
     by_key_model: byKeyModel,

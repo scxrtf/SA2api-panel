@@ -8,6 +8,11 @@ import { normalizeUsage, usageCacheHitTokens, usageCacheMissTokens } from "./usa
 export interface StreamStats {
   validFrames: number;
   errorFrame: string; // 上游 error 帧原文（空 = 无）
+  assistantRole: string;
+  assistantContent: string;
+  assistantReasoning: string;
+  assistantToolCalls: Obj[];
+  finishReason: string;
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
@@ -21,6 +26,16 @@ export interface StreamStats {
 }
 
 type Obj = Record<string, unknown>;
+
+export class StreamPassthroughError extends Error {
+  readonly stats: StreamStats;
+
+  constructor(cause: unknown, stats: StreamStats) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = cause instanceof Error ? cause.name : "StreamPassthroughError";
+    this.stats = stats;
+  }
+}
 
 // normalizeFrame 以 OpenAI 流式规范白名单重建帧：剔除上游噪声（空 content/refusal、
 // 空 tool_calls 列表、空占位 function_call、顶层未知字段），usage 缺失 → null。
@@ -103,6 +118,56 @@ function readUsageInto(stats: StreamStats, u: Obj): void {
   }
 }
 
+function mergeObservedToolCall(merged: Obj, delta: Obj): void {
+  for (const k of ["id", "type"]) {
+    const v = delta[k];
+    if (typeof v === "string" && v !== "" && !merged[k]) merged[k] = v;
+  }
+  const df = delta["function"];
+  if (!df || typeof df !== "object") return;
+  let mf = merged["function"] as Obj | undefined;
+  if (!mf || typeof mf !== "object") {
+    mf = {};
+    merged["function"] = mf;
+  }
+  const name = (df as Obj)["name"];
+  if (typeof name === "string" && name !== "" && !mf["name"]) mf["name"] = name;
+  const args = (df as Obj)["arguments"];
+  if (typeof args === "string" && args !== "") {
+    mf["arguments"] = String(mf["arguments"] ?? "") + args;
+  }
+}
+
+function observeAssistantFrame(stats: StreamStats, obj: Obj): void {
+  const choices = obj["choices"];
+  if (!Array.isArray(choices)) return;
+  for (const choice of choices) {
+    if (!choice || typeof choice !== "object") continue;
+    const item = choice as Obj;
+    const delta = item["delta"];
+    if (delta && typeof delta === "object") {
+      const d = delta as Obj;
+      if (typeof d["role"] === "string" && d["role"]) stats.assistantRole = d["role"] as string;
+      if (typeof d["content"] === "string") stats.assistantContent += d["content"] as string;
+      if (typeof d["reasoning_content"] === "string") {
+        stats.assistantReasoning += d["reasoning_content"] as string;
+      }
+      const toolCalls = d["tool_calls"];
+      if (Array.isArray(toolCalls)) {
+        for (const call of toolCalls) {
+          if (!call || typeof call !== "object") continue;
+          const tc = call as Obj;
+          const idx = num(tc["index"]);
+          while (stats.assistantToolCalls.length <= idx) stats.assistantToolCalls.push({});
+          mergeObservedToolCall(stats.assistantToolCalls[idx], tc);
+        }
+      }
+    }
+    const finish = item["finish_reason"];
+    if (typeof finish === "string" && finish) stats.finishReason = finish;
+  }
+}
+
 
 // ─── 标记修复（dsml.go）的流式帧改写助手 ─────────────────────────────────────
 
@@ -174,6 +239,8 @@ export async function streamPassthrough(
 ): Promise<StreamStats> {
   const stats: StreamStats = {
     validFrames: 0, errorFrame: "",
+    assistantRole: "", assistantContent: "", assistantReasoning: "",
+    assistantToolCalls: [], finishReason: "",
     promptTokens: 0, completionTokens: 0, totalTokens: 0, hasUsage: false,
     credit: 0, hasCredit: false, ttfbMs: 0,
     cacheHitTokens: 0, cacheMissTokens: 0, hasCache: false,
@@ -307,7 +374,9 @@ export async function streamPassthrough(
             if (u) readUsageInto(stats, u);
             noteToolIdx(obj);
             for (const fr of repairFrame(obj)) {
-              await write(JSON.stringify(normalizeFrame(fr)));
+              const normalized = normalizeFrame(fr);
+              observeAssistantFrame(stats, normalized);
+              await write(JSON.stringify(normalized));
             }
             stats.validFrames++;
             continue;
@@ -334,11 +403,15 @@ export async function streamPassthrough(
           object: "chat.completion.chunk",
           choices: [{ index: 0, delta: { content: tail } }],
         };
-        await write(JSON.stringify(normalizeFrame(tailObj)));
+        const normalized = normalizeFrame(tailObj);
+        observeAssistantFrame(stats, normalized);
+        await write(JSON.stringify(normalized));
         stats.validFrames++;
       }
       if (synthIdx > 0 && !toolFinishSent) {
-        await write(JSON.stringify(normalizeFrame(finishOnlyFrame({}, "tool_calls"))));
+        const normalized = normalizeFrame(finishOnlyFrame({}, "tool_calls"));
+        observeAssistantFrame(stats, normalized);
+        await write(JSON.stringify(normalized));
       }
     }
     // 空流兜底：先写 error 帧再补 [DONE]（HTTP 头已发只能 200）。
@@ -347,6 +420,8 @@ export async function streamPassthrough(
       await write('{"error":{"message":"empty upstream stream","type":"upstream_error","code":"upstream_parse"}}');
     }
     await writer.write(enc.encode("data: [DONE]\n\n"));
+  } catch (e) {
+    throw new StreamPassthroughError(e, stats);
   } finally {
     // 关闭 writable 让下游读到 done（releaseLock 不关流，下游会一直挂起）。
     // 客户端断连时 close 抛错，吞掉即可。
@@ -422,6 +497,8 @@ function mergeToolCallDelta(merged: Obj, delta: Obj): void {
 export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{ resp: Obj; stats: StreamStats }> {
   const stats: StreamStats = {
     validFrames: 0, errorFrame: "",
+    assistantRole: "", assistantContent: "", assistantReasoning: "",
+    assistantToolCalls: [], finishReason: "",
     promptTokens: 0, completionTokens: 0, totalTokens: 0, hasUsage: false,
     credit: 0, hasCredit: false, ttfbMs: 0,
     cacheHitTokens: 0, cacheMissTokens: 0, hasCache: false,
@@ -517,6 +594,11 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
   const message: Obj = { role: role || "assistant", content };
   if (reasoning) message["reasoning_content"] = reasoning;
   if (finalToolCalls.length > 0) message["tool_calls"] = finalToolCalls;
+  stats.assistantRole = String(message["role"] ?? "assistant");
+  stats.assistantContent = content;
+  stats.assistantReasoning = reasoning;
+  stats.assistantToolCalls = finalToolCalls;
+  stats.finishReason = finishReason || "stop";
   out["object"] = "chat.completion";
   out["choices"] = [{ index: 0, message, finish_reason: finishReason || "stop" }];
   out["usage"] = usageObj ? normalizeUsage(usageObj) : null;

@@ -210,12 +210,17 @@ export async function sampleOnce(
   try {
     if (ch.kind === "pool") {
       const where = ch.uid
-        ? { uid: ch.uid }
+        ? { uid: ch.uid, realm: ch.realm }
         : { realm: ch.realm, accessToken: { not: "" }, state: { is: { disabled: false, paused: false } } };
       const acct = await prisma.account.findFirst({ where, include: { state: true } });
       if (!acct || acct.accessToken === "") throw new Error("no available account for realm " + ch.realm);
       const cfg = await getConfig();
-      const meta = { conversationID: "aicheck-" + tag, conversationRequestID: "aicheck:" + tag, traceID: "aicheck:" + tag };
+      const meta = {
+        conversationID: "aicheck-" + tag,
+        cacheKeyID: "",
+        conversationRequestID: "aicheck:" + tag,
+        traceID: "aicheck:" + tag,
+      };
       // 不传 thinking / reasoning_effort：与上游 hlwy-ai-checker 的请求体一致，
       // 让模型走自己的默认思考档。实测主动关思考会改变数字分布（deepseek 关闭
       // 后众数从 217 漂到 187/247），直接影响与官方基准的可比性。
