@@ -1,51 +1,19 @@
-// 聚合供应商直连通道（internal/provider 简化移植）：命中生效供应商时完全旁路
-// CodeBuddy 池管线（无粘性/无积分台账/无提示词改写），直接把 OpenAI 兼容请求
-// 转发到供应商 baseUrl。
+// 供应商直连绕过池选号、粘性、提示词改写；日志在响应真正结束后落库。
 import { prisma } from "./db";
 import { openAIError } from "./chat";
 import { getConfig } from "./config";
 import { idleMonitorBody } from "./upstream/idle";
-import { usageTokensFromResponse } from "./upstream/usage";
 import { providerEndpoint } from "./provider-endpoint";
+import { ProviderObservation, observeProviderStream } from "./provider-observation";
+import { runlog } from "./runlog";
 
-// recordProviderUsage 供应商记账（Go handler.go recordProviderAttempt 同语义）：
-// realm 记为 "provider:"+名字，uid 记为槽位名。这里 TS 版单 key 直连无槽位
-// 轮换，uid 用 provider 名（聚合视图按 realm 前缀取供应商名，uid 仅备查）。
-// requestedModel 保留客户端原始模型串（含供应商前缀），realm/provider/uid
-// 标记供应商通道，model 字段让日志页能看到面板里选中的全名。
-async function recordProviderUsage(
-  name: string,
-  slot: string,
-  requestedModel: string,
-  keyName: string,
-  ok: boolean,
-  pt: number,
-  ct: number,
-  tt: number,
-  latencyMs: number,
-): Promise<void> {
-  try {
-    await prisma.usageEvent.create({
-      data: {
-        uid: slot || name,
-        model: requestedModel,
-        realm: "provider:" + name,
-        provider: name,
-        promptTokens: pt,
-        completionTok: ct,
-        totalTokens: tt,
-        latencyMs,
-        keyName,
-        ok,
-        errKind: ok ? "" : "provider_error",
-      },
-    });
-  } catch {
-    // 记账失败不阻断主链路。
-  }
+interface ProviderRequestContext {
+  started: number;
+  clientIP: string;
+  ua: string;
+  path: string;
 }
 
-// providerChat 通用 OpenAI 直连：body 中模型名重写为 bare 后原样转发。
 export async function providerChat(
   name: string,
   bareModel: string,
@@ -53,101 +21,100 @@ export async function providerChat(
   stream: boolean,
   keyName = "",
   requestedModel = "",
+  context?: ProviderRequestContext,
 ): Promise<Response> {
+  const started = context?.started ?? Date.now();
+  const logModel = requestedModel || `${name}:${bareModel}`;
+  const stats = new ProviderObservation(started);
+  let attempts = 0;
+  let recorded = false;
+  const finish = async (status: number): Promise<void> => {
+    if (recorded) return;
+    recorded = true;
+    const durationMs = Math.max(1, Date.now() - started);
+    const ok = status < 400 && !stats.errKind;
+    const common = {
+      model: logModel, realm: "provider:" + name, provider: name, keyName,
+      promptTokens: stats.promptTokens, completionTok: stats.completionTok,
+      totalTokens: stats.totalTokens, cacheHitTok: stats.cacheHitTok,
+      cacheMissTok: stats.cacheMissTok, errKind: stats.errKind,
+    };
+    runlog(`chat ${ok ? "OK" : "ERR"} ${status} ${logModel} provider=${name} ${durationMs}ms`);
+    // 单 key 供应商用名字标识槽位；不伪造池 UID/机器码/积分。
+    // 两表独立写入：一表失败不能阻止另一表；只记录错误码，不泄露凭据。
+    const tasks: Promise<unknown>[] = [Promise.resolve().then(() => prisma.requestLog.create({ data: {
+      ...common, uid: "", slot: attempts ? name : "", machineId: "",
+      status, stream, durationMs, attempts, ttfbMs: stream ? stats.ttfbMs : 0,
+      clientIp: context?.clientIP ?? "", ua: context?.ua ?? "",
+      path: context?.path ?? "/v1/chat/completions",
+    } }))];
+    if (attempts) tasks.push(Promise.resolve().then(() => prisma.usageEvent.create({ data: {
+      ...common, uid: name, ok, latencyMs: durationMs,
+    } })));
+    const results = await Promise.allSettled(tasks);
+    for (const result of results) {
+      if (result.status === "rejected") {
+        const code = typeof result.reason?.code === "string" ? result.reason.code : "unknown";
+        runlog(`WARN: provider audit write failed (${code}); check database migrations`);
+      }
+    }
+  };
+  const fail = async (status: number, kind: string, message: string): Promise<Response> => {
+    stats.errKind = kind;
+    await finish(status);
+    return openAIError(status, kind, message);
+  };
+
   const p = await prisma.provider.findUnique({ where: { name } });
-  if (!p) return openAIError(400, "provider_not_found", `provider ${name} not registered`);
-  const logModel = requestedModel || bareModel;
-  let out = body;
+  if (!p) return fail(400, "provider_not_found", `provider ${name} not registered`);
+  if (!bareModel) return fail(400, "invalid_model", "provider model is required");
+  const allow = p.models.split(",").map((m) => m.trim()).filter(Boolean);
+  if (allow.length && !allow.includes(bareModel)) {
+    return fail(400, "model_not_allowed", `model is not enabled for provider ${name}`);
+  }
+  let out: string;
   try {
     const obj = JSON.parse(body) as Record<string, unknown>;
-    obj["model"] = bareModel;
-    if (stream) obj["stream"] = true;
+    obj.model = bareModel;
+    obj.stream = stream;
     out = JSON.stringify(obj);
   } catch {
-    // 解析失败按原文转发。
+    return fail(400, "invalid_request", "invalid JSON body");
   }
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (p.apiKey) headers["Authorization"] = "Bearer " + p.apiKey;
-  let resp: globalThis.Response;
-  const attemptStarted = Date.now();
+  if (p.apiKey) headers.Authorization = "Bearer " + p.apiKey;
+  let resp: Response;
+  attempts = 1;
   try {
     resp = await fetch(providerEndpoint(p.baseUrl, "/chat/completions"), {
-      method: "POST",
-      headers,
-      body: out,
+      method: "POST", headers, body: out,
     });
   } catch (e) {
-    void recordProviderUsage(name, name, logModel, keyName, false, 0, 0, 0, Math.max(1, Date.now() - attemptStarted));
-    return openAIError(
-      502, "upstream_connect",
-      e instanceof Error ? e.message : "provider connect failed",
-    );
+    return fail(502, "upstream_connect", e instanceof Error ? e.message : "provider connect failed");
   }
-  const latencyMs = Math.max(1, Date.now() - attemptStarted);
-  if (stream && resp.ok && resp.body) {
-    // 空闲看门狗（对齐 Go provider.go:381 MonitorBodyFor）：默认 300s，
-    // 配置了 stream_idle_ms>0 时以配置为准；0 表示沿用默认而非禁用（与 Go 一致）。
+  const contentType = resp.headers.get("content-type") ?? "application/json";
+  if (stream && resp.ok && resp.body && /text\/event-stream/i.test(contentType)) {
     const cfgIdle = (await getConfig()).stream_idle_ms;
-    const idle = cfgIdle > 0 ? cfgIdle : 300_000;
-    // 旁路统计（Go chatStatsReader 同语义）：tee 一路只读末帧 usage 的
-    // prompt/completion/total，主路原样透传（供应商帧不经 normalizeFrame）。
-    const [main, side] = resp.body.tee();
-    void (async () => {
-      let pt = 0, ct = 0, tt = 0;
-      try {
-        const reader = side.getReader();
-        const dec = new TextDecoder();
-        let buf = "";
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          let idx: number;
-          while ((idx = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, idx).trim();
-            buf = buf.slice(idx + 1);
-            if (!line.startsWith("data: ") || line.startsWith("data: [DONE]")) continue;
-            try {
-              const obj = JSON.parse(line.slice(6)) as Record<string, unknown>;
-              if (obj["usage"] && typeof obj["usage"] === "object") {
-                ({ pt, ct, tt } = usageTokensFromResponse(obj));
-              }
-            } catch {
-              // 非 JSON 帧跳过。
-            }
-          }
-        }
-      } catch {
-        // 旁路读取失败不影响主路。
-      }
-      recordProviderUsage(name, name, logModel, keyName, true, pt, ct, tt, latencyMs).catch(() => undefined);
-    })();
-    return new Response(idleMonitorBody(main, idle), {
-      status: 200,
-      headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache",
-      },
+    const monitored = idleMonitorBody(resp.body, cfgIdle > 0 ? cfgIdle : 300_000,
+      () => { stats.errKind ||= "provider_stream_timeout"; });
+    return new Response(observeProviderStream(monitored, stats, () => finish(resp.status)), {
+      status: resp.status,
+      headers: { "Content-Type": contentType, "Cache-Control": "no-cache" },
     });
   }
-  const raw = await resp.text();
-  // 供应商响应 token 观测（Go usageTokensFromResponse）：成功时从 usage 原对象
-  // 提取；错误响应 usage 通常缺省，记 0。
-  let pt = 0, ct = 0, tt = 0;
-  if (resp.ok) {
-    try {
-      ({ pt, ct, tt } = usageTokensFromResponse(JSON.parse(raw) as Record<string, unknown>));
-    } catch {
-      // 非 JSON 体：无 usage 观测。
-    }
-  }
-  void recordProviderUsage(name, name, logModel, keyName, resp.ok, pt, ct, tt, latencyMs);
-  return new Response(raw, {
+  // stream=true 也可能收到 JSON 错误信封；按实际 Content-Type 观测并透传。
+  let raw: string;
+  try { raw = await resp.text(); }
+  catch { return fail(502, "provider_read_error", "provider response body read failed"); }
+  if (!resp.ok) stats.errKind = "provider_http_error";
+  try { stats.json(JSON.parse(raw)); } catch { /* 保留非 JSON 响应。 */ }
+  if (stream && resp.ok && !stats.errKind) stats.errKind = "provider_expected_sse";
+  await finish(resp.status);
+  return new Response([204, 205, 304].includes(resp.status) ? null : raw, {
     status: resp.status,
-    headers: { "Content-Type": resp.headers.get("content-type") ?? "application/json" },
+    headers: { "Content-Type": contentType },
   });
 }
-
 // providerModels 聚合各供应商的 /v1/models 目录（面板/对外 /v1/models 用）。
 // allowed 为 null/undefined 时不限制；传入集合时只探测集合内的供应商。
 export async function providerModels(

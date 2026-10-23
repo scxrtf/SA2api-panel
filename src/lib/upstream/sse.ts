@@ -170,6 +170,7 @@ export async function streamPassthrough(
   out: WritableStream<Uint8Array>,
   repair?: MarkupRepair | null,
   hintFn?: (payload: string) => string,
+  started = Date.now(),
 ): Promise<StreamStats> {
   const stats: StreamStats = {
     validFrames: 0, errorFrame: "",
@@ -177,7 +178,6 @@ export async function streamPassthrough(
     credit: 0, hasCredit: false, ttfbMs: 0,
     cacheHitTokens: 0, cacheMissTokens: 0, hasCache: false,
   };
-  const started = Date.now();
   const reader = upstream.getReader();
   const writer = out.getWriter();
   const dec = new TextDecoder();
@@ -282,6 +282,7 @@ export async function streamPassthrough(
             obj = null;
           }
           if (obj && obj["error"]) {
+            if (stats.validFrames === 0) stats.ttfbMs = Math.max(1, Date.now() - started);
             // error 帧：原样透传 + 旁路采集（供账号处置分类）；gateway_hint 附加
             // 网关视角补充说明（hintFn 惰性求值——仅 error 帧才调用，正常流零开销）。
             stats.errorFrame = payload;
@@ -301,7 +302,7 @@ export async function streamPassthrough(
             continue;
           }
           if (obj) {
-            if (stats.validFrames === 0) stats.ttfbMs = Date.now() - started;
+            if (stats.validFrames === 0) stats.ttfbMs = Math.max(1, Date.now() - started);
             const u = usageFromFrame(obj);
             if (u) readUsageInto(stats, u);
             noteToolIdx(obj);
@@ -342,6 +343,7 @@ export async function streamPassthrough(
     }
     // 空流兜底：先写 error 帧再补 [DONE]（HTTP 头已发只能 200）。
     if (stats.validFrames === 0) {
+      stats.errorFrame = '{"error":{"code":"upstream_parse"}}';
       await write('{"error":{"message":"empty upstream stream","type":"upstream_error","code":"upstream_parse"}}');
     }
     await writer.write(enc.encode("data: [DONE]\n\n"));
@@ -427,7 +429,7 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
   const reader = upstream.getReader();
   const dec = new TextDecoder();
   let buf = "";
-  let out: Obj = {};
+  const out: Obj = {};
   let content = "";
   let reasoning = "";
   let role = "";

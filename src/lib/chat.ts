@@ -283,13 +283,13 @@ export async function handleChat(opts: {
   path: string;
   req?: Request; // 原始请求（key 归属识别；Anthropic 翻译路径可缺省）
 }): Promise<Response> {
-  const cfg = await getConfig();
   const started = Date.now();
+  const cfg = await getConfig();
   const { body, clientIP, ua, path } = opts;
   const stream = body["stream"] === true;
   const rawModel = typeof body["model"] === "string" ? (body["model"] as string) : "";
 
-  let { realm, provider, bare } = resolveModel(rawModel);
+  const { realm, provider, bare } = resolveModel(rawModel);
   // 使用者归属（Go keyNameFrom）：多 sk-key 模式下命中哪把 key 就记谁的名字；
   // 单 key / 无鉴权 / 无原始请求时为空串。一次性取值，轮转全程复用。
   // 同一身份同时携带供应商授权面，供 provider 通道做准入判定。
@@ -297,15 +297,7 @@ export async function handleChat(opts: {
   const keyName = keyIdentity?.name ?? "";
   // 请求时生效积分倍率（Go handler.go:605）：目录成功刷新时缓存于 modelRates 桶。
   const modelRate = currentModelRate(realm, bare);
-  // 未注册的 provider 前缀回落 cn 裸名（bareModel 回填原串）。
-  if (provider !== "") {
-    const exists = await prisma.provider.findUnique({ where: { name: provider } });
-    if (!exists) {
-      provider = "";
-      realm = "cn";
-      bare = rawModel;
-    }
-  }
+  // 显式供应商前缀绝不回落池：查找失败由 providerChat 返回并记录错误。
   if (provider !== "") {
     // 供应商准入：子密钥绑定白名单时只放行名单内供应商；未绑定（空）或 "*"
     // 不限制。身份缺失（无法识别 / DB 异常）仍按拒绝处理，避免借空绑定绕过。
@@ -314,6 +306,11 @@ export async function handleChat(opts: {
         ? keyIdentity.unrestricted || providerAllowed(keyIdentity.providers, provider)
         : false;
       if (!allowed) {
+        await recordRequestLog({
+          uid: "", model: rawModel, realm: "provider:" + provider, provider,
+          status: 403, errKind: "provider_not_authorized", stream,
+          durationMs: Date.now() - started, clientIp: clientIP, ua, path, keyName,
+        });
         return openAIError(
           403,
           "provider_not_authorized",
@@ -323,7 +320,8 @@ export async function handleChat(opts: {
       }
     }
     const { providerChat } = await import("./provider");
-    return providerChat(provider, bare, JSON.stringify(body), stream, keyName, rawModel);
+    return providerChat(provider, bare, JSON.stringify(body), stream, keyName, rawModel,
+      { started, clientIP, ua, path });
   }
 
   // 会话键 / 轮级键 / 粘性解析。
@@ -418,11 +416,11 @@ export async function handleChat(opts: {
       " " + (Date.now() - started) + "ms",
     );
     void recordRequestLog({
-      uid, model: bare, realm, provider: "",
+      uid, model: rawModel, realm, provider: "",
       status, errKind, stream,
       durationMs: Date.now() - started,
       clientIp: clientIP, ua, path,
-      ttfbMs: extra?.ttfbMs ?? 0,
+      ttfbMs: extra?.ttfbMs ? extra.ttfbMs + logAttemptStarted - started : 0,
       attempts: attemptCount,
       promptTokens: extra?.promptTokens ?? 0,
       completionTok: extra?.completionTokens ?? 0,
@@ -438,6 +436,7 @@ export async function handleChat(opts: {
     });
   };
 
+  let logAttemptStarted = started;
   try {
     for (let i = 0; i < cfg.max_rotate; i++) {
       // 选号：粘性优先，否则普通轮换。
@@ -525,6 +524,7 @@ export async function handleChat(opts: {
       }
 
       const attemptStarted = Date.now();
+      logAttemptStarted = attemptStarted;
       let res;
       try {
         res = await chatStream(cfg, authShape, outBody, clientIP, chatMeta);
@@ -657,6 +657,7 @@ export async function handleChat(opts: {
         const statsPromise = streamPassthrough(
           res.body, writable, new MarkupRepair(declaredTools, true),
           (payload) => frameHint(payload, hintContext),
+          attemptStarted,
         );
         const uidCaptured = acct.uid;
         void statsPromise.then(async (stats) => {
@@ -696,7 +697,8 @@ export async function handleChat(opts: {
         });
         // RequestLog 的 token/TTFB 维度与 Go 的 defer st.done() 同语义：流式
         // 下等流真正结束、末帧 usage 可得时才落日志（响应本身已可先返回）。
-        void statsPromise.then((stats) => finishLog(200, uidCaptured, "", stats));
+        void statsPromise.then((stats) => finishLog(200, uidCaptured,
+          stats.errorFrame ? "upstream_error" : "", stats));
         return new Response(readable, {
           status: 200,
           headers: {

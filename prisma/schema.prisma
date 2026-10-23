@@ -39,8 +39,6 @@ model Account {
   modelCooldowns ModelCooldown[]
   modelCosts     ModelCost[]
   stickySessions StickySession[]
-  usageEvents    UsageEvent[]
-  requestLogs    RequestLog[]
 }
 
 model AccountState {
@@ -122,7 +120,7 @@ model Setting {
 model UsageEvent {
   id            String   @id @default(cuid())
   uid           String
-  account       Account  @relation(fields: [uid], references: [uid], onDelete: Cascade)
+  // 审计快照：uid 可为供应商槽位，不依赖 Account 生命周期。
   model         String   @default("")
   realm         String   @default("cn")
   provider      String   @default("") // 聚合供应商名（空 = 内置池）
@@ -149,7 +147,7 @@ model UsageEvent {
 model RequestLog {
   id            String   @id @default(cuid())
   uid           String   @default("")
-  account       Account? @relation(fields: [uid], references: [uid], onDelete: SetNull)
+  // 供应商/选号前失败没有池账号，uid 留空；删除账号也保留历史日志。
   model         String   @default("")
   realm         String   @default("")
   provider      String   @default("")

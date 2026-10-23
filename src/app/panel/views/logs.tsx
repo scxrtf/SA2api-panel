@@ -142,7 +142,7 @@ export function LogsView({ flash }: { flash: Flash }) {
                     <tr onClick={() => setExpanded(open ? null : r.id)}
                       style={{ cursor: "pointer", ...(open ? { background: "var(--bg-soft)" } : {}) }}>
                       <td className="dim mono">{new Date(r.at).toLocaleTimeString("zh-CN", { hour12: false })}</td>
-                      <td><span className={"tag " + (r.status < 400 ? "ok" : "err")}>
+                      <td><span className={"tag " + (r.status < 400 && !r.errKind ? "ok" : "err")}>
                         {r.status}{r.errKind ? " " + r.errKind : r.status < 400 ? " 成功" : " 错误"}</span></td>
                       <td className="mono">{r.model || <span className="dim">—</span>}</td>
                       <td className="mono">{r.uid || <span className="dim">—</span>}</td>

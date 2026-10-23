@@ -23,8 +23,13 @@ export async function GET(req: Request) {
   const ua = q.get("user_agent") ?? "";
   if (ua) where["ua"] = { contains: ua };
   const outcome = q.get("outcome") ?? "";
-  if (outcome === "ok") where["status"] = { lt: 400 };
-  else if (outcome === "error") where["status"] = { gte: 400 };
+  // HTTP 200 开流后仍可能返回错误帧，结果不能只看响应头状态码。
+  if (outcome === "ok") {
+    where["status"] = { lt: 400 };
+    where["errKind"] = "";
+  } else if (outcome === "error") {
+    where["OR"] = [{ status: { gte: 400 } }, { errKind: { not: "" } }];
+  }
   const key = q.get("key") ?? "";
   if (key) where["keyName"] = { contains: key };
 

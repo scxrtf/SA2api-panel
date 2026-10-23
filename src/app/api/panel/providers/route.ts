@@ -39,6 +39,8 @@ export async function POST(req: Request) {
   if (!name || !/^[\p{Script=Han}A-Za-z0-9_-]{1,64}$/u.test(name)) {
     return fail(400, "供应商名仅限中文/字母/数字/下划线/连字符（1-64 字符）");
   }
+  // 这两个前缀属于内置池；允许注册会产生无法区分的模型 ID。
+  if (name === "cn" || name === "global") return fail(400, "cn/global 是内置池保留前缀，请使用其他供应商名");
   if (!baseUrl || !/^https?:\/\//.test(baseUrl)) return fail(400, "base_url 必须是 http(s) URL");
   if (!key) return fail(400, "key 必填");
   const exists = await prisma.provider.findUnique({ where: { name } });

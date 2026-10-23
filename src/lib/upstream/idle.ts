@@ -14,7 +14,7 @@ export function idleTick(idleMs: number): number {
 // 否则包一层：每次读到底层 chunk 刷新 lastRead，后台周期检查，
 // 静默超过 idleMs 就 cancel 底流（下游消费侧拿到 reader.read() 终止即收尾）。
 // 下游读取结束（cancel/自然 EOF）时 stop() 停掉后台计时器，保证无泄漏。
-export function idleMonitorBody(body: ReadableStream<Uint8Array>, idleMs: number): ReadableStream<Uint8Array> {
+export function idleMonitorBody(body: ReadableStream<Uint8Array>, idleMs: number, onTimeout?: () => void): ReadableStream<Uint8Array> {
   if (idleMs <= 0) return body;
   let lastRead = Date.now();
   let stopped = false;
@@ -25,6 +25,7 @@ export function idleMonitorBody(body: ReadableStream<Uint8Array>, idleMs: number
       if (stopped) return;
       if (Date.now() - lastRead > idleMs) {
         stopWatch();
+        onTimeout?.();
         // 掐流：cancel 上游 reader，阻塞中的下游 read() 拿到 done 收尾。
         void reader.cancel("stream idle timeout").catch(() => undefined);
       }
@@ -44,7 +45,15 @@ export function idleMonitorBody(body: ReadableStream<Uint8Array>, idleMs: number
       startWatch();
     },
     async pull(controller) {
-      const { done, value } = await reader.read();
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch (e) {
+        stopWatch();
+        controller.error(e);
+        return;
+      }
+      const { done, value } = result;
       if (done) {
         stopWatch();
         controller.close();
