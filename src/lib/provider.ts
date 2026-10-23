@@ -11,10 +11,12 @@ import { providerEndpoint } from "./provider-endpoint";
 // recordProviderUsage 供应商记账（Go handler.go recordProviderAttempt 同语义）：
 // realm 记为 "provider:"+名字，uid 记为槽位名。这里 TS 版单 key 直连无槽位
 // 轮换，uid 用 provider 名（聚合视图按 realm 前缀取供应商名，uid 仅备查）。
+// requestedModel 保留客户端原始模型串（含供应商前缀），realm/provider/uid
+// 标记供应商通道，model 字段让日志页能看到面板里选中的全名。
 async function recordProviderUsage(
   name: string,
   slot: string,
-  model: string,
+  requestedModel: string,
   keyName: string,
   ok: boolean,
   pt: number,
@@ -26,7 +28,7 @@ async function recordProviderUsage(
     await prisma.usageEvent.create({
       data: {
         uid: slot || name,
-        model,
+        model: requestedModel,
         realm: "provider:" + name,
         provider: name,
         promptTokens: pt,
@@ -50,9 +52,11 @@ export async function providerChat(
   body: string,
   stream: boolean,
   keyName = "",
+  requestedModel = "",
 ): Promise<Response> {
   const p = await prisma.provider.findUnique({ where: { name } });
   if (!p) return openAIError(400, "provider_not_found", `provider ${name} not registered`);
+  const logModel = requestedModel || bareModel;
   let out = body;
   try {
     const obj = JSON.parse(body) as Record<string, unknown>;
@@ -73,7 +77,7 @@ export async function providerChat(
       body: out,
     });
   } catch (e) {
-    void recordProviderUsage(name, name, bareModel, keyName, false, 0, 0, 0, Math.max(1, Date.now() - attemptStarted));
+    void recordProviderUsage(name, name, logModel, keyName, false, 0, 0, 0, Math.max(1, Date.now() - attemptStarted));
     return openAIError(
       502, "upstream_connect",
       e instanceof Error ? e.message : "provider connect failed",
@@ -116,7 +120,7 @@ export async function providerChat(
       } catch {
         // 旁路读取失败不影响主路。
       }
-      recordProviderUsage(name, name, bareModel, keyName, true, pt, ct, tt, latencyMs).catch(() => undefined);
+      recordProviderUsage(name, name, logModel, keyName, true, pt, ct, tt, latencyMs).catch(() => undefined);
     })();
     return new Response(idleMonitorBody(main, idle), {
       status: 200,
@@ -137,7 +141,7 @@ export async function providerChat(
       // 非 JSON 体：无 usage 观测。
     }
   }
-  void recordProviderUsage(name, name, bareModel, keyName, resp.ok, pt, ct, tt, latencyMs);
+  void recordProviderUsage(name, name, logModel, keyName, resp.ok, pt, ct, tt, latencyMs);
   return new Response(raw, {
     status: resp.status,
     headers: { "Content-Type": resp.headers.get("content-type") ?? "application/json" },

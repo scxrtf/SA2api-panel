@@ -323,7 +323,7 @@ export async function handleChat(opts: {
       }
     }
     const { providerChat } = await import("./provider");
-    return providerChat(provider, bare, JSON.stringify(body), stream, keyName);
+    return providerChat(provider, bare, JSON.stringify(body), stream, keyName, rawModel);
   }
 
   // 会话键 / 轮级键 / 粘性解析。
