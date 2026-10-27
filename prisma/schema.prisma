@@ -42,30 +42,31 @@ model Account {
 }
 
 model AccountState {
-  uid            String  @id
-  account        Account @relation(fields: [uid], references: [uid], onDelete: Cascade)
-  credits        BigInt  @default(0) // 本地插值余额（签到权威值 - 实扣）
-  total          BigInt  @default(0)
-  expiring       BigInt  @default(0) // 窗口内将过期积分
-  earliestAt     BigInt  @default(0) // 最近到期时刻 unix 毫秒，0=无
-  earliestRemain BigInt  @default(0)
-  paused         Boolean @default(false) // 人工暂停（不参与选号，但不算禁用）
-  disabled       Boolean @default(false)
-  disableReason  String  @default("")
-  disabledAt     BigInt  @default(0)
-  softStreak     Int     @default(0) // 连续软冷却次数（指数退避指数，CooldownSoftRate 有界退避用）
-  degradeUntil   BigInt  @default(0) // 连败降权截止 unix 毫秒
-  sessionDead    Boolean @default(false) // 12153 会话失效标记（连续 3 次禁用）
-  sessionStrikes Int     @default(0)
-  cooldownUntil  BigInt  @default(0) // 冷却截止 unix 毫秒
-  cooldownReason String  @default("")
-  breakerFails   Int     @default(0) // 熔断连败计数
-  breakerUntil   BigInt  @default(0) // 熔断截止 unix 毫秒
-  lastUsed       BigInt  @default(0) // 上次选中 unix 毫秒（防并发撞号）
-  usedSeq        BigInt  @default(0) // 单调选中序号（LRU 兜底权威依据）
-  lastCheckinDay String  @default("") // 已签到日（Asia/Shanghai 的 YYYY-MM-DD）
-  balanceAt      BigInt  @default(0) // 上次余额同步 unix 毫秒
-  updatedAt      DateTime @updatedAt
+  uid             String   @id
+  account         Account  @relation(fields: [uid], references: [uid], onDelete: Cascade)
+  credits         BigInt   @default(0) // 本地插值余额（签到权威值 - 实扣）
+  total           BigInt   @default(0)
+  expiring        BigInt   @default(0) // 窗口内将过期积分
+  earliestAt      BigInt   @default(0) // 最近到期时刻 unix 毫秒，0=无
+  earliestRemain  BigInt   @default(0)
+  paused          Boolean  @default(false) // 人工暂停（不参与选号，但不算禁用）
+  disabled        Boolean  @default(false)
+  disableReason   String   @default("")
+  disabledAt      BigInt   @default(0)
+  softStreak      Int      @default(0) // 连续软冷却次数（指数退避指数，CooldownSoftRate 有界退避用）
+  degradeUntil    BigInt   @default(0) // 连败降权截止 unix 毫秒
+  sessionDead     Boolean  @default(false) // 12153 会话失效标记（连续 3 次禁用）
+  sessionStrikes  Int      @default(0)
+  cooldownUntil   BigInt   @default(0) // 冷却截止 unix 毫秒
+  cooldownReason  String   @default("")
+  breakerFails    Int      @default(0) // 熔断连败计数
+  breakerUntil    BigInt   @default(0) // 熔断截止 unix 毫秒
+  lastUsed        BigInt   @default(0) // 上次选中 unix 毫秒（防并发撞号）
+  usedSeq         BigInt   @default(0) // 单调选中序号（LRU 兜底权威依据）
+  lastCheckinDay  String   @default("") // 已签到日（Asia/Shanghai 的 YYYY-MM-DD）
+  balanceAt       BigInt   @default(0) // 上次余额同步 unix 毫秒
+  lastKeepaliveAt BigInt   @default(0) // 上次成功续期 unix 毫秒（保活用）
+  updatedAt       DateTime @updatedAt
 }
 
 model ModelCooldown {
@@ -145,35 +146,40 @@ model UsageEvent {
 }
 
 model RequestLog {
-  id            String   @id @default(cuid())
-  uid           String   @default("")
+  id                 String   @id @default(cuid())
+  uid                String   @default("")
   // 供应商/选号前失败没有池账号，uid 留空；删除账号也保留历史日志。
-  model         String   @default("")
-  realm         String   @default("")
-  provider      String   @default("")
-  status        Int      @default(0)
-  errKind       String   @default("")
+  model              String   @default("")
+  realm              String   @default("")
+  provider           String   @default("")
+  status             Int      @default(0)
+  errKind            String   @default("")
   // 报错内容：失败请求的上游响应正文摘要（单行、已压空白、最多 1000 字符）。
   // 成功请求留空。用于面板「请求日志」展开区与运行日志 err= 片段。
-  errMsg        String   @default("")
-  stream        Boolean  @default(false)
-  durationMs    Int      @default(0)
-  ttfbMs        Int      @default(0) // 流式首帧延迟
-  attempts      Int      @default(0) // 轮转尝试次数
-  promptTokens  Int      @default(0)
-  completionTok Int      @default(0)
-  totalTokens   Int      @default(0)
-  credit        Float    @default(0)
-  hasCredit     Boolean  @default(false)
-  cacheHitTok   Int      @default(0)
-  cacheMissTok  Int      @default(0)
-  clientIp      String   @default("")
-  ua            String   @default("")
-  keyName       String   @default("") // 命中的网关密钥名；供应商路径为槽位名
-  slot          String   @default("") // 供应商内实际命中的 key 槽位
-  machineId     String   @default("") // 该请求实际用号派生的机器码（desktop.go deriveID "machine" 同口径）
-  path          String   @default("")
-  at            DateTime @default(now())
+  errMsg             String   @default("")
+  stream             Boolean  @default(false)
+  durationMs         Int      @default(0)
+  ttfbMs             Int      @default(0) // 流式首帧延迟
+  attempts           Int      @default(0) // 轮转尝试次数
+  promptTokens       Int      @default(0)
+  completionTok      Int      @default(0)
+  totalTokens        Int      @default(0)
+  credit             Float    @default(0)
+  hasCredit          Boolean  @default(false)
+  cacheHitTok        Int      @default(0)
+  cacheMissTok       Int      @default(0)
+  clientIp           String   @default("")
+  ua                 String   @default("")
+  keyName            String   @default("") // 命中的网关密钥名；供应商路径为槽位名
+  slot               String   @default("") // 供应商内实际命中的 key 槽位
+  machineId          String   @default("") // 该请求实际用号派生的机器码（desktop.go deriveID "machine" 同口径）
+  path               String   @default("")
+  requestMessages    Json? // 清洗后的请求对话（图片仅保留摘要）
+  responseMessage    Json? // 助手回复正文/推理/工具调用
+  errorDetail        String   @default("") // 最终失败原文与网关判断
+  parameterOverrides Json? // 网关对出站参数的逐项改写
+  attemptDetails     Json? // 逐次选号/请求/失败详情
+  at                 DateTime @default(now())
 
   @@index([at])
   @@index([uid, at])
@@ -224,11 +230,48 @@ model TaskQueueItem {
 // key 带域前缀（cn:glm-5.2 / artex:xxx）；合并语义：未重测的模型保留旧记录。
 model ModelProbe {
   key       String   @id // 探测键：realm:model 或 provider:model
-  claimed   Int?     // 上游声称 max_output_tokens（null = 未知）
-  measured  Int?     // 实测值：clamped = 截断值（可信），at_least = 已知下界
+  claimed   Int? // 上游声称 max_output_tokens（null = 未知）
+  measured  Int? // 实测值：clamped = 截断值（可信），at_least = 已知下界
   verdict   String   @default("inconclusive") // clamped | at_least | inconclusive
   note      String   @default("") // 原始判据文本（中文）
   source    String   @default("panel-probe")
   testedAt  DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// 模型健康探测历史：每行代表一次真实最小聊天请求。
+// 与 ModelProbe（最大输出探测）分离，避免把输出上限结论误当成可用率。
+model ModelHealthCheck {
+  id               String   @id @default(cuid())
+  modelKey         String // 面板模型键：cn:model / global:model / provider:model
+  ok               Boolean  @default(false)
+  status           Int      @default(0)
+  latencyMs        Int      @default(0)
+  completionTokens Int      @default(0)
+  tokensPerSecond  Float    @default(0)
+  errorKind        String   @default("")
+  detail           String   @default("")
+  source           String   @default("scheduler")
+  checkedAt        DateTime @default(now())
+
+  @@index([modelKey, checkedAt])
+  @@index([checkedAt])
+}
+
+// 余额趋势采样（移植 internal/balance）：定时驱动的余额水位存量记录。
+// 与 UsageEvent（事件驱动的流量）刻意分开：没有请求也要照常采样。
+// 两级粒度：近 30 天保留原始点；更早折叠为日粒度点（day 非空，并随点保存
+// 当日首值/消耗/到账，否则折叠后日流量静默归零）。
+model BalanceSample {
+  id       String   @id @default(cuid())
+  uid      String
+  credits  BigInt
+  day      String   @default("") // 非空 = 日粒度折叠点（YYYY-MM-DD，Asia/Shanghai）
+  first    BigInt   @default(0) // 仅折叠点：当日首个水位
+  consumed BigInt   @default(0) // 仅折叠点：当日消耗合计（下界估计）
+  gained   BigInt   @default(0) // 仅折叠点：当日到账合计（下界估计）
+  at       DateTime @default(now())
+
+  @@index([uid, at])
+  @@index([at])
 }

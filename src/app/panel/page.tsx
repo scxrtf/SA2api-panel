@@ -11,6 +11,7 @@ import { AccountsView } from "./views/accounts";
 import { UsageView } from "./views/usage";
 import { AnalyticsView } from "./views/analytics";
 import { PackagesView } from "./views/packages";
+import { BalHistView } from "./views/balhist";
 import { TasksCenterView } from "./views/taskscenter";
 import { ModelsView } from "./views/models";
 import { AiCheckerView } from "./views/aichecker";
@@ -84,6 +85,7 @@ export default function PanelPage() {
       {visited.has("usage") && <ViewPane active={view === "usage"}><UsageView flash={flash} /></ViewPane>}
       {visited.has("analytics") && <ViewPane active={view === "analytics"}><AnalyticsView flash={flash} /></ViewPane>}
       {visited.has("packages") && <ViewPane active={view === "packages"}><PackagesView flash={flash} /></ViewPane>}
+      {visited.has("balhist") && <ViewPane active={view === "balhist"}><BalHistView flash={flash} /></ViewPane>}
       {visited.has("taskscenter") && <ViewPane active={view === "taskscenter"}><TasksCenterView flash={flash} /></ViewPane>}
       {visited.has("models") && <ViewPane active={view === "models"}><ModelsView flash={flash} /></ViewPane>}
       {visited.has("aichecker") && <ViewPane active={view === "aichecker"}><AiCheckerView flash={flash} /></ViewPane>}

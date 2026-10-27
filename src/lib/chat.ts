@@ -10,6 +10,7 @@ import {
   extractKey,
   turnKey,
   resolveConversationID,
+  deriveKey,
   resolveSticky,
   bindSticky,
   unbindSticky,
@@ -18,6 +19,7 @@ import {
   chatStream,
   refreshToken,
   requestIDForKey,
+  newTraceID,
   type ChatMeta,
   type AuthShape,
 } from "./upstream/client";
@@ -31,18 +33,17 @@ import {
   type ErrKind,
 } from "./upstream/errors";
 import { catalogSupportsImages } from "./upstream/modelCatalog";
-import { streamPassthrough, aggregate, type StreamStats } from "./upstream/sse";
+import {
+  streamPassthrough,
+  aggregate,
+  StreamPassthroughError,
+  type StreamStats,
+} from "./upstream/sse";
 import { tokensPerSecond } from "./upstream/usage";
 import { currentModelRate } from "./upstream/modelCatalog";
 import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
-import { clipLogText } from "./logfmt";
-import * as wafip from "./wafip";
-import { backoffAfter, sleep } from "./backoff";
-import { identifyKeyIdentity, providerAllowed } from "./auth-guard";
-import { withFreshAuth, classifySessionError } from "./accountSession";
-import { isModelRateLimit } from "./upstream/errors";
-import { aggregateStarved, starvedRetryBody } from "./starved";
+import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import {   assistantMessageForLog,   errorText,   failureDetail,   parameterOverrides,   requestMessagesForLog,   responseMessageFromObject,   type AttemptDetail, } from "./request-log-detail";
 
 type Obj = Record<string, unknown>;
 
@@ -229,13 +230,24 @@ async function recordRequestLog(r: {
   keyName?: string;
   slot?: string;
   machineId?: string;
-  // 报错内容：失败请求的上游响应正文（已 clipLogText）。成功请求留空。
+  // 报错内容：失败请求的上游响应正文摘要（已 clipLogText）。成功请求留空。
   errMsg?: string;
-}): Promise<void> {
+  requestMessages?: unknown;
+  responseMessage?: unknown;
+  errorDetail?: string;
+  parameterOverrides?: unknown;
+  attemptDetails?: unknown;
+}, logRef = ""): Promise<boolean> {
   try {
-    await prisma.requestLog.create({ data: r });
+    const row = await prisma.requestLog.create({
+      data: r as never,
+      select: { id: true },
+    });
+    markRunlogPersisted(logRef, row.id);
+    return true;
   } catch {
     // 同上。
+    return false;
   }
 }
 
@@ -294,6 +306,9 @@ export async function handleChat(opts: {
   const { body, clientIP, ua, path } = opts;
   const stream = body["stream"] === true;
   const rawModel = typeof body["model"] === "string" ? (body["model"] as string) : "";
+  const loggedRequestMessages = requestMessagesForLog(body["messages"]);
+  const attemptDetails: AttemptDetail[] = [];
+  let latestOutboundOverrides = parameterOverrides(body, body);
 
   const { realm, provider, bare } = resolveModel(rawModel);
   // 使用者归属（Go keyNameFrom）：多 sk-key 模式下命中哪把 key 就记谁的名字；
@@ -318,6 +333,15 @@ export async function handleChat(opts: {
           status: 403, errKind: "provider_not_authorized", stream,
           errMsg: "key 未授权使用供应商 " + provider,
           durationMs: Date.now() - started, clientIp: clientIP, ua, path, keyName,
+          attempts: 0,
+          requestMessages: loggedRequestMessages,
+          errorDetail: failureDetail({
+            status: 403,
+            code: "provider_not_authorized",
+            kind: "provider_not_authorized",
+            message: `key 未授权使用供应商 ${provider}`,
+            stage: "provider_authorization",
+          }),
         });
         return openAIError(
           403,
@@ -337,14 +361,15 @@ export async function handleChat(opts: {
   const tKey = turnKey(body);
   let stickyUID = "";
   if (cfg.session_sticky && sessKey) {
-    stickyUID = (await resolveSticky(sessKey, bare)) ?? "";
+    stickyUID = (await resolveSticky(sessKey, bare, realm)) ?? "";
   }
 
   // 会话头族（issue #35）：轮转循环外生成一次，循环内复用。
   const chatMeta: ChatMeta = {
     conversationID: resolveConversationID(body),
+    cacheKeyID: sessKey || deriveKey(body),
     conversationRequestID: "",
-    traceID: opts.inboundHeaders.get("x-trace-id") ?? "",
+    traceID: opts.inboundHeaders.get("x-trace-id") || newTraceID(),
   };
   const inboundConvReqID = opts.inboundHeaders.get("x-conversation-request-id") ?? "";
   if (inboundConvReqID) {
@@ -363,6 +388,14 @@ export async function handleChat(opts: {
   let outBody = applyPromptMode(cfg, body);
   let degradedApplied = degradeActive() && (cfg.prompt_mode === "passthrough" || cfg.prompt_mode === "append");
   if (bare !== rawModel) outBody = rewriteModel(outBody, bare);
+  const snapshotOutbound = (raw: string) => {
+    try {
+      latestOutboundOverrides = parameterOverrides(body, JSON.parse(raw));
+    } catch {
+      latestOutboundOverrides = [];
+    }
+  };
+  snapshotOutbound(outBody);
 
   // gateway_hint 判定所需的请求形态（image_url part）：在改写前取（与 Go 同理）。
   const reqHasImage = hasImagePart(body);
@@ -452,21 +485,33 @@ export async function handleChat(opts: {
     uid: string,
     errKind: string,
     extra?: Partial<StreamStats>,
-    errMsg = "",
-  ) => {
-    const errText = errMsg ? clipLogText(errMsg, 1000) : "";
-    runlog(
-      "chat " + (status < 400 ? "OK " : "ERR ") + status + " " + bare +
-      (uid ? " uid=" + uid : "") + (errKind ? " kind=" + errKind : "") +
-      " " + (Date.now() - started) + "ms" +
-      // 运行日志只带截断片段：完整报错内容看请求日志展开区。
-      (errText ? " err=" + clipLogText(errText, 180) : ""),
+    detailOverride?: string,     responseOverride?: Record<string, unknown> | null,     durationOverride?: number,   ) => {     const logRef = runlog(       "[call] " + bare + " " + (status < 400 && !errKind ? "成功" : "失败") +       " HTTP " + status + (uid ? " uid=" + uid : "") +       (errKind ? " kind=" + errKind : "") +       " " + (Date.now() - started) + "ms",
     );
+    const failed = status >= 400 || errKind !== "";
+    const responseMessage = responseOverride !== undefined
+      ? responseOverride
+      : extra ? assistantMessageForLog({
+        role: extra.assistantRole,
+        content: extra.assistantContent,
+        reasoningContent: extra.assistantReasoning,
+        toolCalls: extra.assistantToolCalls,
+      }) : null;
+    let detail = detailOverride ?? "";
+    if (failed && !detail) {
+      detail = failureDetail({
+        status,
+        code: errKind || "upstream_error",
+        kind: errKind,
+        message: status === 200 && errKind
+          ? "上游在 HTTP 200 流中返回错误"
+          : "请求失败",
+        upstream: extra?.errorFrame || "",
+      });
+    }
     void recordRequestLog({
       uid, model: rawModel, realm, provider: "",
       status, errKind, stream,
-      errMsg: errText,
-      durationMs: Date.now() - started,
+      errMsg: failed ? clipLogText(detail || extra?.errorFrame || "", 1000) : "",       durationMs: Math.max(1, durationOverride ?? Date.now() - started),
       clientIp: clientIP, ua, path,
       ttfbMs: extra?.ttfbMs ? extra.ttfbMs + logAttemptStarted - started : 0,
       attempts: attemptCount,
@@ -481,6 +526,13 @@ export async function handleChat(opts: {
       // 机器码 = 实际用号按 desktop.go deriveID("machine") 同盐派生（sha36 截 36 hex）。
       // uid 为空（选号前失败 / 供应商直连）时留空，与 Go 请求日志"账号列 + 派生"口径一致。
       machineId: uid ? deriveID({ uid }, "machine") : "",
+      requestMessages: loggedRequestMessages,
+      responseMessage: responseMessage ?? undefined,
+      errorDetail: detail,
+      parameterOverrides: latestOutboundOverrides.length ? latestOutboundOverrides : undefined,
+      attemptDetails: attemptDetails.length ? attemptDetails : undefined,
+    }, logRef).then((saved) => {
+      if (saved) void maybeProbeAfterModelCall({ realm, provider: "", bare });
     });
   };
 
@@ -552,6 +604,7 @@ export async function handleChat(opts: {
       // token 临近过期 → 先 refresh（失败冷却换号）。
       const { needsRefresh } = await import("./upstream/client");
       if (needsRefresh(authShape, cfg.refresh_skew_sec)) {
+        const refreshStarted = Date.now();
         try {
           const patch = await refreshToken(cfg, authShape);
           await prisma.account.update({
@@ -583,6 +636,15 @@ export async function handleChat(opts: {
             uid: acct.uid, model: bare, realm, provider: "",
             ok: false, errKind: kind,
           });
+          attemptDetails.push({
+            attempt: attemptCount,
+            uid: acct.uid,
+            status: lastErr.status,
+            ok: false,
+            errKind: kind,
+            durationMs: Math.max(1, Date.now() - refreshStarted),
+            error: errorText(e),
+          });
           fail(acct.uid);
           await sleep(backoffAfter(i)); // refresh 失败换号退避
           continue;
@@ -594,6 +656,7 @@ export async function handleChat(opts: {
       let res;
       try {
         res = await chatStream(cfg, authShape, outBody, clientIP, chatMeta);
+        snapshotOutbound(res.preparedBody);
       } catch (e) {
         // 传输层失败：不换号语义区分超时——AbortError/超时不停轮换止损；
         // 其他网络抖动换号 + 喂连败计数（不罚熔断）。
@@ -604,11 +667,18 @@ export async function handleChat(opts: {
         fail(acct.uid);
         const isTimeout =
           e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+        attemptDetails.push({
+          attempt: attemptCount,
+          uid: acct.uid,
+          status: isTimeout ? 503 : 0,
+          ok: false,
+          errKind: isTimeout ? "upstream_timeout" : "transport",
+          durationMs: Math.max(1, Date.now() - attemptStarted),
+          error: errorText(e),
+        });
         if (isTimeout) {
           lastErr = { kind: "none", status: 0, msg: "upstream timeout", retryAfterMs: 0 };
-          finishLog(503, acct.uid, "upstream_timeout", undefined,
-            "upstream timeout after " + (Date.now() - attemptStarted) + "ms (" +
-            (e instanceof Error ? e.name : "timeout") + ")");
+          finishLog(503, acct.uid, "upstream_timeout", undefined, failureDetail({             status: 503,             code: "upstream_timeout",             kind: "upstream_timeout",             message: "upstream timed out: rotation stopped, please retry later",             upstream: errorText(e),             stage: "upstream_connect",           }));
           return openAIError(
             503,
             "upstream_timeout",
@@ -683,6 +753,24 @@ export async function handleChat(opts: {
           uid: acct.uid, model: bare, realm, provider: "",
           ok: false, errKind: kind,
         });
+        const attemptFailure = failureDetail({
+          status,
+          code: kind,
+          kind,
+          message: res.error?.message ?? "",
+          upstream: respBody,
+          stage: "upstream_response",
+        });
+        attemptDetails.push({
+          attempt: attemptCount,
+          uid: acct.uid,
+          status,
+          ok: false,
+          errKind: kind,
+          durationMs: Math.max(1, Date.now() - attemptStarted),
+          ttfbMs: 0,
+          error: attemptFailure,
+        });
 
         // 模型降级：**仅 6004 模型级限流**触发。等价模型是同一底层能力（计价不同），
         // 被限流时同账号改用另一个继续服务，而不是让客户端等冷却结束。
@@ -713,7 +801,7 @@ export async function handleChat(opts: {
           const effectiveMs = Math.min(cfg.soft_cooldown_ms, retryMs);
           await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, retryMs);
           fail(acct.uid);
-          finishLog(429, acct.uid, kind, undefined, respBody);
+          finishLog(429, acct.uid, kind, undefined, attemptFailure);
           return openAIError(
             429,
             "upstream_queueing",
@@ -731,6 +819,7 @@ export async function handleChat(opts: {
         ) {
           triggerDegrade();
           outBody = rewriteSystemPrompt(JSON.parse(outBody) as Obj, DEGRADED_PROMPT);
+          snapshotOutbound(res.preparedBody);
           degradedApplied = true;
           tried.delete(acct.uid); // 单账号池也能拿到重试机会
           releaseHeld();
@@ -740,7 +829,7 @@ export async function handleChat(opts: {
         if (kind === "content_blocked") {
           await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, 0);
           fail(acct.uid);
-          finishLog(400, acct.uid, kind, undefined, respBody);
+          finishLog(400, acct.uid, kind, undefined, attemptFailure);
           return openAIError(
             400, "content_blocked",
             respBody.trim() || "content blocked by upstream content firewall",
@@ -754,7 +843,7 @@ export async function handleChat(opts: {
           kind === "bad_params"
         ) {
           fail(acct.uid);
-          finishLog(400, acct.uid, kind, undefined, respBody);
+          finishLog(400, acct.uid, kind, undefined, attemptFailure);
           return openAIError(
             400, kind,
             respBody.trim() || `upstream rejected request (${kind})`,
@@ -786,7 +875,7 @@ export async function handleChat(opts: {
         // 该次 WAF 403 喂入 IP 级状态机，若激活（短窗多号命中，IP 被拦而非账号）
         // 直接终止轮转返回 403，避免把一次客户端请求放大 max_rotate 倍加重风控。
         if (kind === "waf_block" && wafip.noteWaf(acct.uid)) {
-          finishLog(403, acct.uid, "waf_ip_blocked", undefined, respBody);
+          finishLog(403, acct.uid, "waf_ip_blocked", undefined, failureDetail({             status: 403,             code: "waf_ip_blocked",             kind: "waf_block",             message: "waf ip-level block: upstream firewall is blocking the gateway IP",             upstream: respBody,             stage: "upstream_response",           }));
           return openAIError(
             403, "waf_ip_blocked",
             "waf ip-level block: upstream firewall is blocking the gateway IP, " +
@@ -812,19 +901,48 @@ export async function handleChat(opts: {
           attemptStarted,
         );
         const uidCaptured = acct.uid;
+        // 流式响应的租约归 statsPromise 的完成/中断回调释放；外层 finally 不能
+        // 在响应头刚返回时提前释放，否则同一账号可能被并发超额占用。
+        heldUID = "";
         void statsPromise.then(async (stats) => {
+          const endedAt = Date.now();
+          const latencyMs = Math.max(1, endedAt - attemptStarted);
+          const kind = stats.errorFrame ? classify(200, stats.errorFrame) : "";
+          const frameKind: ErrKind = kind === "" ? "client" : kind;
+          const responseMessage = assistantMessageForLog({
+            role: stats.assistantRole,
+            content: stats.assistantContent,
+            reasoningContent: stats.assistantReasoning,
+            toolCalls: stats.assistantToolCalls,
+          });
+          const detail = stats.errorFrame ? failureDetail({
+            status: 200,
+            code: kind,
+            kind,
+            message: "上游在 HTTP 200 流中返回错误",
+            upstream: stats.errorFrame,
+            stage: "upstream_stream",
+          }) : "";
+          attemptDetails.push({
+            attempt: attemptCount,
+            uid: uidCaptured,
+            status: 200,
+            ok: kind === "",
+            errKind: kind,
+            durationMs: latencyMs,
+            ttfbMs: stats.ttfbMs,
+            error: detail,
+          });
           try {
             if (stats.errorFrame) {
               // 上游 200 已开流 + error 帧：按帧分类处置，不记成功不绑粘性。
-              const kind = classify(200, stats.errorFrame);
-              await pool.applyErrorKind(cfg, uidCaptured, kind, stats.errorFrame, bare, 0);
+              await pool.applyErrorKind(cfg, uidCaptured, frameKind, stats.errorFrame, bare, 0);
               await recordAttempt({
                 uid: uidCaptured, model: bare, realm, provider: "",
-                ok: false, errKind: kind, stats,
-                latencyMs: Date.now() - attemptStarted, keyName, modelRate,
+                ok: false, errKind: frameKind, stats,
+                latencyMs, keyName, modelRate,
               });
             } else {
-              const latencyMs = Math.max(1, Date.now() - attemptStarted);
               const tps = stats.hasUsage && stats.completionTokens >= 0
                 ? tokensPerSecond(stats.completionTokens, latencyMs, stats.ttfbMs)
                 : null;
@@ -843,27 +961,73 @@ export async function handleChat(opts: {
                 await pool.noteModelCost(uidCaptured, bare, stats.credit, stats.totalTokens);
               }
             }
+          } catch (e) {
+            runlog("WARN: stream accounting failed: " + errorText(e));
           } finally {
             pool.release(uidCaptured);
+            finishLog(
+              200,
+              uidCaptured,
+              kind,
+              stats,
+              detail,
+              responseMessage,
+              endedAt - started,
+            );
           }
-        }, async () => {
+        }, async (rejection) => {
+          const endedAt = Date.now();
+          const latencyMs = Math.max(1, endedAt - attemptStarted);
+          const kind = opts.req?.signal.aborted ? "client_cancelled" : "stream_interrupted";
+          const stats = rejection instanceof StreamPassthroughError ? rejection.stats : undefined;
+          const detail = failureDetail({
+            status: 200,
+            code: kind,
+            kind,
+            message: opts.req?.signal.aborted
+              ? "客户端在流式响应结束前断开"
+              : "流式响应在结束前中断",
+            upstream: errorText(rejection),
+            stage: "stream_passthrough",
+          });
+          const responseMessage = stats ? assistantMessageForLog({
+            role: stats.assistantRole,
+            content: stats.assistantContent,
+            reasoningContent: stats.assistantReasoning,
+            toolCalls: stats.assistantToolCalls,
+          }) : null;
+          attemptDetails.push({
+            attempt: attemptCount,
+            uid: uidCaptured,
+            status: 200,
+            ok: false,
+            errKind: kind,
+            durationMs: latencyMs,
+            ttfbMs: stats?.ttfbMs,
+            error: detail,
+          });
           // 读写中断同样释放租约，且不把客户端取消惩罚为账号错误。
           try {
             await recordAttempt({
               uid: uidCaptured, model: bare, realm, provider: "", ok: false,
-              errKind: "stream_interrupted", latencyMs: Date.now() - attemptStarted,
-              keyName, modelRate,
+              errKind: kind, ...(stats ? { stats } : {}),
+              latencyMs, keyName, modelRate,
             });
+          } catch (e) {
+            runlog("WARN: stream failure accounting failed: " + errorText(e));
           } finally {
             pool.release(uidCaptured);
+            finishLog(
+              200,
+              uidCaptured,
+              kind,
+              stats,
+              detail,
+              responseMessage,
+              endedAt - started,
+            );
           }
         }).catch(() => runlog("WARN: stream accounting failed"));
-        // RequestLog 的 token/TTFB 维度与 Go 的 defer st.done() 同语义：流式
-        // 下等流真正结束、末帧 usage 可得时才落日志（响应本身已可先返回）。
-        void statsPromise.then((stats) => finishLog(200, uidCaptured,
-          stats.errorFrame ? "upstream_error" : "", stats, stats.errorFrame || ""),
-          () => finishLog(200, uidCaptured, "stream_interrupted"))
-          .catch(() => runlog("WARN: stream request log failed"));
         return new Response(readable, {
           status: 200,
           headers: {
@@ -876,17 +1040,49 @@ export async function handleChat(opts: {
 
       // 非流式：聚合成单个 chat.completion。
       if (!res.body) {
+        const detail = failureDetail({
+          status: 502,
+          code: "upstream_parse",
+          kind: "upstream_parse",
+          message: "上游响应没有可读取的响应体",
+          stage: "upstream_response",
+        });
+        attemptDetails.push({
+          attempt: attemptCount,
+          uid: acct.uid,
+          status: 502,
+          ok: false,
+          errKind: "upstream_parse",
+          durationMs: Math.max(1, Date.now() - attemptStarted),
+          error: detail,
+        });
         fail(acct.uid);
-        finishLog(502, acct.uid, "upstream_parse", undefined, "empty upstream stream");
+        finishLog(502, acct.uid, "upstream_parse", undefined, detail);
         return openAIError(502, "upstream_parse", "empty upstream stream");
       }
       let agg;
       try {
         agg = await aggregate(res.body);
       } catch (e) {
+        const detail = failureDetail({
+          status: 502,
+          code: "upstream_parse",
+          kind: "upstream_parse",
+          message: e instanceof Error ? e.message : "aggregate failed",
+          upstream: errorText(e),
+          stage: "response_aggregate",
+        });
+        attemptDetails.push({
+          attempt: attemptCount,
+          uid: acct.uid,
+          status: 502,
+          ok: false,
+          errKind: "upstream_parse",
+          durationMs: Math.max(1, Date.now() - attemptStarted),
+          error: detail,
+        });
         fail(acct.uid);
-        finishLog(502, acct.uid, "upstream_parse", undefined,
-          e instanceof Error ? e.message : "aggregate failed");
+        finishLog(502, acct.uid, "upstream_parse", undefined, detail);
         return openAIError(
           502, "upstream_parse",
           e instanceof Error ? e.message : "aggregate failed",
@@ -915,10 +1111,11 @@ export async function handleChat(opts: {
           }
         }
       }
+      const endedAt = Date.now();
+      const latencyMs = Math.max(1, endedAt - attemptStarted);
       await pool.noteSuccess(acct.uid);
       await pool.blockModelClear(acct.uid, curModel);
       if (sessKey && cfg.session_sticky) await bindSticky(sessKey, acct.uid);
-      const latencyMs = Math.max(1, Date.now() - attemptStarted);
       const tps = agg.stats.hasUsage && agg.stats.completionTokens >= 0
         ? tokensPerSecond(agg.stats.completionTokens, latencyMs, agg.stats.ttfbMs)
         : null;
@@ -930,16 +1127,31 @@ export async function handleChat(opts: {
         ok: true, errKind: "", stats: agg.stats,
         latencyMs, tps, keyName, modelRate,
       });
+      attemptDetails.push({
+        attempt: attemptCount,
+        uid: acct.uid,
+        status: 200,
+        ok: true,
+        errKind: "",
+        durationMs: latencyMs,
+        ttfbMs: agg.stats.ttfbMs,
+      });
       if (agg.stats.hasCredit && agg.stats.totalTokens > 0) {
         await pool.noteModelCost(acct.uid, bare, agg.stats.credit, agg.stats.totalTokens);
       }
-      finishLog(200, acct.uid, "", agg.stats);
       // 非流式标记修复（Go handler.go:1148 同语义）：content 含原生标记且
       // 无结构化 tool_calls、finish_reason=stop 时，还原为 message.tool_calls。
       // 注意：repairAggregatedResponse 原地修改 resp 并返回状态机本身，
       // 这里必须序列化 resp，不能把返回值当响应体（否则客户端只拿到
       // {allowed, allowUnknown, hold, inBlock, …} 这类内部字段）。
       repairAggregatedResponse(agg.resp as Obj, declaredTools, true);
+      const choices = agg.resp["choices"];
+      const firstChoice = Array.isArray(choices) && choices[0]
+        && typeof choices[0] === "object" ? choices[0] as Obj : null;
+      const finalResponse = firstChoice
+        ? responseMessageFromObject(firstChoice["message"])
+        : null;
+      finishLog(200, acct.uid, "", agg.stats, undefined, finalResponse, endedAt - started);
       return Response.json(agg.resp);
     }
   } finally {
@@ -961,6 +1173,7 @@ export async function handleChat(opts: {
   // 时按 Kind + 原文 + 请求形态判定（hintOf 统一入口，与 Go 同口径）。
   let hint = noHealthyAccountHint();
   let upstreamMsgPassed = false;
+  let modelBlockDetail = "";
 
   if (lastErr) {
     hint = hintOf(lastErr.kind, lastErr.msg);
@@ -1039,11 +1252,8 @@ export async function handleChat(opts: {
       lockDetail += "; earliest unblock at " + new Date(modelBlock.until).toISOString();
     }
     if (modelBlock.reason.trim()) lockDetail += "; upstream: " + modelBlock.reason;
+    modelBlockDetail = lockDetail;
     hint = kindHint ? kindHint + "; " + lockDetail : lockDetail;
   }
-  finishLog(status, "", lastErr?.kind ?? "", undefined, lastErr?.msg ?? "");
-  const headers = status === 429 && retryAfterMs > 0
-    ? { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1000))) }
-    : undefined;
-  return openAIError(status, code, msg, hint, headers);
+  const finalKind = lastErr?.kind ?? (modelBlock?.blocked ? "model_blocked" : "");   finishLog(status, "", finalKind, undefined, failureDetail({     status,     code,     kind: finalKind,     message: msg,     upstream: lastErr?.msg || modelBlock?.reason || "",     hint,     modelBlock: modelBlockDetail,     stage: attemptCount > 0 ? "rotation_exhausted" : "account_selection",   }));   const headers = status === 429 && retryAfterMs > 0     ? { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1000))) }     : undefined;   return openAIError(status, code, msg, hint, headers);
 }

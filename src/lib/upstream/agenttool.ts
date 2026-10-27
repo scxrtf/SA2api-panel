@@ -30,6 +30,7 @@ async function agentTool(
 ): Promise<string> {
   const h = chatHeaders(cfg, a, "", {
     conversationID: "",
+    cacheKeyID: "",
     conversationRequestID: "",
     traceID: "",
   });

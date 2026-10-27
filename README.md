@@ -55,9 +55,14 @@ npm run dev                 # http://localhost:3000/panel
 |---|---|---|
 | 每天 09:00 / 21:00（Asia/Shanghai） | `POST /api/cron/checkin` | 全账号签到 |
 | 每 5 分钟 | `POST /api/cron/balance` | 余额台账刷新 |
-| 每 30 分钟 | `POST /api/cron/keepalive` | token 保活刷新 |
+| 每 30 分钟 | `POST /api/cron/keepalive` | 仅续期临期 token；可安全高频调用 |
 
 请求头：`Authorization: Bearer $WB2A_API_KEY`。主密钥为空时 cron 端点返回 503（拒绝未鉴权触发）。
+
+Token 保活默认只处理 24 小时内到期或过期时间未知的账号；本进程调度器默认仍在
+22:00 触发一次。所有自动/外部/面板触发共用数据库租约，同一时间只跑一轮；单轮
+默认最多 240 秒、3 并发，跑不完的账号下次继续。外部 cron 若配置 `force=1`
+（`POST /api/cron/keepalive?force=1`）则强制刷新全部账号，用于人工排障。
 
 ## 架构要点
 

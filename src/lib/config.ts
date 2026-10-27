@@ -37,6 +37,9 @@ export interface AppConfig {
   schedule_travel_hours: number[]; // 默认 [9,21]
   schedule_activity_hours: number[]; // 默认 [10]
   schedule_keepalive_hours: number[]; // 默认 [22]
+  schedule_keepalive_refresh_before_hours: number; // 仅续期临期 token（0=仅已过期）
+  schedule_keepalive_concurrency: number; // 单轮续期并发
+  schedule_keepalive_time_budget_ms: number; // 单轮运行预算，避免 HTTP 超时
   schedule_blackcat_hours: number[]; // 默认 [23]（夜猫子 23:00–08:00 计数窗口）
   schedule_growth_hours: number[]; // 默认 [1]（成长队列每日零点解锁后 01:00 扫执行）
   // 开关用「禁用」命名：零值（false）即启用，对齐 Go 的 *_enabled 缺省 true。
@@ -51,6 +54,11 @@ export interface AppConfig {
   // 余额刷新：false=关停循环；分钟 <=0 回落 5。
   schedule_balance_refresh_enabled: boolean;
   schedule_balance_refresh_minutes: number;
+  // 模型可用率探测：对所有目录模型发送最小真实聊天请求并逐次落库。
+  schedule_model_health_enabled: boolean;
+  schedule_model_health_minutes: number;
+  // 每 N 次真实模型调用后探测一次该模型；0=关闭。
+  schedule_model_health_every_calls: number;
   // 快过期积分窗口（小时）：签到/余额刷新时把到期 ≤ now+window 的批次标记为快过期。
   // <=0 = 禁用路由门槛（展示仍用完整逐包数据）。
   expiring_soon_hours: number;
@@ -90,6 +98,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   schedule_travel_hours: [9, 21],
   schedule_activity_hours: [10],
   schedule_keepalive_hours: [22],
+  schedule_keepalive_refresh_before_hours: 24,
+  schedule_keepalive_concurrency: 3,
+  schedule_keepalive_time_budget_ms: 240_000,
   schedule_blackcat_hours: [23],
   schedule_growth_hours: [1],
   schedule_checkin_disabled: false,
@@ -101,6 +112,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   schedule_include_disabled_in_tasks: false,
   schedule_balance_refresh_enabled: true,
   schedule_balance_refresh_minutes: 5,
+  schedule_model_health_enabled: true,
+  schedule_model_health_minutes: 15,
+  schedule_model_health_every_calls: 0,
   expiring_soon_hours: 168, // 默认 7 天：官方活动奖励积分多在两周内过期
   package_detail_limit: 5,
 };
@@ -127,6 +141,30 @@ export async function getConfig(force = false): Promise<AppConfig> {
   // 对齐 Go normalize：<=0 回落 5（不是「全部展开」）。
   if (!Number.isFinite(cfg.package_detail_limit) || cfg.package_detail_limit <= 0) {
     cfg.package_detail_limit = 5;
+  }
+  if (!Number.isFinite(cfg.schedule_keepalive_refresh_before_hours)
+    || cfg.schedule_keepalive_refresh_before_hours < 0
+    || cfg.schedule_keepalive_refresh_before_hours > 24 * 365) {
+    cfg.schedule_keepalive_refresh_before_hours = DEFAULT_CONFIG.schedule_keepalive_refresh_before_hours;
+  }
+  if (!Number.isInteger(cfg.schedule_keepalive_concurrency)
+    || cfg.schedule_keepalive_concurrency < 1
+    || cfg.schedule_keepalive_concurrency > 10) {
+    cfg.schedule_keepalive_concurrency = DEFAULT_CONFIG.schedule_keepalive_concurrency;
+  }
+  if (!Number.isInteger(cfg.schedule_keepalive_time_budget_ms)
+    || cfg.schedule_keepalive_time_budget_ms < 10_000
+    || cfg.schedule_keepalive_time_budget_ms > 240_000) {
+    cfg.schedule_keepalive_time_budget_ms = DEFAULT_CONFIG.schedule_keepalive_time_budget_ms;
+  }
+  if (cfg.schedule_model_health_enabled
+    && (!Number.isFinite(cfg.schedule_model_health_minutes) || cfg.schedule_model_health_minutes <= 0)) {
+    cfg.schedule_model_health_minutes = DEFAULT_CONFIG.schedule_model_health_minutes;
+  }
+  if (!Number.isInteger(cfg.schedule_model_health_every_calls)
+    || cfg.schedule_model_health_every_calls < 0
+    || cfg.schedule_model_health_every_calls > 100_000) {
+    cfg.schedule_model_health_every_calls = DEFAULT_CONFIG.schedule_model_health_every_calls;
   }
   cache = { cfg, at: Date.now() };
   return cfg;
@@ -163,6 +201,19 @@ export async function saveConfig(raw: unknown): Promise<AppConfig> {
     }
   }
   if (next.max_rotate < 1) throw new Error("max_rotate 至少为 1");
+  if (next.schedule_keepalive_refresh_before_hours > 24 * 365) {
+    throw new Error("schedule_keepalive_refresh_before_hours 不能超过 8760");
+  }
+  if (!Number.isInteger(next.schedule_keepalive_concurrency)
+    || next.schedule_keepalive_concurrency < 1
+    || next.schedule_keepalive_concurrency > 10) {
+    throw new Error("schedule_keepalive_concurrency 必须是 1-10 的整数");
+  }
+  if (!Number.isInteger(next.schedule_keepalive_time_budget_ms)
+    || next.schedule_keepalive_time_budget_ms < 10_000
+    || next.schedule_keepalive_time_budget_ms > 240_000) {
+    throw new Error("schedule_keepalive_time_budget_ms 必须是 10000-240000 的整数");
+  }
   // 空 hours 回落默认（对齐 Go normalize：len==0 时用缺省时点）。
   for (const k of [
     "schedule_checkin_hours", "schedule_travel_hours", "schedule_activity_hours",
@@ -172,6 +223,14 @@ export async function saveConfig(raw: unknown): Promise<AppConfig> {
   }
   if (next.schedule_balance_refresh_enabled && next.schedule_balance_refresh_minutes <= 0) {
     next.schedule_balance_refresh_minutes = 5;
+  }
+  if (next.schedule_model_health_enabled && next.schedule_model_health_minutes <= 0) {
+    next.schedule_model_health_minutes = DEFAULT_CONFIG.schedule_model_health_minutes;
+  }
+  if (!Number.isInteger(next.schedule_model_health_every_calls)
+    || next.schedule_model_health_every_calls < 0
+    || next.schedule_model_health_every_calls > 100_000) {
+    throw new Error("schedule_model_health_every_calls 必须是 0-100000 的整数");
   }
   // 与 getConfig 同一归一化：保存 0/负值后内存配置也必须是 5，不能等 5s 缓存过期。
   if (!Number.isFinite(next.package_detail_limit) || next.package_detail_limit <= 0) {

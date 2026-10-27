@@ -77,7 +77,7 @@ export async function POST(req: Request) {
     let acct: Awaited<ReturnType<typeof prisma.account.findFirst>> | null = null;
     if (!provider) {
       const where = body.uid
-        ? { uid: body.uid }
+        ? { uid: body.uid, realm }
         : { realm, accessToken: { not: "" }, state: { is: { disabled: false, paused: false } } };
       acct = await prisma.account.findFirst({ where, include: { state: true } });
       if (!acct || acct.accessToken === "") return fail(503, "no available account for realm " + realm);
@@ -102,7 +102,12 @@ export async function POST(req: Request) {
         } else {
           const res = await chatStream(
             cfg, authShapeOf(acct!), probeRequestBody(bare, tier, prompt), "",
-            { conversationID: "probe-" + probeID, conversationRequestID: "probe:" + probeID, traceID: "probe:" + probeID },
+            {
+              conversationID: "probe-" + probeID,
+              cacheKeyID: "",
+              conversationRequestID: "probe:" + probeID,
+              traceID: "probe:" + probeID,
+            },
             controller.signal,
           );
           if (res.status >= 400) {

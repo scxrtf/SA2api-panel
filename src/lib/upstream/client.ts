@@ -1,7 +1,7 @@
 // 上游 HTTP 客户端（移植 internal/upstream/client.go + headers.go）。
 // 端点/请求头/信封解析与 Go 版逐字对齐；网络层用全局 fetch（AbortSignal.timeout）。
-import { createHash, randomBytes } from "crypto";
-import { getConfig, type AppConfig } from "../config";
+import { createHash, randomBytes, randomUUID } from "crypto";
+import { type AppConfig } from "../config";
 import { classify, parseRetryAfter, UpstreamError } from "./errors";
 import { idleMonitorBody } from "./idle";
 import { prepareBodyOpt, ensureConsoleSystem, globalEffortMap, realmKey } from "./payload";
@@ -26,8 +26,10 @@ const METER_PATH_V2 = "/v2/billing/meter/get-user-resource";
 const CHECKIN_PATH = "/billing/meter/daily-checkin";
 const CHECKIN_PATH_V2 = "/v2/billing/meter/daily-checkin";
 
-const DEFAULT_CLIENT_VERSION = "5.5.4";
-const DEFAULT_CLI_VERSION = "2.137.1";
+const DEFAULT_CLIENT_VERSION_CN = "5.8.3";
+const DEFAULT_CLIENT_VERSION_GLOBAL = "5.8.4";
+const DEFAULT_CLI_VERSION = "2.161.0";
+const BILLING_USER_AGENT = "axios/1.16.1";
 
 // AuthShape 账号凭证快照（DB Account 行的最小投影）。
 export interface AuthShape {
@@ -72,16 +74,11 @@ export function needsRefresh(a: AuthShape, skewSec: number): boolean {
 //   只给网关自建会话用；真实用户会话必须透传客户端声明的 conversationId。
 // - newTraceID / newSpanID：纯随机（官方 X-Trace-ID / X-B3-SpanId 与 request id 无关）。
 export function newMessageID(): string {
-  const ms = Date.now().toString(16).padStart(12, "0").slice(-12);
-  return ms + randomBytes(10).toString("hex");
+  return Date.now().toString(16).padStart(12, "0") + randomBytes(10).toString("hex");
 }
 
 export function newConversationID(): string {
-  const u = randomBytes(16);
-  u[6] = (u[6] & 0x0f) | 0x40; // version 4
-  u[8] = (u[8] & 0x3f) | 0x80; // RFC 4122 variant
-  const h = u.toString("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  return randomUUID();
 }
 
 export function newTraceID(): string {
@@ -113,13 +110,15 @@ function validTraceID(s: string): boolean {
 
 export interface ChatMeta {
   conversationID: string;
+  cacheKeyID: string;
   conversationRequestID: string;
   traceID: string;
 }
 
 // 请求头构造
-function clientVersion(cfg: AppConfig): string {
-  return cfg.client_version || DEFAULT_CLIENT_VERSION;
+function clientVersion(cfg: AppConfig, a: AuthShape): string {
+  if (cfg.client_version) return cfg.client_version;
+  return isGlobal(a) ? DEFAULT_CLIENT_VERSION_GLOBAL : DEFAULT_CLIENT_VERSION_CN;
 }
 function cliVersion(cfg: AppConfig): string {
   return cfg.cli_version || DEFAULT_CLI_VERSION;
@@ -127,8 +126,9 @@ function cliVersion(cfg: AppConfig): string {
 
 function userAgent(cfg: AppConfig, a: AuthShape): string {
   if (cfg.user_agent) return cfg.user_agent;
-  const platform = isGlobal(a) ? "WorkBuddy AI" : "WorkBuddy";
-  return `WorkBuddy/${clientVersion(cfg)} ${platform}/${clientVersion(cfg)} CLI/${cliVersion(cfg)}`;
+  const version = clientVersion(cfg, a);
+  const brand = isGlobal(a) ? "workbuddy-ai" : "WorkBuddy";
+  return `WorkBuddy/${version} ${brand}/${version} CLI/${cliVersion(cfg)}`;
 }
 
 export function commonHeaders(cfg: AppConfig, a: AuthShape): Record<string, string> {
@@ -156,18 +156,37 @@ function attributionClientName(cfg: AppConfig): string {
 
 // injectAttribution 注入用量归属头。X-Product 恒为 "SaaS"（上游 issue #51 真机纠正：
 // 官方出站 X-Product 是 SKU 段，产品名只在 X-IDE-Name/Type/Version）。
-function injectAttribution(h: Record<string, string>, cfg: AppConfig): void {
+function injectAttribution(h: Record<string, string>, cfg: AppConfig, a: AuthShape): void {
   const name = attributionClientName(cfg);
   h["X-Product"] = "SaaS";
-  if (name === "SaaS") return; // 仅声明 SKU，不补 X-IDE-*（兼容旧行为）
+  if (name === "SaaS") {
+    return;
+  }
   h["X-Agent-Purpose"] = "conversation";
   h["X-IDE-Name"] = name;
   h["X-IDE-Type"] = name;
-  h["X-IDE-Version"] = clientVersion(cfg);
+  h["X-IDE-Version"] = clientVersion(cfg, a);
 }
 
 function resolveDeviceToken(cfg: AppConfig, a: AuthShape): string {
   return a.deviceToken || cfg.device_token || "";
+}
+
+function cacheKeySource(meta: ChatMeta): string {
+  return meta.conversationID || meta.cacheKeyID;
+}
+
+// buildStableUUID 由 (uid, conversation, purpose) 稳定派生 UUID v4 形态的 36 字符值。
+// purpose 是域分隔段：同一 (账号,会话) 需要多个稳定标识（如会话 ID 与 acp-connection-id）
+// 时用它区分；purpose="" 时与旧 buildCacheKey 哈希输入逐字节一致，缓存槽零漂移。
+function buildStableUUID(uid: string, conversation: string, purpose = ""): string {
+  let input = uid + "|" + conversation;
+  if (purpose) input += "|" + purpose;
+  const bytes = Buffer.from(createHash("sha256").update(input, "utf8").digest().subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function injectConversationHeaders(h: Record<string, string>, uid: string, meta: ChatMeta): void {
@@ -175,6 +194,8 @@ function injectConversationHeaders(h: Record<string, string>, uid: string, meta:
   if (!convReqID) convReqID = newMessageID();
   const messageID = newMessageID();
   if (meta.conversationID) h["X-Conversation-ID"] = meta.conversationID;
+  else if (cacheKeySource(meta)) h["X-Conversation-ID"] = buildStableUUID(uid, cacheKeySource(meta));
+  else h["X-Conversation-ID"] = newMessageID();
   h["X-Conversation-Request-ID"] = convReqID;
   h["X-Conversation-Message-ID"] = messageID;
   h["X-Request-ID"] = messageID;
@@ -198,23 +219,32 @@ function injectConversationHeaders(h: Record<string, string>, uid: string, meta:
   h["traceparent"] = `00-${b3Trace}-${spanID}-01`;
   // acp-connection-id：官方与 X-Conversation-ID 同批设置（会话注册表 acpConnectionId，
   // 每 session 一次、同会话稳定、与会话 ID 不同值）。按「同 (账号,会话) 稳定」派生。
-  const src = meta.conversationID || meta.conversationRequestID;
-  h["acp-connection-id"] = src ? buildStableUUID(uid, src, "acp") : newConversationID();
+  h["acp-connection-id"] = cacheKeySource(meta)
+    ? buildStableUUID(uid, cacheKeySource(meta), "acp")
+    : newConversationID();
 }
 
-// 官方 chat 出站的 SDK 指纹头（国际版 5.8.4 / 国内版 5.8.3 实测一致）：
-// openai-node SDK 的 x-stainless-* + 业务语义 x-agent-*。客户端版本变化时需跟随更新。
-const SDK_HEADERS: Record<string, string> = {
-  "X-Agent-Type": "main",
-  "X-Agent-Intent": "craft",
-  "X-Stainless-Lang": "js",
-  "X-Stainless-Package-Version": "6.25.0",
-  "X-Stainless-OS": "Windows",
-  "X-Stainless-Arch": "x64",
-  "X-Stainless-Runtime": "node",
-  "X-Stainless-Runtime-Version": "v22.21.1",
-  "X-Stainless-Retry-Count": "0",
-};
+function injectClientSDKHeaders(h: Record<string, string>): void {
+  h["X-Agent-Type"] = "main";
+  h["X-Agent-Intent"] = "craft";
+  h["X-Stainless-Lang"] = "js";
+  h["X-Stainless-Package-Version"] = "6.25.0";
+  h["X-Stainless-OS"] = "Windows";
+  h["X-Stainless-Arch"] = "x64";
+  h["X-Stainless-Runtime"] = "node";
+  h["X-Stainless-Runtime-Version"] = "v22.21.1";
+  h["X-Stainless-Retry-Count"] = "0";
+}
+
+function injectIdentityHeaders(h: Record<string, string>, a: AuthShape): void {
+  // issue #51：个人号即使 token 带 token_source（如 login.sh 设备流的 enterprise_switch）
+  // 也不发 X-Auth-Method / X-Userinfo——两版真机个人号都不带这两个头；判定只看 enterpriseId。
+  if (!a.uid || !a.enterpriseId) return;
+  h["X-Userinfo"] = Buffer.from(
+    JSON.stringify({ uin: a.uid, owner_uin: a.enterpriseId }),
+    "utf8",
+  ).toString("base64");
+}
 
 export function chatHeaders(
   cfg: AppConfig,
@@ -247,7 +277,9 @@ export function chatHeaders(
     // global 个人账号：只声明国际版域（官方个人号同样不发 X-No-Enterprise-Id）。
     h["X-Domain"] = "www.workbuddy.ai";
   }
-  injectAttribution(h, cfg);
+  injectAttribution(h, cfg, a);
+  h["X-Private-Data"] = "true";
+  injectIdentityHeaders(h, a);
   if (cfg.passthrough_ip && clientIP) {
     h["X-Forwarded-For"] = clientIP;
     h["X-Real-IP"] = clientIP;
@@ -257,7 +289,7 @@ export function chatHeaders(
   if (dt) h["X-Device-Token"] = dt;
   injectConversationHeaders(h, a.uid, meta);
   // SDK / agent 段指纹头（x-stainless-* / x-agent-type / x-agent-intent），仅 chat 路径。
-  Object.assign(h, SDK_HEADERS);
+  injectClientSDKHeaders(h);
   return h;
 }
 
@@ -270,7 +302,7 @@ export function billingHeaders(cfg: AppConfig, a: AuthShape): Record<string, str
     "Accept-Language": acceptLanguage(a),
   };
   if (cfg.user_agent) h["User-Agent"] = cfg.user_agent;
-  else if (attributionClientName(cfg) !== "SaaS") h["User-Agent"] = `WorkBuddy/${clientVersion(cfg)}`;
+  else if (attributionClientName(cfg) !== "SaaS") h["User-Agent"] = BILLING_USER_AGENT;
   if (a.uid) h["X-User-Id"] = a.uid;
   if (a.enterpriseId) {
     h["X-Enterprise-Id"] = a.enterpriseId;
@@ -396,20 +428,6 @@ function buildCacheKey(uid: string, conversation: string): string {
   return buildStableUUID(uid, conversation, "");
 }
 
-// buildStableUUID 由 (uid, conversation, purpose) 稳定派生 UUID v4 形态的 36 字符值。
-// purpose 是域分隔段：同一 (账号,会话) 需要多个稳定标识（如会话 ID 与 acp-connection-id）
-// 时用它区分；purpose="" 时与旧 buildCacheKey 哈希输入逐字节一致，缓存槽零漂移。
-function buildStableUUID(uid: string, conversation: string, purpose: string): string {
-  let input = uid + "|" + conversation;
-  if (purpose) input += "|" + purpose;
-  const sum = createHash("sha256").update(input, "utf8").digest();
-  const u = Buffer.from(sum.subarray(0, 16));
-  u[6] = (u[6] & 0x0f) | 0x40;
-  u[8] = (u[8] & 0x3f) | 0x80;
-  const h = u.toString("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-}
-
 // injectPromptCacheKey 在已改写的出站 body 上注入 prompt_cache_key（P0 费用优化，
 // 对齐 Go InjectPromptCacheKey）。优先级：
 //   1. body 已带 prompt_cache_key → 原值保留（客户端自知复用哪个键）
@@ -456,36 +474,35 @@ export function prepareBody(body: string, realm: string, uid: string, conversati
 // 边界（不伪造）：
 //   - 只给「当前轮」的最后一条 user 消息写；历史轮次 ID 客户端没给，网关无从得知；
 //   - 客户端自带该字段时原值优先；空 ID / 坏 body 原样返回。
-export function injectConversationFields(body: string, convReqID: string): string {
-  if (!body || !convReqID) return body;
+export function injectConversationFields(body: string, conversationRequestID: string): string {
+  if (!body || !conversationRequestID) return body;
   let obj: Record<string, unknown>;
   try {
     obj = JSON.parse(body);
   } catch {
     return body;
   }
-  const msgs = obj["messages"];
-  if (!Array.isArray(msgs) || msgs.length === 0) return body;
-  let idx = -1;
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i];
-    if (!m || typeof m !== "object") continue;
-    const role = (m as Record<string, unknown>)["role"];
-    if (typeof role === "string" && role.toLowerCase() === "user") {
-      idx = i;
+  const messages = obj.messages;
+  if (!Array.isArray(messages) || messages.length === 0) return body;
+  let index = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (!message || typeof message !== "object" || Array.isArray(message)) continue;
+    if (String((message as Record<string, unknown>).role).toLowerCase() === "user") {
+      index = i;
       break;
     }
   }
-  if (idx < 0) return body;
-  const cur = msgs[idx] as Record<string, unknown>;
-  if (typeof cur["conversationRequestId"] === "string" && cur["conversationRequestId"] !== "") {
-    return body; // 客户端原值优先
+  if (index < 0) return body;
+  const current = messages[index] as Record<string, unknown>;
+  if (typeof current.conversationRequestId === "string" && current.conversationRequestId !== "") {
+    return body;
   }
-  cur["conversationRequestId"] = convReqID;
-  cur["startsNewUserRequest"] = true;
-  if (typeof cur["agent"] !== "string" || cur["agent"] === "") cur["agent"] = "cli";
-  msgs[idx] = cur;
-  obj["messages"] = msgs;
+  current.conversationRequestId = conversationRequestID;
+  current.startsNewUserRequest = true;
+  if (typeof current.agent !== "string" || current.agent === "") current.agent = "cli";
+  messages[index] = current;
+  obj.messages = messages;
   try {
     return JSON.stringify(obj);
   } catch {
@@ -496,6 +513,7 @@ export function injectConversationFields(body: string, convReqID: string): strin
 export interface ChatStreamResult {
   ok: boolean;
   status: number;
+  preparedBody: string;
   body?: ReadableStream<Uint8Array>; // 成功时的 SSE 流
   respBody?: string; // 失败时的原文
   error?: UpstreamError;
@@ -509,13 +527,14 @@ export async function chatStream(
   clientIP: string,
   meta: ChatMeta,
   signal?: AbortSignal,
+  extraHeaders?: Record<string, string>,
 ): Promise<ChatStreamResult> {
   // 轮级 ID 在头与体之间必须同值（头体一致，issue #51）：入站未给时在这里生成一次，
   // 头部注入与 body 注入共用。
   const convReqID = meta.conversationRequestID || newMessageID();
   const m: ChatMeta = { ...meta, conversationRequestID: convReqID };
   const prepared = injectConversationFields(
-    prepareBody(body, a.realm, a.uid, m.conversationID),
+    prepareBody(body, a.realm, a.uid, cacheKeySource(m)),
     convReqID,
   );
   // 首字节（响应头）超时：对齐 Go chat 会话的 transport.ResponseHeaderTimeout
@@ -527,11 +546,13 @@ export async function chatStream(
     ? setTimeout(() => headerCtrl.abort(new DOMException("upstream header timeout", "TimeoutError")), headerMs)
     : null;
   const sig = signal ? AbortSignal.any([signal, headerCtrl.signal]) : headerCtrl.signal;
+  const headers = chatHeaders(cfg, a, clientIP, m);
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   let resp: Response;
   try {
     resp = await fetch(chatBase(a) + CHAT_PATH, {
       method: "POST",
-      headers: chatHeaders(cfg, a, clientIP, m),
+      headers,
       body: prepared,
       signal: sig,
     });
@@ -542,19 +563,25 @@ export async function chatStream(
     const raw = await resp.text();
     const kind = classify(resp.status, raw);
     if (kind === "none") {
-      return { ok: false, status: resp.status, respBody: raw };
+      return { ok: false, status: resp.status, preparedBody: prepared, respBody: raw };
     }
     return {
       ok: false,
       status: resp.status,
+      preparedBody: prepared,
       respBody: raw,
       error: new UpstreamError(kind, resp.status, truncate(raw, 200), parseRetryAfter(resp.headers)),
     };
   }
-  if (!resp.body) return { ok: false, status: resp.status, respBody: "empty body" };
+  if (!resp.body) return { ok: false, status: resp.status, preparedBody: prepared, respBody: "empty body" };
   // 空闲看门狗（对齐 Go client.go:1079 monitorBody）：静默超 stream_idle_ms 掐流，
   // 防止僵死 SSE 连接占住账号租约；0=禁用。首字节前由 fetch 超时管，这里只管流中。
-  return { ok: true, status: resp.status, body: idleMonitorBody(resp.body, cfg.stream_idle_ms) };
+  return {
+    ok: true,
+    status: resp.status,
+    preparedBody: prepared,
+    body: idleMonitorBody(resp.body, cfg.stream_idle_ms),
+  };
 }
 
 // billing 域

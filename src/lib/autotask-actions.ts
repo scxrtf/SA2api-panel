@@ -3,7 +3,13 @@
 // 通用约定：返回 string 为业务结果（含「跳过/稍后重试」语义），throw 为系统错误。
 import type { AppConfig } from "./config";
 import type { AuthShape } from "./upstream/client";
-import { chatStream, truncate, newConversationID, newMessageID, type ChatMeta } from "./upstream/client";
+import {
+  chatStream,
+  newConversationID,
+  newMessageID,
+  truncate,
+  type ChatMeta,
+} from "./upstream/client";
 import {
   acceptTasks, acceptTasksMP, claimReward, claimRewardMP, listTasks, listTasksMP,
   buddyAgreement, buddyFirst,
@@ -58,7 +64,7 @@ export async function runChat5(cfg: AppConfig, a: AuthShape): Promise<string> {
   for (let i = 0; i < need; i++) {
     const cid = newConversationID();
     try {
-      await reportChatActivity(cfg, a, cid, "");
+      await reportChatActivity(cfg, a, cid, newMessageID());
     } catch (e) {
       return "上报第 " + (i + 1) + "/" + need + " 条失败: " + (e instanceof Error ? e.message : String(e));
     }
@@ -70,7 +76,7 @@ export async function runChat5(cfg: AppConfig, a: AuthShape): Promise<string> {
 // runFirstBuddy 领养：report（解锁前置）→ agreement → first。
 export async function runFirstBuddy(cfg: AppConfig, a: AuthShape): Promise<string> {
   try {
-    await reportChatActivity(cfg, a, newConversationID(), "");
+    await reportChatActivity(cfg, a, newConversationID(), newMessageID());
   } catch (e) {
     throw new Error("前置上报: " + (e instanceof Error ? e.message : String(e)));
   }
@@ -105,7 +111,9 @@ export async function runModelChat(cfg: AppConfig, a: AuthShape): Promise<string
     messages: [{ role: "user", content: "hi，请回复一句话" }],
     stream: true,
   });
-  const meta: ChatMeta = { conversationID: "", conversationRequestID: "", traceID: "" };
+  const meta: ChatMeta = {
+    conversationID: "", cacheKeyID: "", conversationRequestID: "", traceID: "",
+  };
   const r = await chatStream(cfg, a, body, "", meta);
   if (r.status >= 400) {
     throw new Error("对话失败 http=" + r.status + ": " + truncate(r.respBody ?? "", 160));
@@ -123,7 +131,9 @@ export async function runModelChat(cfg: AppConfig, a: AuthShape): Promise<string
   }
   await sleep(reportGapMs);
   try {
-    await reportChatActivityModel(cfg, a, newConversationID(), "", modelID, modelName);
+    await reportChatActivityModel(
+      cfg, a, newConversationID(), newMessageID(), modelID, modelName,
+    );
   } catch (e) {
     return "对话已完成，但进度上报失败：" + (e instanceof Error ? e.message : String(e));
   }
@@ -150,7 +160,7 @@ export async function runBuddyApp(cfg: AppConfig, a: AuthShape): Promise<string>
 
 // runAutomationCreate automation_1：定时任务创建成功事件。
 export async function runAutomationCreate(cfg: AppConfig, a: AuthShape): Promise<string> {
-  await reportDesktopEvent(cfg, a, [desktopAutomationCreateEvent("自动化")]);
+  await reportDesktopEvent(cfg, a, [desktopAutomationCreateEvent("工作助手自动化")]);
   return "已上报定时任务创建事件";
 }
 
@@ -168,7 +178,9 @@ export async function runTemplateUse(cfg: AppConfig, a: AuthShape): Promise<stri
   ];
   for (let i = 0; i < templates.length; i++) {
     const [id, name] = templates[i];
-    const events = desktopTemplateUseSequence(newConversationID(), newMessageID(), id, name);
+    const events = desktopTemplateUseSequence(
+      newConversationID(), newMessageID(), id, name,
+    );
     try {
       await reportDesktopEvent(cfg, a, events);
     } catch (e) {
@@ -339,7 +351,9 @@ async function runNightChats(cfg: AppConfig, a: AuthShape, need: number): Promis
       messages: [{ role: "user", content: "1+1等于几？直接回答。" }],
       stream: true,
     });
-    const meta: ChatMeta = { conversationID: "", conversationRequestID: "", traceID: "" };
+    const meta: ChatMeta = {
+      conversationID: "", cacheKeyID: "", conversationRequestID: "", traceID: "",
+    };
     let r;
     try {
       r = await chatStream(cfg, a, body, "", meta);
@@ -360,7 +374,9 @@ async function runNightChats(cfg: AppConfig, a: AuthShape, need: number): Promis
       }
     }
     try {
-      await reportChatActivityModel(cfg, a, newConversationID(), "", "glm-5.2", "GLM-5.2");
+      await reportChatActivityModel(
+        cfg, a, newConversationID(), newMessageID(), "glm-5.2", "GLM-5.2",
+      );
     } catch (e) {
       return { ok, err: "第 " + (i + 1) + " 次上报失败: " + (e instanceof Error ? e.message : String(e)) };
     }
@@ -515,7 +531,7 @@ async function runSequentialEventTask(
 // runSequentialAutomation Tasks_4「创建定时任务」：PC 同源 automation 事件。
 export function runSequentialAutomation(cfg: AppConfig, a: AuthShape): Promise<string> {
   return runSequentialEventTask(cfg, a, "Sequential_Tasks_4", async () => {
-    await reportDesktopEvent(cfg, a, [desktopAutomationCreateEvent("自动化")]);
+    await reportDesktopEvent(cfg, a, [desktopAutomationCreateEvent("工作助手自动化")]);
   }, null);
 }
 
@@ -528,7 +544,9 @@ export function runSequentialModelChat(cfg: AppConfig, a: AuthShape): Promise<st
       await reportMPEvent(cfg, a, [miniChatModelEvent(conv, "glm-5.2", "GLM-5.2")]);
     },
     async () => {
-      await reportChatActivityModel(cfg, a, newConversationID(), "", "glm-5.2", "GLM-5.2");
+      await reportChatActivityModel(
+        cfg, a, newConversationID(), newMessageID(), "glm-5.2", "GLM-5.2",
+      );
     },
   );
 }

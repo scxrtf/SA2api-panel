@@ -397,6 +397,7 @@ async function probeModel(
       "",
       {
         conversationID: "modelscan-" + randomUUID(),
+        cacheKeyID: "",
         conversationRequestID: "modelscan:" + randomUUID(),
         traceID: "modelscan:" + randomUUID(),
       },
