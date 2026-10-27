@@ -6,6 +6,7 @@ import { idleMonitorBody } from "./upstream/idle";
 import { providerEndpoint } from "./provider-endpoint";
 import { ProviderObservation, observeProviderStream } from "./provider-observation";
 import { runlog } from "./runlog";
+import { clipLogText } from "./logfmt";
 
 interface ProviderRequestContext {
   started: number;
@@ -29,9 +30,11 @@ export async function providerChat(
   const stats = new ProviderObservation(started);
   let attempts = 0;
   let recorded = false;
-  const finish = async (status: number): Promise<void> => {
+  // errMsg 为失败请求的报错内容（供应商回包正文，已 clip）；成功路径留空。
+  const finish = async (status: number, errMsg = ""): Promise<void> => {
     if (recorded) return;
     recorded = true;
+    const errText = errMsg ? clipLogText(errMsg, 1000) : "";
     const durationMs = Math.max(1, Date.now() - started);
     const ok = status < 400 && !stats.errKind;
     const common = {
@@ -40,11 +43,13 @@ export async function providerChat(
       totalTokens: stats.totalTokens, cacheHitTok: stats.cacheHitTok,
       cacheMissTok: stats.cacheMissTok, errKind: stats.errKind,
     };
-    runlog(`chat ${ok ? "OK" : "ERR"} ${status} ${logModel} provider=${name} ${durationMs}ms`);
+    runlog(`chat ${ok ? "OK" : "ERR"} ${status} ${logModel} provider=${name} ${durationMs}ms`
+      + (errText ? " err=" + clipLogText(errText, 180) : ""));
     // 单 key 供应商用名字标识槽位；不伪造池 UID/机器码/积分。
     // 两表独立写入：一表失败不能阻止另一表；只记录错误码，不泄露凭据。
     const tasks: Promise<unknown>[] = [Promise.resolve().then(() => prisma.requestLog.create({ data: {
       ...common, uid: "", slot: attempts ? name : "", machineId: "",
+      errMsg: errText,
       status, stream, durationMs, attempts, ttfbMs: stream ? stats.ttfbMs : 0,
       clientIp: context?.clientIP ?? "", ua: context?.ua ?? "",
       path: context?.path ?? "/v1/chat/completions",
@@ -55,14 +60,16 @@ export async function providerChat(
     const results = await Promise.allSettled(tasks);
     for (const result of results) {
       if (result.status === "rejected") {
-        const code = typeof result.reason?.code === "string" ? result.reason.code : "unknown";
+        const code = typeof result.reason?.code === "string"
+          ? result.reason.code
+          : result.reason instanceof Error ? result.reason.name : "write_failed";
         runlog(`WARN: provider audit write failed (${code}); check database migrations`);
       }
     }
   };
   const fail = async (status: number, kind: string, message: string): Promise<Response> => {
     stats.errKind = kind;
-    await finish(status);
+    await finish(status, message);
     return openAIError(status, kind, message);
   };
 
@@ -120,7 +127,7 @@ export async function providerChat(
   if (!resp.ok) stats.errKind = "provider_http_error";
   try { stats.json(JSON.parse(raw)); } catch { /* 保留非 JSON 响应。 */ }
   if (stream && resp.ok && !stats.errKind) stats.errKind = "provider_expected_sse";
-  await finish(resp.status);
+  await finish(resp.status, resp.ok ? "" : raw);
   return new Response([204, 205, 304].includes(resp.status) ? null : raw, {
     status: resp.status,
     headers: { "Content-Type": contentType },

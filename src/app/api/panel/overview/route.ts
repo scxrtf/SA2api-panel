@@ -35,6 +35,9 @@ export async function GET(req: Request) {
     ...c,
     accounts,
     model_locks: modelLocks,
+    // model_fallback 降级路由表（上游 f1eca4a）：面板据此把「限流中」标注成
+    // 「已路由至等价模型」——否则运维只看到限流，会误判为服务不可用。
+    model_fallback: cfg.model_fallback ?? {},
     gateway: { enabled: providerCount > 0, providers: providerCount, keys: keyCount },
   });
 }

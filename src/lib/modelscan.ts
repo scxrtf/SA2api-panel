@@ -326,6 +326,7 @@ function codeOf(r: ProbeResult): { code: string; label: string } {
   switch (r.kind) {
     case "hard_credit": return { code: "402", label: "积分耗尽" };
     case "session_dead": return { code: "12153", label: "会话失效" };
+    case "auth_expired": return { code: "401", label: "401 token 失效" };
     case "account_fault": return { code: "fault", label: "账号级故障" };
     case "waf_block": return { code: "waf", label: "WAF 拦截" };
     case "timeout": return { code: "timeout", label: "请求超时" };
@@ -348,6 +349,7 @@ function stopAccount(r: ProbeResult): boolean {
   return (
     r.kind === "hard_credit" ||
     r.kind === "session_dead" ||
+    r.kind === "auth_expired" ||
     r.kind === "account_fault" ||
     r.kind === "waf_block"
   );
@@ -361,6 +363,7 @@ async function applyOutcome(cfg: AppConfig, uid: string, model: string, r: Probe
     case "hard_credit":
     case "model_blocked":
     case "session_dead":
+    case "auth_expired":
     case "account_fault":
     case "waf_block":
       await pool.applyErrorKind(cfg, uid, r.kind, r.body || r.kind, model, r.retryAfterMs);

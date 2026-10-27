@@ -165,7 +165,8 @@ function canonicalUsageModel(model: string): string {
   for (const p of ["cn:", "global:"]) {
     if (m.startsWith(p)) { m = m.slice(p.length); break; }
   }
-  return m || "(unknown)";
+  // 旧记录可能缺模型名：统一用中文占位，避免面板出现 "(unknown)"。
+  return m || "（未知模型）";
 }
 
 // providerNameFromRealm 提取 "provider:名字" 的供应商名；非供应商桶返回空。
@@ -251,7 +252,7 @@ export async function GET(req: Request) {
     if (!acctAgg.has(e.uid)) acctAgg.set(e.uid, new AggAcc());
     acctAgg.get(e.uid)!.add(e);
     if (!acctRealm.has(e.uid)) acctRealm.set(e.uid, realm);
-    const model = e.model || "(unknown)";
+    const model = e.model || "（未知模型）";
     if (!modelAgg.has(model)) modelAgg.set(model, new AggAcc());
     modelAgg.get(model)!.add(e);
     // 按 key 维度：旧记录 keyName 为空 = 上线前未归属，归入 "(未知)"。

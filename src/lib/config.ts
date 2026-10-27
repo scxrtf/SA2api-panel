@@ -28,6 +28,9 @@ export interface AppConfig {
   prompt_text: string;
   header_timeout_ms: number; // 上游响应头超时
   stream_idle_ms: number; // 流空闲看门狗（0=关）
+  // model_fallback 模型降级路由表（对齐上游 pool.model_fallback）：key = 请求模型
+  // （裸名或带域前缀），value = 6004 模型级限流时同账号改用的等价模型。空 = 不降级。
+  model_fallback: Record<string, string>;
   // ─── schedule（对齐 Go config.schedule，扁平化进顶层）────────────────────
   // 时点均为 Asia/Shanghai 本地整点小时（0-23）。
   schedule_checkin_hours: number[]; // 默认 [9,21]
@@ -82,6 +85,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   prompt_text: "",
   header_timeout_ms: 120_000, // 对齐 Go upstream.header_timeout_seconds 缺省 120s
   stream_idle_ms: 120_000,
+  model_fallback: {},
   schedule_checkin_hours: [9, 21],
   schedule_travel_hours: [9, 21],
   schedule_activity_hours: [10],

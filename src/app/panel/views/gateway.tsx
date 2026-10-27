@@ -53,8 +53,8 @@ function KeysBox({ flash }: { flash: Flash }) {
   const openAuth = (k: KeyRow) => {
     setAuthEditor({
       name: k.name,
-      // 只有显式 "*" 才预勾「全部供应商」；空绑定保持未勾选状态，
-      // 直接保存仍是空绑定（不限制），不会被改写为 "*"。
+      // 只有显式 "*" 才预勾「全部供应商」；空授权保持未勾选状态，
+      // 直接保存仍是空授权（不授权任何供应商），不会被改写为 "*"。
       all: k.providers.includes("*"),
       picked: k.providers.filter((p) => p !== "*"),
       password: "",
@@ -89,13 +89,13 @@ function KeysBox({ flash }: { flash: Flash }) {
       ? "全部供应商"
       : k.providers.length > 0
         ? k.providers.join(", ")
-        : "未绑定（全部供应商）";
+        : "未授权（无供应商）";
 
   return (
-    <Box title="网关密钥环" hint="可调用 /api/v1/* 的子密钥；绑定供应商后仅可调用已勾选项，留空 = 不限制">
+    <Box title="网关密钥环" hint="可调用 /api/v1/* 的子密钥；新建默认无供应商授权，勾选后仅可调用已授权供应商（池通道不受限）">
       <div className="pad">
         {created && (
-          <div className="msg ok">新密钥 {created.name}：<span className="mono">{created.key}</span>（仅显示一次，请立即保存）</div>
+          <div className="msg ok">新密钥 {created.name}：<span className="mono">{created.key}</span>（仅显示一次，请立即保存；默认无供应商授权，如需调用聚合供应商请在下方「授权」中勾选）</div>
         )}
         <div className="btn-row" style={{ marginBottom: 12 }}>
           <input className="input" style={{ width: 220 }} placeholder="密钥名称"
@@ -132,7 +132,7 @@ function KeysBox({ flash }: { flash: Flash }) {
               全部供应商
             </label>
             {!authEditor.all && (
-              <span className="dim">不勾选 = 未绑定（不限制）</span>
+              <span className="dim">不勾选 = 不授权任何供应商（该 key 将无法调用聚合供应商）</span>
             )}
             {!authEditor.all && providers.length === 0 && (
               <span className="dim">暂无可授权供应商，请先在下方添加</span>

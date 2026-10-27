@@ -64,9 +64,32 @@ export function needsRefresh(a: AuthShape, skewSec: number): boolean {
   return Date.now() / 1000 + skewSec >= a.expiresAt;
 }
 
-// 会话头族 ID
+// 会话头族 ID（形态对齐上游 issue #51 真机取证，见上游 internal/session/ids.go）：
+// - newMessageID：32 hex，前 12 hex 为毫秒时间戳（官方 X-Request-ID /
+//   X-Conversation-Message-ID 前 48 bit 是毫秒时间、同会话严格单调；纯随机构成
+//   可聚类批次特征）。
+// - newConversationID：UUID v4 带横线 36 字符（官方 X-Conversation-ID 形态），
+//   只给网关自建会话用；真实用户会话必须透传客户端声明的 conversationId。
+// - newTraceID / newSpanID：纯随机（官方 X-Trace-ID / X-B3-SpanId 与 request id 无关）。
 export function newMessageID(): string {
+  const ms = Date.now().toString(16).padStart(12, "0").slice(-12);
+  return ms + randomBytes(10).toString("hex");
+}
+
+export function newConversationID(): string {
+  const u = randomBytes(16);
+  u[6] = (u[6] & 0x0f) | 0x40; // version 4
+  u[8] = (u[8] & 0x3f) | 0x80; // RFC 4122 variant
+  const h = u.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+export function newTraceID(): string {
   return randomBytes(16).toString("hex");
+}
+
+export function newSpanID(): string {
+  return randomBytes(8).toString("hex");
 }
 
 // 进程启动随机盐：派生 ID 无法按外部可控键内容预计算；重启换新。
@@ -131,24 +154,23 @@ function attributionClientName(cfg: AppConfig): string {
   return cfg.client_name || "WorkBuddy";
 }
 
+// injectAttribution 注入用量归属头。X-Product 恒为 "SaaS"（上游 issue #51 真机纠正：
+// 官方出站 X-Product 是 SKU 段，产品名只在 X-IDE-Name/Type/Version）。
 function injectAttribution(h: Record<string, string>, cfg: AppConfig): void {
   const name = attributionClientName(cfg);
-  if (name === "SaaS") {
-    h["X-Product"] = "SaaS";
-    return;
-  }
+  h["X-Product"] = "SaaS";
+  if (name === "SaaS") return; // 仅声明 SKU，不补 X-IDE-*（兼容旧行为）
   h["X-Agent-Purpose"] = "conversation";
   h["X-IDE-Name"] = name;
   h["X-IDE-Type"] = name;
   h["X-IDE-Version"] = clientVersion(cfg);
-  h["X-Product"] = name;
 }
 
 function resolveDeviceToken(cfg: AppConfig, a: AuthShape): string {
   return a.deviceToken || cfg.device_token || "";
 }
 
-function injectConversationHeaders(h: Record<string, string>, meta: ChatMeta): void {
+function injectConversationHeaders(h: Record<string, string>, uid: string, meta: ChatMeta): void {
   let convReqID = meta.conversationRequestID;
   if (!convReqID) convReqID = newMessageID();
   const messageID = newMessageID();
@@ -157,12 +179,42 @@ function injectConversationHeaders(h: Record<string, string>, meta: ChatMeta): v
   h["X-Conversation-Message-ID"] = messageID;
   h["X-Request-ID"] = messageID;
   h["X-Root-Request-ID"] = convReqID;
-  h["X-Trace-ID"] = meta.traceID || convReqID;
-  const b3Trace = validTraceID(convReqID) ? convReqID : messageID;
+  // X-Trace-ID 与 request id 互不回落（上游 issue #51 真机实测两族恒不相等）；
+  // 入站透传值优先，否则独立随机。
+  const traceID = meta.traceID || newTraceID();
+  h["X-Trace-ID"] = traceID;
+  // B3 跟随 trace（官方 X-B3-TraceId == X-Trace-ID）；透传值非法时回落恒 32 hex 的消息级 ID。
+  const b3Trace = validTraceID(traceID) ? traceID : messageID;
   h["X-B3-TraceId"] = b3Trace;
-  h["X-B3-SpanId"] = messageID.slice(0, 16);
+  // SpanId / ParentSpanId 独立随机（官方 span 与 trace/request 均无关系；
+  // 不能切片 messageID——那会带出 12 hex 时间前缀）。
+  const spanID = newSpanID();
+  const parentSpanID = newSpanID();
+  h["X-B3-SpanId"] = spanID;
+  h["X-B3-ParentSpanId"] = parentSpanID;
   h["X-B3-Sampled"] = "1";
+  // B3 单头与 W3C traceparent：官方两版都双发，客户端从不只发 X-B3-* 三件套。
+  h["b3"] = `${b3Trace}-${spanID}-1-${parentSpanID}`;
+  h["traceparent"] = `00-${b3Trace}-${spanID}-01`;
+  // acp-connection-id：官方与 X-Conversation-ID 同批设置（会话注册表 acpConnectionId，
+  // 每 session 一次、同会话稳定、与会话 ID 不同值）。按「同 (账号,会话) 稳定」派生。
+  const src = meta.conversationID || meta.conversationRequestID;
+  h["acp-connection-id"] = src ? buildStableUUID(uid, src, "acp") : newConversationID();
 }
+
+// 官方 chat 出站的 SDK 指纹头（国际版 5.8.4 / 国内版 5.8.3 实测一致）：
+// openai-node SDK 的 x-stainless-* + 业务语义 x-agent-*。客户端版本变化时需跟随更新。
+const SDK_HEADERS: Record<string, string> = {
+  "X-Agent-Type": "main",
+  "X-Agent-Intent": "craft",
+  "X-Stainless-Lang": "js",
+  "X-Stainless-Package-Version": "6.25.0",
+  "X-Stainless-OS": "Windows",
+  "X-Stainless-Arch": "x64",
+  "X-Stainless-Runtime": "node",
+  "X-Stainless-Runtime-Version": "v22.21.1",
+  "X-Stainless-Retry-Count": "0",
+};
 
 export function chatHeaders(
   cfg: AppConfig,
@@ -171,19 +223,28 @@ export function chatHeaders(
   meta: ChatMeta,
 ): Record<string, string> {
   const h = commonHeaders(cfg, a);
-  h["Accept"] = "application/json, text/event-stream";
+  // chat 出站头剥离（上游 issue #51 两版真机逐头对照）：Origin/Referer/Accept-Language
+  // 是浏览器语义头，桌面端 chat 从不发；X-Machine-ID/X-Session-ID 是网关自造派生值。
+  // 保留在 commonHeaders 里是为了不动 billing/checkin 等域（那层没有真机对照证据）。
+  delete h["Origin"];
+  delete h["Referer"];
+  delete h["Accept-Language"];
+  delete h["X-Machine-ID"];
+  delete h["X-Session-ID"];
+  // Accept 与官方 chat 完全一致：只发 application/json（SSE 照常返回）。
+  // Accept-Encoding 刻意不设：显式设置会关闭 fetch 的透明解压，收到 br 时无解码器。
+  h["Accept"] = "application/json";
   if (a.accessToken) h["Authorization"] = "Bearer " + a.accessToken;
   else h["X-No-Authorization"] = "1";
   if (a.uid) h["X-User-Id"] = a.uid;
   else h["X-No-User-Id"] = "1";
+  // 企业/域头只发有值的：桌面端个人号实测两个方向都不发 X-No-* 哨兵头
+  // （那是 CodeBuddy CLI 的约定，不是 WorkBuddy 桌面端形态）。
   if (!isGlobal(a)) {
     if (a.enterpriseId) h["X-Enterprise-Id"] = a.enterpriseId;
-    else h["X-No-Enterprise-Id"] = "1";
     if (a.domain) h["X-Domain"] = a.domain;
-    else h["X-No-Department-Info"] = "1";
   } else {
-    // global 个人账号：显式声明无企业 + 国际版域（对齐 intl 客户端）。
-    h["X-No-Enterprise-Id"] = "1";
+    // global 个人账号：只声明国际版域（官方个人号同样不发 X-No-Enterprise-Id）。
     h["X-Domain"] = "www.workbuddy.ai";
   }
   injectAttribution(h, cfg);
@@ -194,7 +255,9 @@ export function chatHeaders(
   }
   const dt = resolveDeviceToken(cfg, a);
   if (dt) h["X-Device-Token"] = dt;
-  injectConversationHeaders(h, meta);
+  injectConversationHeaders(h, a.uid, meta);
+  // SDK / agent 段指纹头（x-stainless-* / x-agent-type / x-agent-intent），仅 chat 路径。
+  Object.assign(h, SDK_HEADERS);
   return h;
 }
 
@@ -325,13 +388,26 @@ function sanitizeFingerprints(): boolean {
   return process.env.WB2A_SANITIZE_FINGERPRINTS !== "false";
 }
 
-// buildCacheKey 生成 `wb2a-<uid8>-<convHex>` 格式的稳定 cache key（对齐 Go buildCacheKey）：
-// uid8 账号隔离段（跨账号绝不碰撞）；convHex = sha256(uid|conversation) 前 16 字节 hex。
+// buildCacheKey 生成与官方客户端同形的会话标识：UUID v4 形态的 36 字符
+// （上游 issue #51：旧 `wb2a-<uid8>-<convHex>` 自带项目缩写且把 uid 前 8 位明文写进
+// X-Conversation-ID 与 prompt_cache_key，三处都可与官方值区分）。
+// 语义不变：uid 仍参与哈希输入 → 跨账号绝不碰撞；同 (uid, conversation) 恒得同值。
 function buildCacheKey(uid: string, conversation: string): string {
-  let uid8 = uid.length > 8 ? uid.slice(0, 8) : uid;
-  if (uid8 === "") uid8 = "-";
-  const convHex = createHash("sha256").update(uid + "|" + conversation, "utf8").digest("hex").slice(0, 32);
-  return `wb2a-${uid8}-${convHex}`;
+  return buildStableUUID(uid, conversation, "");
+}
+
+// buildStableUUID 由 (uid, conversation, purpose) 稳定派生 UUID v4 形态的 36 字符值。
+// purpose 是域分隔段：同一 (账号,会话) 需要多个稳定标识（如会话 ID 与 acp-connection-id）
+// 时用它区分；purpose="" 时与旧 buildCacheKey 哈希输入逐字节一致，缓存槽零漂移。
+function buildStableUUID(uid: string, conversation: string, purpose: string): string {
+  let input = uid + "|" + conversation;
+  if (purpose) input += "|" + purpose;
+  const sum = createHash("sha256").update(input, "utf8").digest();
+  const u = Buffer.from(sum.subarray(0, 16));
+  u[6] = (u[6] & 0x0f) | 0x40;
+  u[8] = (u[8] & 0x3f) | 0x80;
+  const h = u.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 // injectPromptCacheKey 在已改写的出站 body 上注入 prompt_cache_key（P0 费用优化，
@@ -374,6 +450,49 @@ export function prepareBody(body: string, realm: string, uid: string, conversati
   return out;
 }
 
+// injectConversationFields 在已改写的出站 body 上补会话轮级字段（上游 issue #51 body 侧，
+// 移植 conv_fields.go）：官方桌面端把「这一轮属于哪个 request-id」同时写在头和体里
+// （messages[i].conversationRequestId == 出站头 X-Conversation-Request-ID）。
+// 边界（不伪造）：
+//   - 只给「当前轮」的最后一条 user 消息写；历史轮次 ID 客户端没给，网关无从得知；
+//   - 客户端自带该字段时原值优先；空 ID / 坏 body 原样返回。
+export function injectConversationFields(body: string, convReqID: string): string {
+  if (!body || !convReqID) return body;
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  const msgs = obj["messages"];
+  if (!Array.isArray(msgs) || msgs.length === 0) return body;
+  let idx = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (!m || typeof m !== "object") continue;
+    const role = (m as Record<string, unknown>)["role"];
+    if (typeof role === "string" && role.toLowerCase() === "user") {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) return body;
+  const cur = msgs[idx] as Record<string, unknown>;
+  if (typeof cur["conversationRequestId"] === "string" && cur["conversationRequestId"] !== "") {
+    return body; // 客户端原值优先
+  }
+  cur["conversationRequestId"] = convReqID;
+  cur["startsNewUserRequest"] = true;
+  if (typeof cur["agent"] !== "string" || cur["agent"] === "") cur["agent"] = "cli";
+  msgs[idx] = cur;
+  obj["messages"] = msgs;
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return body;
+  }
+}
+
 export interface ChatStreamResult {
   ok: boolean;
   status: number;
@@ -391,7 +510,14 @@ export async function chatStream(
   meta: ChatMeta,
   signal?: AbortSignal,
 ): Promise<ChatStreamResult> {
-  const prepared = prepareBody(body, a.realm, a.uid, meta.conversationID);
+  // 轮级 ID 在头与体之间必须同值（头体一致，issue #51）：入站未给时在这里生成一次，
+  // 头部注入与 body 注入共用。
+  const convReqID = meta.conversationRequestID || newMessageID();
+  const m: ChatMeta = { ...meta, conversationRequestID: convReqID };
+  const prepared = injectConversationFields(
+    prepareBody(body, a.realm, a.uid, m.conversationID),
+    convReqID,
+  );
   // 首字节（响应头）超时：对齐 Go chat 会话的 transport.ResponseHeaderTimeout
   // （main.go 按 upstream.header_timeout_seconds 注入）。只约束响应头到达前的时长，
   // 头到手就清定时器——SSE 长流的流中静默交给 stream_idle_ms 看门狗，不误杀。
@@ -405,7 +531,7 @@ export async function chatStream(
   try {
     resp = await fetch(chatBase(a) + CHAT_PATH, {
       method: "POST",
-      headers: chatHeaders(cfg, a, clientIP, meta),
+      headers: chatHeaders(cfg, a, clientIP, m),
       body: prepared,
       signal: sig,
     });

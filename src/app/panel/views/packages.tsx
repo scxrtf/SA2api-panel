@@ -1,5 +1,7 @@
 "use client";
 // 积分构成视图（对齐 Go view-packages）：按账号列出套餐包构成 + 到期分布。
+// 取数失败的行显式标注原因（会话失效/鉴权被拒/上游失败），不再用 0/0 冒充真实余额，
+// 也不计入域合计——否则整页会读出「CN 剩余 0」这种与事实相反的结论。
 import React, { useCallback, useEffect, useState } from "react";
 import { req, fmtNum, fmtTime, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
@@ -12,8 +14,23 @@ export interface CreditPackage {
 }
 export interface PkgAccount {
   uid: string; nickname: string; realm: string;
-  remain: number; size: number; packages: CreditPackage[]; error?: string;
+  remain: number; size: number; packages: CreditPackage[];
+  ok?: boolean; reason?: string; error?: string;
 }
+
+// 失败原因 → 面板文案（后端给稳定 reason 码，前端不解析上游原文）。
+const reasonText: Record<string, string> = {
+  session_dead: "会话已失效，该账号需重新登录后才会恢复积分数据。",
+  auth_rejected: "上游鉴权被拒（401），可能需重新登录。",
+  upstream_error: "上游取数失败，稍后重试；持续失败请查看运行日志。",
+};
+const reasonTag: Record<string, string> = {
+  session_dead: "会话失效",
+  auth_rejected: "鉴权被拒",
+  upstream_error: "上游失败",
+};
+const reasonOf = (a: PkgAccount) => reasonText[a.reason ?? ""] ?? reasonText.upstream_error;
+const tagOf = (a: PkgAccount) => reasonTag[a.reason ?? ""] ?? reasonTag.upstream_error;
 
 export function PackagesView({ flash }: { flash: Flash }) {
   const [rows, setRows] = useState<PkgAccount[] | null>(null);
@@ -33,17 +50,25 @@ export function PackagesView({ flash }: { flash: Flash }) {
   useAutoRefresh(load, 60_000);
   usePanelRefresh(load);
 
-  // 域分组汇总：cn（国内）与 global（国际）各自加总剩余/总量。
+  // 域分组汇总：只累加取数成功的账号；失败账号单独计数，不污染合计。
   const realmSummary = (rows ?? []).reduce(
     (acc, a) => {
       const k = a.realm === "global" ? "global" : "cn";
+      if (a.ok === false) {
+        acc[k].failed += 1;
+        return acc;
+      }
       acc[k].remain += a.remain || 0;
       acc[k].size += a.size || 0;
       acc[k].count += 1;
       return acc;
     },
-    { cn: { remain: 0, size: 0, count: 0 }, global: { remain: 0, size: 0, count: 0 } },
+    {
+      cn: { remain: 0, size: 0, count: 0, failed: 0 },
+      global: { remain: 0, size: 0, count: 0, failed: 0 },
+    },
   );
+  const totalFailed = (rows ?? []).filter((a) => a.ok === false).length;
 
   return (
     <Box title="积分构成" hint="按账号列出套餐包 · 上游按失效时刻先后自动优先扣减（FEFO）"
@@ -57,38 +82,59 @@ export function PackagesView({ flash }: { flash: Flash }) {
         <div className="pad">
           <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
             {realmSummary.cn.count > 0 && (
-              <span className="tag info" title="国内域账号积分合计">
+              <span className="tag info" title="国内域账号积分合计（仅统计取数成功的账号）">
                 CN · {realmSummary.cn.count} 账号 · 剩余 {fmtNum(realmSummary.cn.remain)} / 总量 {fmtNum(realmSummary.cn.size)}
               </span>
             )}
             {realmSummary.global.count > 0 && (
-              <span className="tag ok" title="国际域账号积分合计">
+              <span className="tag ok" title="国际域账号积分合计（仅统计取数成功的账号）">
                 国际 · {realmSummary.global.count} 账号 · 剩余 {fmtNum(realmSummary.global.remain)} / 总量 {fmtNum(realmSummary.global.size)}
+              </span>
+            )}
+            {totalFailed > 0 && (
+              <span className="tag warn" title="这些账号未取到上游数据，未计入合计；逐号原因见下方">
+                {totalFailed} 个账号取数失败 · 未计入合计
               </span>
             )}
           </div>
           <ExpiryDistribution accounts={rows} />
         </div>
-        {rows.map((a) => (
+        {rows.map((a) => {
+          const failed = a.ok === false;
+          return (
           <div className="tc-acct" key={a.uid}>
             <h4>
               {a.nickname || a.uid}
-              <span className="dim mono" style={{ marginLeft: 8 }}>{a.uid}</span>
+              <span className="dim" style={{ margin: "0 8px" }}>·</span>
+              <span className="dim mono">{a.uid}</span>
               <span className={"tag " + (a.realm === "global" ? "ok" : "info")} style={{ marginLeft: 8 }}>
                 {a.realm === "global" ? "国际" : "CN"}
               </span>
-              <span style={{ marginLeft: 8 }} className="dim">
-                剩余 {fmtNum(a.remain)} / 总量 {fmtNum(a.size)}
-              </span>
+              {failed ? (
+                <span className="tag err" style={{ marginLeft: 8 }}>{tagOf(a)}</span>
+              ) : (
+                <span style={{ marginLeft: 8 }} className="dim">
+                  剩余 {fmtNum(a.remain)} / 总量 {fmtNum(a.size)}
+                </span>
+              )}
             </h4>
-            {a.error && <div className="msg err">{a.error}</div>}
-            {!a.error && (
+            {failed && (
+              <div className="msg err" style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>
+                {reasonOf(a)}
+                {a.error && (
+                  <span className="dim" style={{ display: "block", marginTop: 4, fontSize: 12 }}>
+                    上游原文：{a.error}
+                  </span>
+                )}
+              </div>
+            )}
+            {!failed && (
               <div style={{ marginBottom: 10 }}>
                 <PackageMixBar packs={a.packages} />
               </div>
             )}
-            {!a.error && a.packages.length === 0 && <div className="dim" style={{ fontSize: 13 }}>无套餐包</div>}
-            {a.packages.length > 0 && (
+            {!failed && a.packages.length === 0 && <div className="dim" style={{ fontSize: 13 }}>无套餐包</div>}
+            {!failed && a.packages.length > 0 && (
               <div className="tbl-wrap">
                 <table className="tbl tbl-packages">
                   <thead><tr><th>套餐</th><th>剩余 / 总量</th><th>已用</th><th>到期</th></tr></thead>
@@ -135,7 +181,8 @@ export function PackagesView({ flash }: { flash: Flash }) {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
         </>
       )}
     </Box>

@@ -1,0 +1,156 @@
+diff --git a/README.md b/README.md
+index d2240ce..f49eef7 100644
+--- a/README.md
++++ b/README.md
+@@ -117,7 +117,8 @@ curl https://<你的域名>/api/v1/chat/completions \
+ 
+ - **鉴权**：与池通道相同，`/api/v1/*` 接受主密钥或 ApiKey 环任一 Bearer。
+ - **密钥环绑定**：面板网关页可给子密钥勾选供应商白名单——绑定后该子密钥只能调用已勾选
+-  供应商的模型；显式 `*` = 全部；留空 = 不限制。
++  供应商的模型；显式 `*` = 全部；留空/不勾选 = 不授权任何供应商（新建密钥的默认态，
++  需在面板显式授权后才能调用聚合供应商；池通道不受影响）。
+ - **流式空闲看门狗**：供应商 SSE 流经 `stream_idle_ms` 看门狗（默认 300s），面板配置项可调。
+ - **用量记账**：供应商调用计入 UsageEvent，`realm = provider:<供应商名>`，
+   面板用量视图可按 realm 前缀筛选。
+diff --git a/src/app/api/panel/keys/[name]/route.ts b/src/app/api/panel/keys/[name]/route.ts
+index f5cb5f2..5333dfb 100644
+--- a/src/app/api/panel/keys/[name]/route.ts
++++ b/src/app/api/panel/keys/[name]/route.ts
+@@ -26,7 +26,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
+   }
+ 
+   // providers 接收字符串数组（兼容逗号分隔字符串）；[] / "" / null / 缺省 =
+-  // 清空绑定（未绑定 = 不限制供应商）。
++  // 撤销全部授权（空 = 未授权任何供应商，fail closed，与新建密钥默认态一致）。
+   let rawList: unknown[];
+   if (body.providers === undefined || body.providers === null) {
+     rawList = [];
+diff --git a/src/app/api/panel/keys/route.ts b/src/app/api/panel/keys/route.ts
+index f5e12aa..5492f06 100644
+--- a/src/app/api/panel/keys/route.ts
++++ b/src/app/api/panel/keys/route.ts
+@@ -35,7 +35,9 @@ export async function POST(req: Request) {
+   const exists = await prisma.apiKey.findUnique({ where: { name } });
+   if (exists) return fail(409, "同名密钥已存在");
+   const key = "sk-" + randomBytes(24).toString("hex");
+-  await prisma.apiKey.create({ data: { name, key } });
++  // 新建密钥默认无任何供应商授权（providers = ""）：需在面板显式勾选后才能调用
++  // 聚合供应商通道；池通道（模型名无供应商前缀）不受供应商授权限制。
++  await prisma.apiKey.create({ data: { name, key, providers: "" } });
+   // 原文仅在此响应出现一次，前端需提示用户保存。
+-  return ok({ name, key });
++  return ok({ name, key, providers: [] });
+ }
+diff --git a/src/app/panel/views/gateway.tsx b/src/app/panel/views/gateway.tsx
+index 94961ad..5eb5f7a 100644
+--- a/src/app/panel/views/gateway.tsx
++++ b/src/app/panel/views/gateway.tsx
+@@ -53,8 +53,8 @@ function KeysBox({ flash }: { flash: Flash }) {
+   const openAuth = (k: KeyRow) => {
+     setAuthEditor({
+       name: k.name,
+-      // 只有显式 "*" 才预勾「全部供应商」；空绑定保持未勾选状态，
+-      // 直接保存仍是空绑定（不限制），不会被改写为 "*"。
++      // 只有显式 "*" 才预勾「全部供应商」；空授权保持未勾选状态，
++      // 直接保存仍是空授权（不授权任何供应商），不会被改写为 "*"。
+       all: k.providers.includes("*"),
+       picked: k.providers.filter((p) => p !== "*"),
+       password: "",
+@@ -89,13 +89,13 @@ function KeysBox({ flash }: { flash: Flash }) {
+       ? "全部供应商"
+       : k.providers.length > 0
+         ? k.providers.join(", ")
+-        : "未绑定（全部供应商）";
++        : "未授权（无供应商）";
+ 
+   return (
+-    <Box title="网关密钥环" hint="可调用 /api/v1/* 的子密钥；绑定供应商后仅可调用已勾选项，留空 = 不限制">
++    <Box title="网关密钥环" hint="可调用 /api/v1/* 的子密钥；新建默认无供应商授权，勾选后仅可调用已授权供应商（池通道不受限）">
+       <div className="pad">
+         {created && (
+-          <div className="msg ok">新密钥 {created.name}：<span className="mono">{created.key}</span>（仅显示一次，请立即保存）</div>
++          <div className="msg ok">新密钥 {created.name}：<span className="mono">{created.key}</span>（仅显示一次，请立即保存；默认无供应商授权，如需调用聚合供应商请在下方「授权」中勾选）</div>
+         )}
+         <div className="btn-row" style={{ marginBottom: 12 }}>
+           <input className="input" style={{ width: 220 }} placeholder="密钥名称"
+@@ -132,7 +132,7 @@ function KeysBox({ flash }: { flash: Flash }) {
+               全部供应商
+             </label>
+             {!authEditor.all && (
+-              <span className="dim">不勾选 = 未绑定（不限制）</span>
++              <span className="dim">不勾选 = 不授权任何供应商（该 key 将无法调用聚合供应商）</span>
+             )}
+             {!authEditor.all && providers.length === 0 && (
+               <span className="dim">暂无可授权供应商，请先在下方添加</span>
+diff --git a/src/lib/auth-guard.ts b/src/lib/auth-guard.ts
+index 37fdd77..8a9c370 100644
+--- a/src/lib/auth-guard.ts
++++ b/src/lib/auth-guard.ts
+@@ -31,7 +31,8 @@ export function verifyBearer(req: Request, key: string): boolean {
+ }
+ 
+ // KeyIdentity 请求凭证的归属与供应商授权面。unrestricted 仅用于主密钥 / 未启用
+-// 鉴权的部署；子密钥一律按 providers 白名单判定（DB 异常时 fail closed）。
++// 鉴权的部署；子密钥一律按 providers 白名单判定，未授权任何供应商 = 全拒绝
++// （DB 异常同样 fail closed）。
+ export interface KeyIdentity {
+   name: string;
+   providers: string;
+@@ -39,8 +40,8 @@ export interface KeyIdentity {
+ }
+ 
+ // parseProviderAccess 解析 ApiKey.providers 存储串：
+-//   "*"        → ["*"]
+-//   ""         → []（未绑定；由 providerAllowed / providerAllowlist 解释为不限制）
++//   "*"        → ["*"]（全部供应商）
++//   ""         → []（未授权任何供应商；新建密钥的默认态）
+ //   "foo,bar"  → ["foo", "bar"]
+ export function parseProviderAccess(raw: string): string[] {
+   const s = (raw ?? "").trim();
+@@ -51,10 +52,11 @@ export function parseProviderAccess(raw: string): string[] {
+ }
+ 
+ // providerAllowed 判断指定供应商是否在该 key 的授权名单内。
++// 未授权任何供应商（空串）→ 一律拒绝（fail closed）；"*" → 全部放行。
+ export function providerAllowed(providersRaw: string, provider: string): boolean {
+   const list = parseProviderAccess(providersRaw);
+-  // 未绑定任何供应商 = 不限制（面板允许把绑定留空）。
+-  if (list.length === 0) return true;
++  // 未授权任何供应商 = 拒绝（新建密钥默认态，需在面板显式勾选）。
++  if (list.length === 0) return false;
+   return list.includes("*") || list.includes(provider);
+ }
+ 
+@@ -87,13 +89,13 @@ export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | n
+ }
+ 
+ // providerAllowlist 把身份折算成供应商白名单：
+-//   null       = 不限制（主密钥 / 未启用鉴权 / 子密钥未绑定或显式 "*"）
+-//   空集合     = 禁止所有供应商（身份缺失也按空集合处理，fail closed）
++//   null       = 不限制（主密钥 / 未启用鉴权 / 子密钥显式 "*"）
++//   空集合     = 禁止所有供应商（子密钥未授权任何供应商 / 身份缺失，fail closed）
+ export function providerAllowlist(id: KeyIdentity | null): Set<string> | null {
+   if (!id) return new Set();
+   if (id.unrestricted) return null;
+   const list = parseProviderAccess(id.providers);
+-  if (list.length === 0 || list.includes("*")) return null;
++  if (list.includes("*")) return null;
+   return new Set(list);
+ }
+ 
+diff --git a/src/lib/chat.ts b/src/lib/chat.ts
+index 15c3403..6fdb6bd 100644
+--- a/src/lib/chat.ts
++++ b/src/lib/chat.ts
+@@ -299,8 +299,9 @@ export async function handleChat(opts: {
+   const modelRate = currentModelRate(realm, bare);
+   // 显式供应商前缀绝不回落池：查找失败由 providerChat 返回并记录错误。
+   if (provider !== "") {
+-    // 供应商准入：子密钥绑定白名单时只放行名单内供应商；未绑定（空）或 "*"
+-    // 不限制。身份缺失（无法识别 / DB 异常）仍按拒绝处理，避免借空绑定绕过。
++    // 供应商准入：子密钥只放行授权名单内的供应商；显式 "*" = 全部；未授权任何
++    // 供应商（空）一律拒绝（新建密钥默认态）。身份缺失（无法识别 / DB 异常）
++    // 同样按拒绝处理，避免借空授权绕过。
+     if (opts.req) {
+       const allowed = keyIdentity
+         ? keyIdentity.unrestricted || providerAllowed(keyIdentity.providers, provider)

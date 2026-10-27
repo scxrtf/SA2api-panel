@@ -1,0 +1,73 @@
+[VERIFICATION] wb2api-next · 请求日志新增「报错内容」
+Date: 2026-10-23 16:50 (Asia/Shanghai)
+HEAD: a3eb3d1（工作区含前序未提交改动，本次改动仅 7 个文件，见 §2）
+
+== 1. 需求 ==
+请求报错时，把「报错内容」落进项目日志——原先 RequestLog 只有 status + errKind，
+排障只能看到 401 / model_blocked 这类分类码，看不到上游到底说了什么；
+运行日志的 chat ERR 行同样只有状态与耗时。
+
+== 2. 改动 ==
+prisma/schema.prisma
+  + RequestLog.errMsg String @default("")   // 失败请求的上游响应正文摘要（单行，≤1000 字符）
+prisma/migrations/20261023093000_request_log_err_msg/migration.sql  (新增)
+  ALTER TABLE "RequestLog" ADD COLUMN IF NOT EXISTS "errMsg" TEXT NOT NULL DEFAULT '';
+  已应用（prisma migrate deploy → 9 migrations, applied）
+
+src/lib/logfmt.ts
+  + clipLogText(raw, limit=1000)：网关整页 HTML 剥标签、空白压成单空格、超长截断加「…」。
+    业务信封 JSON 不剥内容（信息密度高，原样保留）。
+
+src/lib/chat.ts
+  - recordRequestLog 增加 errMsg 字段
+  - finishLog 增加第 5 参 errMsg：写库前 clip 到 1000 字符；运行日志行追加 `err=<clip 180>`
+  - 各失败分支补内容：soft_queue 429 / content_blocked / prompt_too_long·image_invalid·bad_params /
+    请求级 4xx / waf_ip_blocked / upstream_timeout（带耗时与异常名）/ 流式 error 帧原文 /
+    聚合失败 / 空响应体 / 供应商未授权（本地文案）/ 末端轮转耗尽（lastErr.msg）
+  - 成功路径保持留空，日志表不添噪声
+
+src/lib/provider.ts
+  - finish(status, errMsg)：供应商回包非 2xx 时把 raw 正文记入；fail() 的本地错误文案同样记入
+  - 运行日志行同步追加 err=
+
+src/app/api/panel/request_logs/route.ts
+  + 过滤参数 err（errMsg contains，大小写不敏感）——按上游原文检索，如 12153 / rate limit / WAF
+
+src/app/panel/views/logs.tsx
+  - 请求日志新增「报错内容过滤」输入框
+  - 结果列：有报错内容时追加「 · 报错」并把全文挂 title（悬停即读）
+  - 展开区新增「报错内容」行（等宽、自动换行/pre-wrap），位置在客户端 IP 之前
+
+== 3. 验证 ==
+tsc --noEmit: exit 0
+prisma migrate deploy: 9 migrations, 20261023093000_request_log_err_msg applied
+
+scripts/_verify-errmsg.mts → 10 PASS / 0 FAIL
+  [1] clipLogText
+      <html>…401 Authorization Required…openresty…</html> → "401 Authorization Required 401 openresty"（无标签/单行）
+      {"code":12153,"msg":"refresh token is invalid"} → 原样保留（含 12153）
+      5000 字符 → 1000（末尾 …）
+      空串 / undefined → ""
+  [2] 真实失败请求（dev :3100，key=SA，模型 definitely-not-a-model-xyz）
+      HTTP 400 {"code":11102,"msg":"model [...] service info not found"}
+      RequestLog 4653 → 4654
+      最新行 {"status":400,"errKind":"model_blocked","errMsg":"{\"code\":11102,...,\"requestId\":\"01a167ec…\"}"}（len=559，单行）
+
+接口/界面侧
+  GET /api/panel/logs → 运行日志出现：
+    chat ERR 400 definitely-not-a-model-xyz kind=model_blocked 52975ms err={"code":11102,"msg":"model [...] service info not found",…}
+  GET /api/panel/request_logs?limit=3&err=11102 → hits=1，行内 errMsg 完整
+  GET /panel → 200，dev 编译无报错
+
+== 4. 边界与取舍 ==
+- 只记错误路径：成功请求 errMsg 留空，避免表体积随正常流量增长。
+- 单行 + 1000 字符上限：网关 HTML 常达数 KB，原样落库既占空间又破坏 grep；
+  完整定位仍在运行日志/上游复现，日志只留可读摘要。
+- 不记录请求体（prompt）：属用户内容，本次仅采「上游报错正文」，与既有 privacy 边界一致。
+- UsageEvent 未加该字段：用量台账关注 token/积分，排障走请求日志；如需图表侧联动可另开。
+
+== 5. 回滚 ==
+1) 代码：反向应用本文件 §2 的改动点（chat.ts / provider.ts / logfmt.ts / request_logs route / logs.tsx / schema.prisma）。
+   注意工作区含其他会话的未提交改动（如 auth_expired），不要整文件回退。
+2) 数据库：ALTER TABLE "RequestLog" DROP COLUMN IF EXISTS "errMsg";
+   并删除 prisma/migrations/20261023093000_request_log_err_msg/。

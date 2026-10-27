@@ -6,6 +6,7 @@ export type ErrKind =
   | "soft_rate" // 429 软限流 → 对齐上游重置墙钟，封顶 softRateMax
   | "soft_queue" // 6020 queue.waiting 排队等待 → 仅模型级短冷却，绝不罚号
   | "session_dead" // 401+12153 会话失效 → 连续 3 次禁用
+  | "auth_expired" // 401 无业务信封（APISIX HTML）：token 被上游判无效 → 强制刷新/禁用
   | "account_fault" // 11140 request illegal / 14017 未激活 → 冷却轮换
   | "content_blocked" // 内容审核误报 → 不罚号，网关降级重试
   | "model_blocked" // 11102 该后端无此模型 → (账号,模型) 负缓存
@@ -288,6 +289,12 @@ export function classify(status: number, body: string): ErrKind {
   if (status >= 500) return "server";
   // 10. WAF 403（无业务信封）。
   if (isWafBlocked(status, body)) return "waf_block";
+  // 10.5 网关层 401（APISIX / OpenResty HTML，无业务信封）：Bearer token 被上游判为
+  // 无效。与业务信封 12153 区分——12153 是「refresh token 失效」（已在上面判
+  // session_dead），这里是「本地 access token 已不可用」，两条都要能触发重新登录，
+  // 但处置不同：本类先强制刷新，刷新失败才落禁用。
+  // 归到 client 的旧口径会让坏号既不刷新也不冷却，长期滞留池中反复被选中。
+  if (status === 401 && !hasBusinessEnvelope(body)) return "auth_expired";
   // 11. 图片无效（11135 / 文案）。
   if (status === 400 && codeMarker(lower, "11135")) return "image_invalid";
   if (status === 400) {
@@ -405,6 +412,8 @@ export function gatewayHint(kind: ErrKind, msg: string, ctx: HintContext): strin
       return "account-level fault at upstream (auth/quota state); the gateway will rotate or disable this account";
     case "session_dead":
       return "account session expired at upstream; the account is disabled until re-login";
+    case "auth_expired":
+      return "account access token rejected by upstream (401); the gateway refreshes it or disables the account until re-login";
     case "hard_credit":
       return "account credits exhausted at upstream; waiting for daily check-in to restore";
     case "model_blocked":

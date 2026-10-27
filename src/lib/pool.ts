@@ -8,6 +8,7 @@
 // 每次 pick 把候选行读入内存后纯计算（权重/分层/抽签），写回只落持久字段。
 import { prisma } from "./db";
 import { modelLockViewPure, type ModelLockRow, type LockViewEntry } from "./modelview";
+import { accountReasonKind, accountReasonSummary } from "./logfmt";
 import type { AppConfig } from "./config";
 import type { Account, AccountState, ModelCooldown, ModelCost } from "@prisma/client";
 import {
@@ -235,8 +236,9 @@ function defaultState(uid: string): AccountState {
   } as AccountState;
 }
 
-// pick 在 healthy 候选集中按权重选出账号（Go pick 全语义：成本分层硬过滤 +
-// 条件探索 + top5 截断 + 加权随机 + minPickGap 防撞号 + LRU 兜底 + 全冷却兜底）。
+// pick 只从健康候选中按权重选号（成本分层 + top5 + 加权随机 + LRU 兜底）。
+// 不把仍在冷却的账号当候补：刚出现的 429 会再次命中同一批账号，既放大限流，
+// 又让客户端重试在冷却结束前稳定失败。
 export async function pick(
   cfg: AppConfig,
   opts: PickOpts = {},
@@ -248,7 +250,7 @@ export async function pick(
   const skipped = (e: PoolEntry) => tried?.has(e.account.uid) ?? false;
   const realmOK = (e: PoolEntry) => realm === "" || e.account.realm === realm;
 
-  let cands: PoolEntry[] = [];
+  const cands: PoolEntry[] = [];
   for (const e of all) {
     if (skipped(e) || !realmOK(e)) continue;
     if (!healthyForModel(e, now, model)) continue;
@@ -257,7 +259,7 @@ export async function pick(
     cands.push(e);
   }
   if (cands.length === 0) {
-    return pickEarliestExpiry(all, tried, now, realm, model, cfg, modelRateOf);
+    return null;
   }
 
   // maxCredits 统一用全集口径（tier 过滤前）。
@@ -333,36 +335,43 @@ export async function pick(
   return chosen;
 }
 
-// pickEarliestExpiry 全冷却兜底：非禁用/非暂停的软冷却/熔断账号中选截止最早者。
-// CoolHard（等签到的号）排除——调了必 402；积分保底同判据生效。
-function pickEarliestExpiry(
-  all: PoolEntry[],
-  tried: Set<string> | undefined,
-  now: number,
-  realm: string,
+export interface PoolRetryStatus {
+  retryAfterMs: number; // 最早可重新路由的健康账号等待时长；无法估计为 0
+  cooling: number;
+  accountCooling: number;
+}
+
+// retryStatus 用于无健康候选时的快速失败。只报告墙钟，不在服务端睡眠或提前探测。
+export async function retryStatus(
   model: string,
-  cfg: AppConfig,
-  modelRateOf?: ModelRateOf,
-): PoolEntry | null {
-  let best: PoolEntry | null = null;
-  let bestExp = 0;
-  for (const e of all) {
-    if (tried?.has(e.account.uid)) continue;
+  realm: string,
+): Promise<PoolRetryStatus> {
+  const now = Date.now();
+  let earliest = 0;
+  let cooling = 0;
+  let accountCooling = 0;
+  for (const e of await loadEntries()) {
     if (realm !== "" && e.account.realm !== realm) continue;
     const s = e.state;
-    if (s.disabled || s.paused) continue;
-    if (s.cooldownReason === "hard_credit" && s.cooldownUntil > now) continue;
-    if (floorBlocked(e, model, realm, cfg, now, modelRateOf)) continue;
-    if (inFlightFull(e, cfg)) continue;
-    const exp = Math.max(Number(s.cooldownUntil), Number(s.breakerUntil));
-    if (exp <= 0) continue;
-    if (!best || exp < bestExp) {
-      best = e;
-      bestExp = exp;
-    }
+    if (
+      s.disabled || s.paused ||
+      (s.cooldownReason === "hard_credit" && s.cooldownUntil > now)
+    ) continue;
+    const modelLock = e.cooldowns.find((c) => c.model === model);
+    const accountUntil = Math.max(
+      Number(s.cooldownUntil), Number(s.breakerUntil), Number(s.degradeUntil),
+    );
+    const until = Math.max(accountUntil, Number(modelLock?.until ?? 0));
+    if (until <= now) continue;
+    cooling++;
+    if (accountUntil > now) accountCooling++;
+    if (earliest === 0 || until < earliest) earliest = until;
   }
-  if (best) markUsed(best.account.uid);
-  return best;
+  return {
+    retryAfterMs: earliest > now ? earliest - now : 0,
+    cooling,
+    accountCooling,
+  };
 }
 
 // PickByUIDForModel 粘性路径：绑定号在当前模型健康且未占满才返回，否则 null
@@ -574,15 +583,17 @@ export interface ModelBlockStatus {
   count: number;
 }
 
-export async function modelBlocked(model: string): Promise<ModelBlockStatus> {
+export async function modelBlocked(model: string, realm = ""): Promise<ModelBlockStatus> {
   const empty: ModelBlockStatus = { blocked: false, reason: "", until: 0, count: 0 };
   if (!model) return empty;
   const now = Date.now();
   const all = await loadEntries();
   const st: ModelBlockStatus = { ...empty };
   for (const e of all) {
+    if (realm !== "" && e.account.realm !== realm) continue;
     if (e.state.disabled || e.state.paused) continue;
-    if (!modelCooled(e, now, model)) return empty; // 还有号能服务 → 非全池阻塞
+    // 账号级冷却不是模型级阻塞：否则普通 429 会被末端错误映射覆盖成 503/400。
+    if (!modelCooled(e, now, model)) return empty;
     st.count++;
     const mc = e.cooldowns.find((c) => c.model === model);
     if (mc) {
@@ -864,6 +875,7 @@ export interface StatusRow {
   cool_kind: string;
   cool_remaining_sec: number;
   reason: string;
+  raw_reason: string;
   disabled: boolean;
   disabled_reason: string;
   paused: boolean;
@@ -949,7 +961,8 @@ export async function statusList(): Promise<StatusRow[]> {
         model: c.model,
         kind: c.reason.startsWith("11102") ? "model_unavailable" : "rate_limit",
         until: Number(c.until),
-        reason: c.reason,
+        reason: accountReasonSummary(c.reason),
+        raw_reason: c.reason,
       }))
       .sort((a, b) => (a.model < b.model ? -1 : 1));
     const modelCosts = e.costs
@@ -971,9 +984,10 @@ export async function statusList(): Promise<StatusRow[]> {
       credits_earliest_expiry: Number(s.earliestAt),
       credits_earliest_remaining: Number(s.earliestRemain),
       cooling,
-      cool_kind: cooling ? coolKind : "",
+      cool_kind: cooling ? accountReasonKind(coolKind) : "",
       cool_remaining_sec: remaining,
-      reason: s.cooldownReason,
+      reason: accountReasonSummary(s.cooldownReason),
+      raw_reason: s.cooldownReason,
       disabled: s.disabled,
       disabled_reason: s.disabled ? s.disableReason : "",
       paused: s.paused,
@@ -1099,6 +1113,11 @@ export async function applyErrorKind(
       return;
     }
     case "session_dead":
+      await noteSessionDead(uid);
+      return;
+    case "auth_expired":
+      // 上游 401（token 已不可用）：刷新重试由调用方负责；走到这里说明刷新也没救回，
+      // 按会话失效计数，达阈值即禁用，避免坏号长期滞留池中反复被选中。
       await noteSessionDead(uid);
       return;
     case "account_fault":

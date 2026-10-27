@@ -35,7 +35,9 @@ export async function POST(req: Request) {
   const exists = await prisma.apiKey.findUnique({ where: { name } });
   if (exists) return fail(409, "同名密钥已存在");
   const key = "sk-" + randomBytes(24).toString("hex");
-  await prisma.apiKey.create({ data: { name, key } });
+  // 新建密钥默认无任何供应商授权（providers = ""）：需在面板显式勾选后才能调用
+  // 聚合供应商通道；池通道（模型名无供应商前缀）不受供应商授权限制。
+  await prisma.apiKey.create({ data: { name, key, providers: "" } });
   // 原文仅在此响应出现一次，前端需提示用户保存。
-  return ok({ name, key });
+  return ok({ name, key, providers: [] });
 }

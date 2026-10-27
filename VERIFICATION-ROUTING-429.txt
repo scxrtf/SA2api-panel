@@ -1,0 +1,51 @@
+ROUTING-429 verification (offline mocks; no real account/upstream mutation)
+Date: 2026-10-27 Asia/Shanghai
+
+SHA256 src/lib/pool.ts: 138F34ECB22BA07CF080A0DC6165D6028B6EDB88718C8B75B58CBDBD6DF1AC0F
+SHA256 src/lib/chat.ts: 98B011430888BEF518E87BFFA86C28D41BA6F965B6640CC4EEB9856AB9319164
+SHA256 src/lib/agenttool-route.ts: 8E798C2E7C16662A9A42D6230BCBD10AEE993A1302881329360B3625A00C4F34
+SHA256 src/lib/upstream/agenttool.ts: B53C78C0C1FB16AEB540E0B45ACDDA1946DD6493BDFED4B763385E7FE039DCB8
+SHA256 scripts/routing-429.test.mts: 41C6017D728A18EE024C515C50540154C38177DE699188A6DA66DAC5166355F9
+
+Modified files:
+  src/lib/pool.ts
+  src/lib/chat.ts
+  src/lib/agenttool-route.ts
+  src/lib/upstream/agenttool.ts
+  scripts/routing-429.test.mts
+
+Original backups (not overwritten during recheck):
+  backup-routing-429/pool.ts.bak
+  backup-routing-429/chat.ts.bak
+  backup-routing-429/agenttool-route.ts.bak
+  backup-routing-429/agenttool-upstream.ts.bak
+
+PASS npx tsx scripts/routing-429.test.mts
+  healthy account wins over a cooling account
+  cooling accounts are not selected as eager retry fallbacks
+  Retry-After follows the earliest applicable recovery
+  hard-credit exclusion expires while active breaker remains visible
+  model cooldown exhaustion is isolated by realm
+  upstream 429 rotates immediately to a different healthy account
+  all-cooling request fails fast with Retry-After and zero upstream calls
+  rotation-budget exhaustion returns the earliest Retry-After
+  search/fetch share 429 fast-fail and Retry-After semantics
+PASS npx tsx scripts/modelview.test.mts (10 tests)
+PASS npx tsx scripts/queue-6020.test.mts
+PASS npx tsx scripts/auth-401.test.mts
+PASS npx tsx scripts/provider-routing-log.test.mts
+PASS npx tsx scripts/provider-endpoint.test.mts (11 tests)
+PASS npx tsc --noEmit
+PASS npx eslint scripts/routing-429.test.mts src/lib/agenttool-route.ts src/lib/upstream/agenttool.ts
+PASS git diff --check -- src/lib/pool.ts src/lib/chat.ts scripts/routing-429.test.mts
+PASS npm run build (Next.js 16.4.2)
+PASS powershell -NoProfile -ExecutionPolicy Bypass -File ROLLBACK-ROUTING-429.ps1 (dry run only)
+
+Rollback dry run:
+powershell -NoProfile -ExecutionPolicy Bypass -File ROLLBACK-ROUTING-429.ps1
+Rollback execute:
+powershell -NoProfile -ExecutionPolicy Bypass -File ROLLBACK-ROUTING-429.ps1 -Execute
+
+The worktree contains unrelated pre-existing changes. FIX-ROUTING-429.diff is
+based on the original routing backups, not on a clean Git worktree; do not apply
+it blindly to another checkout. No production upstream was contacted.

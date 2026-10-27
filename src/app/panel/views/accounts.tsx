@@ -53,24 +53,39 @@ function useNow(intervalMs = 15_000): number {
   return now;
 }
 
+// fallbackOf 查该模型配置的等价模型（上游 f1eca4a 同口径：双重查找——先按原样
+// 查 model_fallback，再查去掉 cn:/global: 前缀的裸名；只对 6004 限流行展示）。
+function fallbackOf(fb: Record<string, string> | undefined, model: string): string {
+  if (!fb) return "";
+  const bare = model.replace(/^(cn|global):/i, "");
+  return fb[model] || fb[bare] || "";
+}
+
 // RateLimitRows 账号行内「哪些模型暂时不能用」（对齐 Go rateLimitRowsHtml）。
 // rate_limited_models 只含未过期条目；kind=model_unavailable 为 11102 模型不可用，
 // 其余为 6004 等上游限流。剩余时间由 useNow 定时刷新，不随 overview 轮询老化。
-function RateLimitRows({ rows, now }: { rows: StatusRow["rate_limited_models"]; now: number }) {
+// 限流模型若配了等价模型（model_fallback），标注「已路由至 <等价模型>」——请求并未中断，
+// 只是换了等价模型继续服务。
+function RateLimitRows({ rows, now, fb }: {
+  rows: StatusRow["rate_limited_models"]; now: number; fb?: Record<string, string>;
+}) {
   if (!rows || rows.length === 0) return null;
   return (
     <div className="rate-limits">
       {rows.map((r) => {
         const remain = now > 0 ? Math.max(0, Math.round((r.until - now) / 1000)) : null;
         const unavailable = r.kind === "model_unavailable";
-        const detail = unavailable
+        const to = unavailable ? "" : fallbackOf(fb, r.model);
+        const base = unavailable
           ? (remain === null ? "模型不可用" : remain > 0 ? "不可用 · " + fmtDur(remain) + " 后重试" : "不可用 · 等待重新探测")
           : (remain === null ? "限流中" : remain > 0 ? "限流 · " + fmtDur(remain) + " 后可重试" : "限流 · 即将恢复");
+        const detail = to ? base + " ⤳ 已路由至 " + to : base;
         const title = [
           r.model,
           unavailable ? "模型当前不可用" : "上游限流",
+          to ? "已自动改道等价模型：" + to + "（请求继续服务，无需等待）" : "",
           "最早重试：" + fmtTime(r.until),
-          r.reason ? "原因：" + r.reason : "",
+          r.raw_reason || r.reason ? "上游原因：" + (r.raw_reason || r.reason) : "",
         ].filter(Boolean).join("\n");
         return (
           <div key={r.model + "@" + r.until}
@@ -270,9 +285,9 @@ export function AccountsView({ ov, flash, onRefresh }: {
                   <td>
                     {acctTags(a).map((t) => <span key={t.text} className={"tag " + t.cls}>{t.text}</span>)}
                     {a.reason && (
-                      <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }} title={a.reason}>{a.reason}</div>
+                      <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }} title={a.raw_reason || a.reason}>{a.reason}</div>
                     )}
-                    <RateLimitRows rows={a.rate_limited_models} now={now} />
+                    <RateLimitRows rows={a.rate_limited_models} now={now} fb={ov.model_fallback} />
                   </td>
                   <td className="mono">
                     {fmtNum(a.success_count ?? 0)} <span className="dim">/</span>{" "}

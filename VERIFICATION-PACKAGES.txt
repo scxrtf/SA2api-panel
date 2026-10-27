@@ -1,0 +1,95 @@
+[VERIFICATION] wb2api-next · 积分构成「剩余 0 / 总量 0」修复
+Date: 2026-10-23 16:20 (Asia/Shanghai)
+HEAD: a3eb3d1 feat(gateway): 供应商列表支持修改模型白名单(PATCH + 服务端探测勾选)
+Baseline worktree: 存在历史未提交改动（keys/gateway/chat 等），本次仅触及 3 个文件
+
+== 1. 报障 ==
+积分构成页 190****5127（uid 6b55a84f-40c6-4b01-952d-5caf2247774f）显示「剩余 0 / 总量 0」，
+错误正文是网关 HTML：<html>…401 Authorization Required…openresty…Powered by APISIX…
+
+== 2. 现场复现（真实上游，2026-10-23 16:0x）==
+样本 6b55a84f：
+  POST https://www.codebuddy.cn/v2/billing/meter/get-user-resource  → 401 text/html (APISIX HTML)
+  GET  https://www.codebuddy.cn/console/account                     → 401 text/html (同上)
+  GET  https://www.workbuddy.cn/console/account                     → 401 text/html (同上)
+  POST https://copilot.tencent.com/v2/plugin/auth/token/refresh      → 401 {"code":12153,"msg":"12153:refresh token is invalid"}
+
+全量 28 号扫描同一端点：4 成功 / 24 失败，失败均为 HTML 401，刷新一律 12153。
+
+JWT 解码（不验签）：失败号 accessToken 的 iat 均为 2026-10-22T14:00Z（保活批次写入），
+exp 在 2026-11-19，即「DB 认为还有 27 天有效、上游已整体吊销」——不是 access token 自然过期，
+而是会话（access+refresh）被上游同时作废，唯一恢复路径是重新登录。
+
+== 3. 根因 ==
+A. 账号层：24 个号的上游会话已吊销（refresh token 亦失效），代码无法从死 token 推出积分。
+   「0/0」不是可修的数据，只是不该被当作真实余额展示。
+B. 面板层（代码缺陷，本次修复）：
+   1) /api/panel/packages 直接拿 DB 的 accessToken 快照调上游，从不刷新 → 快照一落后必然 401；
+   2) 失败后 remain/size 留在 0，前端原样展示「剩余 0 / 总量 0」，并把 HTML 401 原文塞进 .msg.err；
+   3) CN/国际域合计把失败号的 0 累加进去，整页读出「CN 累计余额」偏低的错误结论。
+
+== 4. 改动 ==
+新增 src/lib/accountSession.ts（会话自愈层）
+  - withFreshAuth()：取数前按 refresh_skew_sec 预刷新；遇 401 刷新后再重试一次（一次为限）
+  - refreshShared()：同 uid 刷新单飞（single-flight），避免并发重复消费 refresh token
+  - latestShape()：重试前重读 DB 凭证（并发刷新后旧 RT 已作废）
+  - sanitizeUpstreamMessage()：网关 HTML → 单行摘要（title 优先 + 按词去重 + 截断 200）
+  - classifySessionError()：session_dead / auth_rejected / upstream_error 三个稳定原因码
+  - SESSION_DEAD_TTL_MS=5min 负缓存：死号在 TTL 内不再打上游
+    （24 死号 × 60s 轮询 = 每分钟 24 次无效刷新的浪费归零）
+
+src/app/api/panel/packages/route.ts
+  - 取数改走 withFreshAuth
+  - 行新增 ok / reason；失败行 remain/size 仍为 0 但 ok=false（供前端区分「取不到」与「真的 0」）
+  - error 统一过 sanitizeUpstreamMessage；无 token 行也带 reason
+  - 响应新增 failed / total；排序：成功行按余额降序在前，失败行沉底但不隐藏
+
+src/app/panel/views/packages.tsx
+  - 失败行：标签「会话失效 / 鉴权被拒 / 上游失败」+ 一句结论 + dim 的上游原文，不再显示 0/0
+  - 域合计只累加成功行，新增 warn 标签「N 个账号取数失败 · 未计入合计」
+  - 账号头部昵称与 uid 之间加「·」分隔（原先昵称+uid+CN 标签连读成
+    「190****51276b55a84f-…CN」，易被误读为一个字段）
+
+== 5. 文件与摘要 ==
+path                                      sha256 before                                                     sha256 after
+src/app/api/panel/packages/route.ts       A6B10EE67C464FCA518D5C5E01957886507BD6865268C6CCB2C4E7D71570FB32  C5903B7527CEDF784AF60FB5DE14BB6ED5CDA514F7563096DB10ACBE8ED8A691
+src/app/panel/views/packages.tsx          44D6ABF82A46FEE7F42E52F77AE552A434AA9373CA270CC330240E887955E5EC  D738AE6F38A70AAC9DE270CB3F1CCE33266F8AF606AE87612AA0F26E7B60B627
+src/lib/accountSession.ts (new)           (absent)                                                          468990985E675FDD5D56E9815400EDF6717500E696E4263B33A9022DE8414405
+
+Backups: backup-packages/route.ts.bak, backup-packages/packages.tsx.bak
+Diff   : FIX-PACKAGES.diff
+
+== 6. 验证 ==
+tsc --noEmit: exit 0，无诊断
+
+scripts/_verify-pkg-fix.mts（真实上游 + 真实 DB）：12 PASS / 0 FAIL
+  [1]   死号 6b55a84f → reason=session_dead，文案无 <>&，含 12153 语义
+  [2]   正常号 5e9959d4 → 28 个套餐包，remain=5249 / size=5419
+  [3]   人为写入脏 token（deadbeef.invalid.token）→ 自愈成功 remain=3193，新 token 已回写 DB
+  [3.5] 死号二次取数 0ms 命中负缓存，结论仍为「需重新登录」
+  [4]   网关 HTML 401 → "401 Authorization Required openresty Powered by APISIX ."
+
+接口冒烟（next dev -p 3100，GET /api/panel/packages）
+  200，ok=true，total=28，failed=24，detail_limit=5
+  失败行样例：{"uid":"62a8f074…","ok":false,"reason":"session_dead",
+               "error":"会话已失效（5 分钟内不重复请求上游），需重新登录"}
+  成功行样例：{"nick":"199****3516","remain":5249,"size":5419,"pkgs":28}
+  首次请求 8.0s（含 24 个死号的首次判定），二次请求 1.9s（负缓存生效）
+GET /panel → 200，dev 编译无报错
+
+== 7. 仍需人工处理（代码不可代劳）==
+24 个号上游会话已吊销，须在「账号」页重新走设备码登录才会恢复积分数据：
+153****7089  136****7667  🙉            132****1164  末之京落      190****5127
+153****6997  发呆呆呆魚    199****8419   178****7873  Genlte 陌     153****3082
+158****1954  152****4782   192****7742   192****1305  156****5006   188****0483
+136****6311  133****2583   136****2960   189****4565  默            溯渊蛰鳞
+
+另注（既有行为，本次未改）：这些号的 AccountState.credits 仍是吊销前的旧快照
+（如 6b55a84f=5082），余额定时刷新失败时不清旧值，所以「账号」页仍显示旧余额，
+与积分构成页的「取数失败」不一致。要统一口径可另开一项修复。
+
+== 8. 回滚 ==
+ROLLBACK-PACKAGES.cmd
+  copy backup-packages\route.ts.bak      → src\app\api\panel\packages\route.ts
+  copy backup-packages\packages.tsx.bak  → src\app\panel\views\packages.tsx
+  del  src\lib\accountSession.ts

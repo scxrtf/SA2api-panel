@@ -153,6 +153,9 @@ model RequestLog {
   provider      String   @default("")
   status        Int      @default(0)
   errKind       String   @default("")
+  // 报错内容：失败请求的上游响应正文摘要（单行、已压空白、最多 1000 字符）。
+  // 成功请求留空。用于面板「请求日志」展开区与运行日志 err= 片段。
+  errMsg        String   @default("")
   stream        Boolean  @default(false)
   durationMs    Int      @default(0)
   ttfbMs        Int      @default(0) // 流式首帧延迟

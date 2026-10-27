@@ -2,9 +2,9 @@
 // 桌面端点亮「需电脑端」类任务的关键：同一 POST /v2/report 通道上的不同客户端指纹
 // （WorkBuddy Desktop 5.5.6 内嵌 CLI 2.137.1，extName=workbuddy-desktop）。
 // 事件形状全部按 Go 版逐字对齐（2026-09-12 Sunny 抓包 + asar 逆向实测，勿改字段）。
-import { createHash, randomUUID } from "crypto";
+import { createHash } from "crypto";
 import type { AppConfig } from "../config";
-import { chatBase, webBaseOf, type AuthShape } from "./client";
+import { chatBase, webBaseOf, chatHeaders, newConversationID, newMessageID, type AuthShape } from "./client";
 
 export const DESKTOP_UA = "WorkBuddy/5.5.6 WorkBuddy/5.5.6 CLI/2.137.1";
 
@@ -318,7 +318,9 @@ const serverIDRegex = /^(cmb-)?[0-9a-f]{32}$/;
 export async function desktopChatWithExpert(
   cfg: AppConfig, a: AuthShape, expertID: string,
 ): Promise<{ conversationID: string; requestID: string }> {
-  const conversationID = "wb2api-conv-" + Date.now();
+  // 会话 ID 用官方形态（UUID v4）。旧值 `wb2api-conv-<毫秒>` 把项目缩写直接当
+  // X-Conversation-ID 打给上游（上游 issue #51 最直白的一处自证）。
+  const conversationID = newConversationID();
   const body = {
     model: "fast-model",
     messages: [
@@ -331,29 +333,18 @@ export async function desktopChatWithExpert(
     stream_options: { include_usage: true },
   };
   const base = chatBase(a);
-  const h: Record<string, string> = {
-    Authorization: "Bearer " + a.accessToken,
-    "Content-Type": "application/json",
-    Accept: "text/event-stream",
-    "User-Agent": DESKTOP_UA,
-    "X-Domain": base,
-    "X-Product": "SaaS",
-    "X-User-Id": a.uid,
-    "X-Conversation-ID": conversationID,
-    "X-Request-ID": String(Date.now()),
-    "X-Agent-Intent": "craft",
-    "X-Agent-Type": "main",
-    "X-IDE-Name": "WorkBuddy",
-    "X-IDE-Type": "WorkBuddy",
-    "X-IDE-Version": "5.5.6",
-    "x-codebuddy-request": "1",
-  };
+  // 头族统一走 chatHeaders：手搓头与主 chat 路径长期漂移（缺 trace/B3/stainless/acp，
+  // X-IDE-Version 写死、X-Request-ID 是十进制毫秒）——统一出口后主路径改一次这里自动跟随。
+  const h = chatHeaders(cfg, a, "", {
+    conversationID,
+    conversationRequestID: newMessageID(),
+    traceID: "",
+  });
   if (expertID) h["X-Expert-Id"] = expertID;
   const resp = await fetch(base + "/v2/chat/completions", {
     method: "POST", headers: h, body: JSON.stringify(body),
     signal: AbortSignal.timeout(120_000), cache: "no-store",
   });
-  void cfg;
   if (resp.status !== 200) {
     const b = (await resp.text()).slice(0, 200);
     throw new Error("chat http " + resp.status + ": " + b);
@@ -478,7 +469,9 @@ export async function reportMPEvent(
 
 // schoolChatTimesEvents mp 对话事件（chat_3_times / Sequential_Tasks_1/3/6 判据）。
 export function schoolChatTimesEvents(conversationID: string): Record<string, unknown> {
-  const rid = "wb2api-" + randomUUID();
+  // rid 用官方形态（32 hex 毫秒前缀）。旧值 "wb2api-"+uuid 把项目缩写写进
+  // traceId / rootRequestId / messageId 一起上报（上游 issue #51）。
+  const rid = newMessageID();
   return {
     eventCode: "chat_request_send",
     inputLength: 14, isPlan: false, isAutoExecuteTerminal: false,
@@ -530,7 +523,7 @@ export function miniPlaybookEvents(caseID: string, caseName: string): Record<str
     {
       eventCode: "playbook_prompt_send", source: "discover",
       promptLength: 96, isOfficial: 1,
-      conversationId: "wb2api-mp-pb-" + randomUUID(), extVersion: "2.2.8", ...base,
+      conversationId: newConversationID(), extVersion: "2.2.8", ...base,
     },
   ];
 }

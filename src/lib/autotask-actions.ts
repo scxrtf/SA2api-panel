@@ -3,7 +3,7 @@
 // 通用约定：返回 string 为业务结果（含「跳过/稍后重试」语义），throw 为系统错误。
 import type { AppConfig } from "./config";
 import type { AuthShape } from "./upstream/client";
-import { chatStream, truncate, type ChatMeta } from "./upstream/client";
+import { chatStream, truncate, newConversationID, newMessageID, type ChatMeta } from "./upstream/client";
 import {
   acceptTasks, acceptTasksMP, claimReward, claimRewardMP, listTasks, listTasksMP,
   buddyAgreement, buddyFirst,
@@ -56,7 +56,7 @@ export async function runChat5(cfg: AppConfig, a: AuthShape): Promise<string> {
   const need = target - t.current;
   if (need <= 0) return "进度已达标，无需上报";
   for (let i = 0; i < need; i++) {
-    const cid = "wb2api-chat5-" + Date.now() + "-" + i;
+    const cid = newConversationID();
     try {
       await reportChatActivity(cfg, a, cid, "");
     } catch (e) {
@@ -70,7 +70,7 @@ export async function runChat5(cfg: AppConfig, a: AuthShape): Promise<string> {
 // runFirstBuddy 领养：report（解锁前置）→ agreement → first。
 export async function runFirstBuddy(cfg: AppConfig, a: AuthShape): Promise<string> {
   try {
-    await reportChatActivity(cfg, a, "wb2api-adopt-" + Date.now(), "");
+    await reportChatActivity(cfg, a, newConversationID(), "");
   } catch (e) {
     throw new Error("前置上报: " + (e instanceof Error ? e.message : String(e)));
   }
@@ -123,7 +123,7 @@ export async function runModelChat(cfg: AppConfig, a: AuthShape): Promise<string
   }
   await sleep(reportGapMs);
   try {
-    await reportChatActivityModel(cfg, a, "wb2api-glm52-" + Date.now(), "", modelID, modelName);
+    await reportChatActivityModel(cfg, a, newConversationID(), "", modelID, modelName);
   } catch (e) {
     return "对话已完成，但进度上报失败：" + (e instanceof Error ? e.message : String(e));
   }
@@ -134,9 +134,8 @@ export async function runModelChat(cfg: AppConfig, a: AuthShape): Promise<string
 
 // runRichMeow RichMeow_Chat：桌面端完整对话事件链。
 export async function runRichMeow(cfg: AppConfig, a: AuthShape): Promise<string> {
-  const ms = Date.now();
   const events = desktopChatSequence(
-    "wb2api-rm-" + ms, "wb2api-rm-req-" + ms, "req-" + ms + "-user", "fast-model", "fast-model",
+    newConversationID(), newMessageID(), newMessageID(), "fast-model", "fast-model",
   );
   await reportDesktopEvent(cfg, a, events);
   return "已按桌面端指纹上报完整对话事件链（agent_task_created→chat_response）";
@@ -151,7 +150,7 @@ export async function runBuddyApp(cfg: AppConfig, a: AuthShape): Promise<string>
 
 // runAutomationCreate automation_1：定时任务创建成功事件。
 export async function runAutomationCreate(cfg: AppConfig, a: AuthShape): Promise<string> {
-  await reportDesktopEvent(cfg, a, [desktopAutomationCreateEvent("wb2api 自动化")]);
+  await reportDesktopEvent(cfg, a, [desktopAutomationCreateEvent("自动化")]);
   return "已上报定时任务创建事件";
 }
 
@@ -169,8 +168,7 @@ export async function runTemplateUse(cfg: AppConfig, a: AuthShape): Promise<stri
   ];
   for (let i = 0; i < templates.length; i++) {
     const [id, name] = templates[i];
-    const ms = Date.now();
-    const events = desktopTemplateUseSequence("wb2api-tpl-" + ms + "-" + i, "wb2api-tpl-req-" + ms + "-" + i, id, name);
+    const events = desktopTemplateUseSequence(newConversationID(), newMessageID(), id, name);
     try {
       await reportDesktopEvent(cfg, a, events);
     } catch (e) {
@@ -183,9 +181,8 @@ export async function runTemplateUse(cfg: AppConfig, a: AuthShape): Promise<stri
 
 // runPlaybookPrompt playbook_prompt：灵感案例做同款事件组。
 export async function runPlaybookPrompt(cfg: AppConfig, a: AuthShape): Promise<string> {
-  const ms = Date.now();
   const events = desktopPlaybookPromptSequence(
-    "wb2api-pb-" + ms, "wb2api-pb-req-" + ms, "pm-gtm-launch-plan", "新产品上市 GTM 发布计划一页纸",
+    newConversationID(), newMessageID(), "pm-gtm-launch-plan", "新产品上市 GTM 发布计划一页纸",
   );
   await reportDesktopEvent(cfg, a, events);
   return "已上报 playbook_cta_click + playbook_prompt_send";
@@ -193,8 +190,7 @@ export async function runPlaybookPrompt(cfg: AppConfig, a: AuthShape): Promise<s
 
 // runCreateCanvas create_canvas：设计创意画布创建事件组（+300 分）。
 export async function runCreateCanvas(cfg: AppConfig, a: AuthShape): Promise<string> {
-  const ms = Date.now();
-  const events = desktopDesignCanvasSequence("wb2api-canvas-" + ms, "wb2api-canvas-req-" + ms);
+  const events = desktopDesignCanvasSequence(newConversationID(), newMessageID());
   await reportDesktopEvent(cfg, a, events);
   return "已上报 wbx_design_canvas_task_create/open";
 }
@@ -364,7 +360,7 @@ async function runNightChats(cfg: AppConfig, a: AuthShape, need: number): Promis
       }
     }
     try {
-      await reportChatActivityModel(cfg, a, "wb2api-night-" + Date.now() + "-" + i, "", "glm-5.2", "GLM-5.2");
+      await reportChatActivityModel(cfg, a, newConversationID(), "", "glm-5.2", "GLM-5.2");
     } catch (e) {
       return { ok, err: "第 " + (i + 1) + " 次上报失败: " + (e instanceof Error ? e.message : String(e)) };
     }
@@ -439,7 +435,7 @@ async function runMPMiniChatTask(cfg: AppConfig, a: AuthShape, code: string, wit
   for (let i = 0; i < need; i++) {
     // 真人节奏：连发会被反作弊判无效整体回滚（2s 连发全灭、45s 间隔全存活）。
     await sleep(mpChatEventGapMs + Math.floor(Math.random() * mpChatJitterMaxMs));
-    const conv = "wb2api-mp-" + Date.now() + "-" + i;
+    const conv = newConversationID();
     const ev = withActivityId ? schoolSeasonChatEvent(conv) : schoolChatTimesEvents(conv);
     try {
       await reportMPEvent(cfg, a, [ev]);
@@ -519,7 +515,7 @@ async function runSequentialEventTask(
 // runSequentialAutomation Tasks_4「创建定时任务」：PC 同源 automation 事件。
 export function runSequentialAutomation(cfg: AppConfig, a: AuthShape): Promise<string> {
   return runSequentialEventTask(cfg, a, "Sequential_Tasks_4", async () => {
-    await reportDesktopEvent(cfg, a, [desktopAutomationCreateEvent("wb2api 自动化")]);
+    await reportDesktopEvent(cfg, a, [desktopAutomationCreateEvent("自动化")]);
   }, null);
 }
 
@@ -528,23 +524,22 @@ export function runSequentialModelChat(cfg: AppConfig, a: AuthShape): Promise<st
   return runSequentialEventTask(
     cfg, a, "Sequential_Tasks_5",
     async () => {
-      const conv = "wb2api-mp-glm-" + Date.now();
+      const conv = newConversationID();
       await reportMPEvent(cfg, a, [miniChatModelEvent(conv, "glm-5.2", "GLM-5.2")]);
     },
     async () => {
-      await reportChatActivityModel(cfg, a, "wb2api-mp-glm-" + Date.now(), "", "glm-5.2", "GLM-5.2");
+      await reportChatActivityModel(cfg, a, newConversationID(), "", "glm-5.2", "GLM-5.2");
     },
   );
 }
 
 // runSequentialPlaybook Tasks_7「体验灵感功能」：PC 事件组 primary + mp 形态 fallback。
 export function runSequentialPlaybook(cfg: AppConfig, a: AuthShape): Promise<string> {
-  const ms = Date.now();
   return runSequentialEventTask(
     cfg, a, "Sequential_Tasks_7",
     async () => {
       await reportDesktopEvent(cfg, a, desktopPlaybookPromptSequence(
-        "wb2api-pb-" + ms, "wb2api-pb-req-" + ms, "pm-gtm-launch-plan", "新产品上市 GTM 发布计划一页纸",
+        newConversationID(), newMessageID(), "pm-gtm-launch-plan", "新产品上市 GTM 发布计划一页纸",
       ));
     },
     async () => {

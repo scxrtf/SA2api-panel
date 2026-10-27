@@ -1,0 +1,215 @@
+diff --git a/src/lib/chat.ts b/src/lib/chat.ts
+index 15c3403..898943a 100644
+--- a/src/lib/chat.ts
++++ b/src/lib/chat.ts
+@@ -36,9 +36,11 @@ import { tokensPerSecond } from "./upstream/usage";
+ import { currentModelRate } from "./upstream/modelCatalog";
+ import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
+ import { runlog } from "./runlog";
++import { clipLogText } from "./logfmt";
+ import * as wafip from "./wafip";
+ import { backoffAfter, sleep } from "./backoff";
+ import { identifyKeyIdentity, providerAllowed } from "./auth-guard";
++import { withFreshAuth, classifySessionError } from "./accountSession";
+ 
+ type Obj = Record<string, unknown>;
+ 
+@@ -557,6 +572,55 @@ export async function handleChat(opts: {
+         continue;
+       }
+ 
++      // ── 上游 401（auth_expired）：强制刷新 + 同号重试一次 ────────────────
++      // expiresAt 是本地时间戳（可能被写成未来值），token 却已被上游提前吊销，
++      // needsRefresh 不会触发——不在这里强制刷新，坏号会一直留在池里被反复选中，
++      // 每次客户端请求都在一串死号之间轮转（8 次 × 指数退避 ≈ 40s）再报 503。
++      // 复用 accountSession.withFreshAuth：单飞刷新 + 401 刷新后重试一次 + 死号负缓存。
++      // 刷新成功 → 同号重试（不占轮转预算、不退避）；刷新失败（12153 / 无
++      // refreshToken）→ 该号已死，立即禁用并换号。
++      if (!res.ok && (res.error?.kind ?? classify(res.status, res.respBody ?? "")) === "auth_expired") {
++        try {
++          res = await withFreshAuth(cfg, authShape, async (auth) => {
++            const r = await chatStream(cfg, auth, outBody, clientIP, chatMeta);
++            if (!r.ok && (r.error?.kind === "auth_expired" || r.error?.kind === "session_dead")) {
++              throw r.error;
++            }
++            return r;
++          });
++          await pool.clearSessionDead(acct.uid);
++          runlog("WARN: upstream 401 uid=" + acct.uid + " → token refreshed, retried");
++        } catch (e) {
++          const emsg = e instanceof Error ? e.message : String(e);
++          const authFailed = classifySessionError(e) !== "upstream_error";
++          if (authFailed) {
++            // token 已不可用且刷新也无效：号已死，立即禁用（不再参与选号）。
++            await pool.disable(
++              acct.uid,
++              "upstream 401 (token rejected); refresh failed: " + emsg.slice(0, 80),
++            );
++            await recordAttempt({
++              uid: acct.uid, model: bare, realm, provider: "",
++              ok: false, errKind: "auth_expired",
++            });
++            lastErr = { kind: "auth_expired", status: 401, msg: emsg, retryAfterMs: 0 };
++            fail(acct.uid);
++            // 死号已从池中剔除，退避无意义（客户端更快拿到下一跳）。
++            continue;
++          }
++          // 非鉴权失败（重试时网络抖动）：沿用传输层口径换号，不罚号。
++          await recordAttempt({
++            uid: acct.uid, model: bare, realm, provider: "",
++            ok: false, errKind: "transport",
++          });
++          lastErr = { kind: "none", status: 0, msg: emsg, retryAfterMs: 0 };
++          fail(acct.uid);
++          await pool.noteFailures(cfg, acct.uid);
++          await sleep(backoffAfter(i));
++          continue;
++        }
++      }
++
+       if (!res.ok) {
+         const status = res.status;
+         const respBody = res.respBody ?? "";
+@@ -618,13 +682,27 @@ export async function handleChat(opts: {
+           kind === "bad_params"
+         ) {
+           fail(acct.uid);
+-          finishLog(400, acct.uid, kind);
++          finishLog(400, acct.uid, kind, undefined, respBody);
+           return openAIError(
+             400, kind,
+             respBody.trim() || `upstream rejected request (${kind})`,
+             hintOf(kind, respBody),
+           );
+         }
++        // 请求级 4xx（400/413/422）：同一 body 换任何一个号结果都一样。继续轮转
++        // 只会把一次客户端错误放大成 max_rotate 次上游请求 + 指数退避（8 次约
++        // 39.5s），末端还会被错报成 503 no_healthy_account——排障时看不到真因。
++        // 直接按上游状态码透传，不罚号、不退避。
++        if (kind === "client" && (status === 400 || status === 413 || status === 422)) {
++          fail(acct.uid);
++          finishLog(status, acct.uid, kind, undefined, respBody);
++          return openAIError(
++            status,
++            "upstream_client_error",
++            respBody.trim() || `upstream rejected the request (HTTP ${status})`,
++            hintOf(kind, respBody),
++          );
++        }
+         // 其余分类错误：落账号处置 + 换号。
+         lastErr = {
+           kind, status, msg: respBody,
+@@ -806,6 +885,35 @@ export async function handleChat(opts: {
+         status = 400;
+         code = "model_unavailable";
+         break;
++      // 上游 4xx / 5xx 一律按上游语义回传：旧口径把未覆盖的类别全部落到
++      // 503 no_healthy_account，把「请求本身有问题」「账号 token 失效」
++      // 「上游 5xx」混成同一个池不可用信号，客户端与排障都被误导。
++      case "client":
++        if (lastErr.status >= 400 && lastErr.status < 500) {
++          status = lastErr.status;
++          code = "upstream_client_error";
++        }
++        break;
++      case "auth_expired":
++        status = 503;
++        code = "upstream_auth_expired";
++        msg = "all candidate accounts were rejected by upstream (401 token invalid); " +
++          "re-login is required for the affected accounts";
++        break;
++      case "account_fault":
++        status = 503;
++        code = "upstream_account_fault";
++        msg = "every candidate account hit an account-level fault at upstream; retry later";
++        break;
++      case "hard_credit":
++        // 上游 402 = 候选号积分耗尽，按计费语义回传（OpenAI 兼容）。
++        status = 402;
++        code = "insufficient_credit";
++        break;
++      case "server":
++        status = 502;
++        code = "upstream_server_error";
++        break;
+       default:
+         break;
+     }
+diff --git a/src/lib/modelscan.ts b/src/lib/modelscan.ts
+index 6001f16..193afe0 100644
+--- a/src/lib/modelscan.ts
++++ b/src/lib/modelscan.ts
+@@ -326,6 +326,7 @@ function codeOf(r: ProbeResult): { code: string; label: string } {
+   switch (r.kind) {
+     case "hard_credit": return { code: "402", label: "积分耗尽" };
+     case "session_dead": return { code: "12153", label: "会话失效" };
++    case "auth_expired": return { code: "401", label: "401 token 失效" };
+     case "account_fault": return { code: "fault", label: "账号级故障" };
+     case "waf_block": return { code: "waf", label: "WAF 拦截" };
+     case "timeout": return { code: "timeout", label: "请求超时" };
+@@ -348,6 +349,7 @@ function stopAccount(r: ProbeResult): boolean {
+   return (
+     r.kind === "hard_credit" ||
+     r.kind === "session_dead" ||
++    r.kind === "auth_expired" ||
+     r.kind === "account_fault" ||
+     r.kind === "waf_block"
+   );
+@@ -361,6 +363,7 @@ async function applyOutcome(cfg: AppConfig, uid: string, model: string, r: Probe
+     case "hard_credit":
+     case "model_blocked":
+     case "session_dead":
++    case "auth_expired":
+     case "account_fault":
+     case "waf_block":
+       await pool.applyErrorKind(cfg, uid, r.kind, r.body || r.kind, model, r.retryAfterMs);
+diff --git a/src/lib/pool.ts b/src/lib/pool.ts
+index ab60e05..c338455 100644
+--- a/src/lib/pool.ts
++++ b/src/lib/pool.ts
+@@ -1101,6 +1101,11 @@ export async function applyErrorKind(
+     case "session_dead":
+       await noteSessionDead(uid);
+       return;
++    case "auth_expired":
++      // 上游 401（token 已不可用）：刷新重试由调用方负责；走到这里说明刷新也没救回，
++      // 按会话失效计数，达阈值即禁用，避免坏号长期滞留池中反复被选中。
++      await noteSessionDead(uid);
++      return;
+     case "account_fault":
+       await cooldownSoftRate(cfg, uid, 0, "account_fault: " + body.slice(0, 110));
+       return;
+diff --git a/src/lib/upstream/errors.ts b/src/lib/upstream/errors.ts
+index ee4e388..a65ade2 100644
+--- a/src/lib/upstream/errors.ts
++++ b/src/lib/upstream/errors.ts
+@@ -6,6 +6,7 @@ export type ErrKind =
+   | "soft_rate" // 429 软限流 → 对齐上游重置墙钟，封顶 softRateMax
+   | "soft_queue" // 6020 queue.waiting 排队等待 → 仅模型级短冷却，绝不罚号
+   | "session_dead" // 401+12153 会话失效 → 连续 3 次禁用
++  | "auth_expired" // 401 无业务信封（APISIX HTML）：token 被上游判无效 → 强制刷新/禁用
+   | "account_fault" // 11140 request illegal / 14017 未激活 → 冷却轮换
+   | "content_blocked" // 内容审核误报 → 不罚号，网关降级重试
+   | "model_blocked" // 11102 该后端无此模型 → (账号,模型) 负缓存
+@@ -288,6 +289,12 @@ export function classify(status: number, body: string): ErrKind {
+   if (status >= 500) return "server";
+   // 10. WAF 403（无业务信封）。
+   if (isWafBlocked(status, body)) return "waf_block";
++  // 10.5 网关层 401（APISIX / OpenResty HTML，无业务信封）：Bearer token 被上游判为
++  // 无效。与业务信封 12153 区分——12153 是「refresh token 失效」（已在上面判
++  // session_dead），这里是「本地 access token 已不可用」，两条都要能触发重新登录，
++  // 但处置不同：本类先强制刷新，刷新失败才落禁用。
++  // 归到 client 的旧口径会让坏号既不刷新也不冷却，长期滞留池中反复被选中。
++  if (status === 401 && !hasBusinessEnvelope(body)) return "auth_expired";
+   // 11. 图片无效（11135 / 文案）。
+   if (status === 400 && codeMarker(lower, "11135")) return "image_invalid";
+   if (status === 400) {
+@@ -405,6 +412,8 @@ export function gatewayHint(kind: ErrKind, msg: string, ctx: HintContext): strin
+       return "account-level fault at upstream (auth/quota state); the gateway will rotate or disable this account";
+     case "session_dead":
+       return "account session expired at upstream; the account is disabled until re-login";
++    case "auth_expired":
++      return "account access token rejected by upstream (401); the gateway refreshes it or disables the account until re-login";
+     case "hard_credit":
+       return "account credits exhausted at upstream; waiting for daily check-in to restore";
+     case "model_blocked":

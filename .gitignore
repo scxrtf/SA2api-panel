@@ -43,3 +43,9 @@ next-env.d.ts
 # 本地一次性写文件脚本
 scripts-*.js
 scripts-*.cjs
+
+# 本地工具与留档（不属于项目代码，避免推送到远端）
+/.codex/
+/.workbuddy/
+/.drill-save-*/
+/backup-*/

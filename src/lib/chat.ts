@@ -36,9 +36,13 @@ import { tokensPerSecond } from "./upstream/usage";
 import { currentModelRate } from "./upstream/modelCatalog";
 import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
+import { clipLogText } from "./logfmt";
 import * as wafip from "./wafip";
 import { backoffAfter, sleep } from "./backoff";
 import { identifyKeyIdentity, providerAllowed } from "./auth-guard";
+import { withFreshAuth, classifySessionError } from "./accountSession";
+import { isModelRateLimit } from "./upstream/errors";
+import { aggregateStarved, starvedRetryBody } from "./starved";
 
 type Obj = Record<string, unknown>;
 
@@ -225,6 +229,8 @@ async function recordRequestLog(r: {
   keyName?: string;
   slot?: string;
   machineId?: string;
+  // 报错内容：失败请求的上游响应正文（已 clipLogText）。成功请求留空。
+  errMsg?: string;
 }): Promise<void> {
   try {
     await prisma.requestLog.create({ data: r });
@@ -299,8 +305,9 @@ export async function handleChat(opts: {
   const modelRate = currentModelRate(realm, bare);
   // 显式供应商前缀绝不回落池：查找失败由 providerChat 返回并记录错误。
   if (provider !== "") {
-    // 供应商准入：子密钥绑定白名单时只放行名单内供应商；未绑定（空）或 "*"
-    // 不限制。身份缺失（无法识别 / DB 异常）仍按拒绝处理，避免借空绑定绕过。
+    // 供应商准入：子密钥只放行授权名单内的供应商；显式 "*" = 全部；未授权任何
+    // 供应商（空）一律拒绝（新建密钥默认态）。身份缺失（无法识别 / DB 异常）
+    // 同样按拒绝处理，避免借空授权绕过。
     if (opts.req) {
       const allowed = keyIdentity
         ? keyIdentity.unrestricted || providerAllowed(keyIdentity.providers, provider)
@@ -309,6 +316,7 @@ export async function handleChat(opts: {
         await recordRequestLog({
           uid: "", model: rawModel, realm: "provider:" + provider, provider,
           status: 403, errKind: "provider_not_authorized", stream,
+          errMsg: "key 未授权使用供应商 " + provider,
           durationMs: Date.now() - started, clientIp: clientIP, ua, path, keyName,
         });
         return openAIError(
@@ -384,9 +392,42 @@ export async function handleChat(opts: {
   // 只认前者会让修复层在最需要它的场景下失效。提示词/模型名改写不动 tools 子树。
   const declaredTools = toolNameAllowlist(outBody);
 
+  // 模型降级（config.model_fallback，移植上游 2cd2f3d）：curModel 是**本轮实际使用**
+  // 的模型，初值 = 客户端请求的 bare。某账号在 curModel 上撞 6004 模型级限流且配了
+  // 等价模型时，同账号换模型重试（换模型比换号代价小）。
+  //
+  // ⚠️ 与 bare 分开的原因：降级后二者指向不同模型，而要喂给不同用途——
+  //   - 实际用途（选号 / 出站 body / 成功清理负缓存）→ curModel
+  //   - 冷却记账（applyErrorKind 的 6004 分支）→ bare（**限流的是原模型**；误记成
+  //     等价模型会把本来可用的等价模型也冷却掉，降级就白做了）
+  let curModel = bare;
+  // fallbackTried 记录本请求已试过的降级目标，防 A→B→A 循环（与按账号去重的 tried 正交）。
+  const fallbackTried = new Set<string>();
+  const fallbackTo = (): string => {
+    const m = cfg.model_fallback ?? {};
+    const to = m[curModel] || (realm ? m[realm + ":" + curModel] ?? "" : "");
+    if (!to || to === curModel || fallbackTried.has(to)) return "";
+    return to;
+  };
+  const applyFallback = (to: string): boolean => {
+    if (!to) return false;
+    fallbackTried.add(to);
+    curModel = to;
+    // 出站 body 重写：上游必须收到等价模型名（解析失败则不动 body，后续按原样失败）。
+    try {
+      const o = JSON.parse(outBody) as Obj;
+      o["model"] = to;
+      outBody = JSON.stringify(o);
+    } catch {
+      // 坏 body：不二次错误化
+    }
+    return true;
+  };
+
   const tried = new Set<string>();
   let lastErr: { kind: ErrKind; status: number; msg: string; retryAfterMs: number } | null = null;
   let modelBlock: pool.ModelBlockStatus | null = null;
+  let retryAfterMs = 0;
   let heldUID = "";
 
   const releaseHeld = () => {
@@ -404,20 +445,27 @@ export async function handleChat(opts: {
   };
 
   let attemptCount = 0;
+  // finishLog 落一条请求日志 + 一行运行日志。errMsg 为失败请求的报错内容
+  // （上游正文，已 clip）；缺省空串——成功路径不写，日志表不带噪声。
   const finishLog = (
     status: number,
     uid: string,
     errKind: string,
     extra?: Partial<StreamStats>,
+    errMsg = "",
   ) => {
+    const errText = errMsg ? clipLogText(errMsg, 1000) : "";
     runlog(
       "chat " + (status < 400 ? "OK " : "ERR ") + status + " " + bare +
       (uid ? " uid=" + uid : "") + (errKind ? " kind=" + errKind : "") +
-      " " + (Date.now() - started) + "ms",
+      " " + (Date.now() - started) + "ms" +
+      // 运行日志只带截断片段：完整报错内容看请求日志展开区。
+      (errText ? " err=" + clipLogText(errText, 180) : ""),
     );
     void recordRequestLog({
       uid, model: rawModel, realm, provider: "",
       status, errKind, stream,
+      errMsg: errText,
       durationMs: Date.now() - started,
       clientIp: clientIP, ua, path,
       ttfbMs: extra?.ttfbMs ? extra.ttfbMs + logAttemptStarted - started : 0,
@@ -442,7 +490,7 @@ export async function handleChat(opts: {
       // 选号：粘性优先，否则普通轮换。
       let entry: pool.PoolEntry | null = null;
       if (stickyUID) {
-        entry = await pool.pickByUIDForModel(cfg, stickyUID, bare);
+        entry = await pool.pickByUIDForModel(cfg, stickyUID, curModel);
         if (!entry || (realm !== "" && entry.account.realm !== realm)) {
           void unbindSticky(sessKey);
           stickyUID = "";
@@ -450,10 +498,28 @@ export async function handleChat(opts: {
         }
       }
       if (!entry) {
-        entry = await pool.pick(cfg, { tried, model: bare, realm });
+        entry = await pool.pick(cfg, { tried, model: curModel, realm });
       }
       if (!entry) {
-        modelBlock = await pool.modelBlocked(bare);
+        // 全池该模型都处于 6004 冷却时 pick 直接返回 null——若只在上游返回 6004 后
+        // 降级，这里会先报 503、根本走不到降级，恰好在最需要降级的场景失效。
+        // 故「选不到号」时也尝试换模型，然后重新进入下一轮选号。
+        const to = fallbackTo();
+        if (to && applyFallback(to)) {
+          runlog("model fallback: " + bare + " -> " + to + " (no account for model, 6004 blocked)");
+          continue;
+        }
+        modelBlock = await pool.modelBlocked(curModel, realm);
+        const unavailable = await pool.retryStatus(curModel, realm);
+        retryAfterMs = unavailable.retryAfterMs;
+        // 模型级全冷却使用既有 model_unavailable 语义；仅账号级冷却是 429。
+        if (unavailable.accountCooling > 0 && modelBlock) modelBlock.blocked = false;
+        if (!lastErr && unavailable.accountCooling > 0) {
+          lastErr = {
+            kind: "soft_rate", status: 429,
+            msg: "all candidate accounts are cooling down", retryAfterMs,
+          };
+        }
         break;
       }
       const acct = entry.account;
@@ -540,7 +606,9 @@ export async function handleChat(opts: {
           e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
         if (isTimeout) {
           lastErr = { kind: "none", status: 0, msg: "upstream timeout", retryAfterMs: 0 };
-          finishLog(503, acct.uid, "upstream_timeout");
+          finishLog(503, acct.uid, "upstream_timeout", undefined,
+            "upstream timeout after " + (Date.now() - attemptStarted) + "ms (" +
+            (e instanceof Error ? e.name : "timeout") + ")");
           return openAIError(
             503,
             "upstream_timeout",
@@ -557,6 +625,55 @@ export async function handleChat(opts: {
         continue;
       }
 
+      // ── 上游 401（auth_expired）：强制刷新 + 同号重试一次 ────────────────
+      // expiresAt 是本地时间戳（可能被写成未来值），token 却已被上游提前吊销，
+      // needsRefresh 不会触发——不在这里强制刷新，坏号会一直留在池里被反复选中，
+      // 每次客户端请求都在一串死号之间轮转（8 次 × 指数退避 ≈ 40s）再报 503。
+      // 复用 accountSession.withFreshAuth：单飞刷新 + 401 刷新后重试一次 + 死号负缓存。
+      // 刷新成功 → 同号重试（不占轮转预算、不退避）；刷新失败（12153 / 无
+      // refreshToken）→ 该号已死，立即禁用并换号。
+      if (!res.ok && (res.error?.kind ?? classify(res.status, res.respBody ?? "")) === "auth_expired") {
+        try {
+          res = await withFreshAuth(cfg, authShape, async (auth) => {
+            const r = await chatStream(cfg, auth, outBody, clientIP, chatMeta);
+            if (!r.ok && (r.error?.kind === "auth_expired" || r.error?.kind === "session_dead")) {
+              throw r.error;
+            }
+            return r;
+          });
+          await pool.clearSessionDead(acct.uid);
+          runlog("WARN: upstream 401 uid=" + acct.uid + " → token refreshed, retried");
+        } catch (e) {
+          const emsg = e instanceof Error ? e.message : String(e);
+          const authFailed = classifySessionError(e) !== "upstream_error";
+          if (authFailed) {
+            // token 已不可用且刷新也无效：号已死，立即禁用（不再参与选号）。
+            await pool.disable(
+              acct.uid,
+              "upstream 401 (token rejected); refresh failed: " + emsg.slice(0, 80),
+            );
+            await recordAttempt({
+              uid: acct.uid, model: bare, realm, provider: "",
+              ok: false, errKind: "auth_expired",
+            });
+            lastErr = { kind: "auth_expired", status: 401, msg: emsg, retryAfterMs: 0 };
+            fail(acct.uid);
+            // 死号已从池中剔除，退避无意义（客户端更快拿到下一跳）。
+            continue;
+          }
+          // 非鉴权失败（重试时网络抖动）：沿用传输层口径换号，不罚号。
+          await recordAttempt({
+            uid: acct.uid, model: bare, realm, provider: "",
+            ok: false, errKind: "transport",
+          });
+          lastErr = { kind: "none", status: 0, msg: emsg, retryAfterMs: 0 };
+          fail(acct.uid);
+          await pool.noteFailures(cfg, acct.uid);
+          await sleep(backoffAfter(i));
+          continue;
+        }
+      }
+
       if (!res.ok) {
         const status = res.status;
         const respBody = res.respBody ?? "";
@@ -566,6 +683,25 @@ export async function handleChat(opts: {
           uid: acct.uid, model: bare, realm, provider: "",
           ok: false, errKind: kind,
         });
+
+        // 模型降级：**仅 6004 模型级限流**触发。等价模型是同一底层能力（计价不同），
+        // 被限流时同账号改用另一个继续服务，而不是让客户端等冷却结束。
+        // 只认 6004：11102（该后端无此模型）换模型也救不了；11101/普通 429/5xx 是
+        // 账号级或瞬时问题，换模型无意义。冷却记在 bare（原模型）名下。
+        if (kind === "soft_rate" && isModelRateLimit(respBody)) {
+          const to = fallbackTo();
+          if (to) {
+            await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare,
+              res.error?.retryAfterMs ?? 0);
+            if (applyFallback(to)) {
+              runlog("model fallback: " + bare + " -> " + to + " (6004 model rate limit, uid=" + acct.uid + ")");
+              // 同账号重试：降级是「换模型」不是「换号」，把该号从 tried 移除。
+              tried.delete(acct.uid);
+              releaseHeld();
+              continue;
+            }
+          }
+        }
 
         // 6020 队列等待：模型级短冷却后立即返回 429，不换号不退避。
         // 继续轮转只会把一次排队放大成 max_rotate 次上游请求；落到末端还会
@@ -577,7 +713,7 @@ export async function handleChat(opts: {
           const effectiveMs = Math.min(cfg.soft_cooldown_ms, retryMs);
           await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, retryMs);
           fail(acct.uid);
-          finishLog(429, acct.uid, kind);
+          finishLog(429, acct.uid, kind, undefined, respBody);
           return openAIError(
             429,
             "upstream_queueing",
@@ -604,7 +740,7 @@ export async function handleChat(opts: {
         if (kind === "content_blocked") {
           await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, 0);
           fail(acct.uid);
-          finishLog(400, acct.uid, kind);
+          finishLog(400, acct.uid, kind, undefined, respBody);
           return openAIError(
             400, "content_blocked",
             respBody.trim() || "content blocked by upstream content firewall",
@@ -618,10 +754,24 @@ export async function handleChat(opts: {
           kind === "bad_params"
         ) {
           fail(acct.uid);
-          finishLog(400, acct.uid, kind);
+          finishLog(400, acct.uid, kind, undefined, respBody);
           return openAIError(
             400, kind,
             respBody.trim() || `upstream rejected request (${kind})`,
+            hintOf(kind, respBody),
+          );
+        }
+        // 请求级 4xx（400/413/422）：同一 body 换任何一个号结果都一样。继续轮转
+        // 只会把一次客户端错误放大成 max_rotate 次上游请求 + 指数退避（8 次约
+        // 39.5s），末端还会被错报成 503 no_healthy_account——排障时看不到真因。
+        // 直接按上游状态码透传，不罚号、不退避。
+        if (kind === "client" && (status === 400 || status === 413 || status === 422)) {
+          fail(acct.uid);
+          finishLog(status, acct.uid, kind, undefined, respBody);
+          return openAIError(
+            status,
+            "upstream_client_error",
+            respBody.trim() || `upstream rejected the request (HTTP ${status})`,
             hintOf(kind, respBody),
           );
         }
@@ -636,14 +786,16 @@ export async function handleChat(opts: {
         // 该次 WAF 403 喂入 IP 级状态机，若激活（短窗多号命中，IP 被拦而非账号）
         // 直接终止轮转返回 403，避免把一次客户端请求放大 max_rotate 倍加重风控。
         if (kind === "waf_block" && wafip.noteWaf(acct.uid)) {
-          finishLog(403, acct.uid, "waf_ip_blocked");
+          finishLog(403, acct.uid, "waf_ip_blocked", undefined, respBody);
           return openAIError(
             403, "waf_ip_blocked",
             "waf ip-level block: upstream firewall is blocking the gateway IP, " +
             "rotation stopped; retry after the block window expires",
           );
         }
-        await sleep(backoffAfter(i)); // 分类错误换号退避（WAF fail-fast 优先于退避）
+        // 普通 429 已把该账号置为冷却；健康账号切换不需要等待或指数退避。
+        // 只有非限流故障保留短退避，避免客户端为每次换号承担数十秒延迟。
+        if (kind !== "soft_rate") await sleep(backoffAfter(i));
         continue;
       }
 
@@ -680,7 +832,7 @@ export async function handleChat(opts: {
                 noteCacheTokens(bare, stats.promptTokens, stats.cacheHitTokens, stats.cacheMissTokens);
               }
               await pool.noteSuccess(uidCaptured);
-              await pool.blockModelClear(uidCaptured, bare);
+              await pool.blockModelClear(uidCaptured, curModel);
               if (sessKey && cfg.session_sticky) await bindSticky(sessKey, uidCaptured);
               await recordAttempt({
                 uid: uidCaptured, model: bare, realm, provider: "",
@@ -709,7 +861,7 @@ export async function handleChat(opts: {
         // RequestLog 的 token/TTFB 维度与 Go 的 defer st.done() 同语义：流式
         // 下等流真正结束、末帧 usage 可得时才落日志（响应本身已可先返回）。
         void statsPromise.then((stats) => finishLog(200, uidCaptured,
-          stats.errorFrame ? "upstream_error" : "", stats),
+          stats.errorFrame ? "upstream_error" : "", stats, stats.errorFrame || ""),
           () => finishLog(200, uidCaptured, "stream_interrupted"))
           .catch(() => runlog("WARN: stream request log failed"));
         return new Response(readable, {
@@ -725,7 +877,7 @@ export async function handleChat(opts: {
       // 非流式：聚合成单个 chat.completion。
       if (!res.body) {
         fail(acct.uid);
-        finishLog(502, acct.uid, "upstream_parse");
+        finishLog(502, acct.uid, "upstream_parse", undefined, "empty upstream stream");
         return openAIError(502, "upstream_parse", "empty upstream stream");
       }
       let agg;
@@ -733,14 +885,38 @@ export async function handleChat(opts: {
         agg = await aggregate(res.body);
       } catch (e) {
         fail(acct.uid);
-        finishLog(502, acct.uid, "upstream_parse");
+        finishLog(502, acct.uid, "upstream_parse", undefined,
+          e instanceof Error ? e.message : "aggregate failed");
         return openAIError(
           502, "upstream_parse",
           e instanceof Error ? e.message : "aggregate failed",
         );
       }
+      // 空截断救援（上游 b0320cf，见 starved.ts）：预算被思考吃光 → 正文零字节、
+      // finish_reason=length。同额度关思考重发一次、重新聚合；失败即按原路降级。
+      if (aggregateStarved(agg.resp as Obj)) {
+        const retryBody = starvedRetryBody(outBody);
+        if (retryBody) {
+          const res2 = await chatStream(cfg, authShape, retryBody, clientIP, chatMeta)
+            .catch(() => null);
+          if (res2?.ok && res2.body) {
+            const agg2 = await aggregate(res2.body).catch(() => null);
+            if (agg2) {
+              agg = agg2;
+              runlog("[starved] non-stream uid=" + acct.uid + " model=" + bare +
+                ": 预算被思考吃光（正文 0B）→ 同额度关思考重发成功");
+            } else {
+              runlog("WARN: [starved] non-stream uid=" + acct.uid + " model=" + bare +
+                ": 重发聚合失败 → 保留原截断响应");
+            }
+          } else {
+            runlog("WARN: [starved] non-stream uid=" + acct.uid + " model=" + bare +
+              ": 关思考重发失败（status=" + (res2?.status ?? 0) + "）→ 保留原截断响应");
+          }
+        }
+      }
       await pool.noteSuccess(acct.uid);
-      await pool.blockModelClear(acct.uid, bare);
+      await pool.blockModelClear(acct.uid, curModel);
       if (sessKey && cfg.session_sticky) await bindSticky(sessKey, acct.uid);
       const latencyMs = Math.max(1, Date.now() - attemptStarted);
       const tps = agg.stats.hasUsage && agg.stats.completionTokens >= 0
@@ -771,6 +947,13 @@ export async function handleChat(opts: {
   }
 
   // ── 末端错误透传（与 Go 同口径映射） ────────────────────────────────────
+  // max_rotate 用尽时同样需要反映路由后的真实冷却墙钟：否则所有健康账号已在
+  // 请求期间进入冷却，却仍让客户端立即重试。只取当前候选集合，不能用最后一次
+  // 上游 Retry-After 覆盖其他账号更早的恢复时间。
+  if (lastErr) {
+    const unavailable = await pool.retryStatus(curModel, realm);
+    retryAfterMs = unavailable.retryAfterMs;
+  }
   let status = 503;
   let code = "no_healthy_account";
   let msg = "all accounts are temporarily unavailable, please retry later";
@@ -806,6 +989,35 @@ export async function handleChat(opts: {
         status = 400;
         code = "model_unavailable";
         break;
+      // 上游 4xx / 5xx 一律按上游语义回传：旧口径把未覆盖的类别全部落到
+      // 503 no_healthy_account，把「请求本身有问题」「账号 token 失效」
+      // 「上游 5xx」混成同一个池不可用信号，客户端与排障都被误导。
+      case "client":
+        if (lastErr.status >= 400 && lastErr.status < 500) {
+          status = lastErr.status;
+          code = "upstream_client_error";
+        }
+        break;
+      case "auth_expired":
+        status = 503;
+        code = "upstream_auth_expired";
+        msg = "all candidate accounts were rejected by upstream (401 token invalid); " +
+          "re-login is required for the affected accounts";
+        break;
+      case "account_fault":
+        status = 503;
+        code = "upstream_account_fault";
+        msg = "every candidate account hit an account-level fault at upstream; retry later";
+        break;
+      case "hard_credit":
+        // 上游 402 = 候选号积分耗尽，按计费语义回传（OpenAI 兼容）。
+        status = 402;
+        code = "insufficient_credit";
+        break;
+      case "server":
+        status = 502;
+        code = "upstream_server_error";
+        break;
       default:
         break;
     }
@@ -829,6 +1041,9 @@ export async function handleChat(opts: {
     if (modelBlock.reason.trim()) lockDetail += "; upstream: " + modelBlock.reason;
     hint = kindHint ? kindHint + "; " + lockDetail : lockDetail;
   }
-  finishLog(status, "", lastErr?.kind ?? "");
-  return openAIError(status, code, msg, hint);
+  finishLog(status, "", lastErr?.kind ?? "", undefined, lastErr?.msg ?? "");
+  const headers = status === 429 && retryAfterMs > 0
+    ? { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1000))) }
+    : undefined;
+  return openAIError(status, code, msg, hint, headers);
 }

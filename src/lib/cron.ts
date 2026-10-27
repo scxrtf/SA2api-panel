@@ -10,6 +10,7 @@ import {
   userResource,
   expiringSoonMs,
   fetchAccountProfile,
+  newConversationID,
   type AuthShape,
 } from "./upstream/client";
 import { isAlreadyCheckin, isSessionDead } from "./upstream/errors";
@@ -291,7 +292,7 @@ async function travelOne(cfg: AppConfig, a: AuthShape, nickname: string): Promis
       runlog("travel " + lb + ": skip (traveling record=" + (ts.record_id ?? 0) + ")");
       return "skipped";
     default:
-      runlog("travel " + lb + ": skip (unknown state " + JSON.stringify(ts.state ?? "") + ")");
+      runlog("travel " + lb + ": skip (未知状态 " + JSON.stringify(ts.state ?? "") + ")");
       return "skipped";
   }
 }
@@ -301,7 +302,9 @@ async function travelOne(cfg: AppConfig, a: AuthShape, nickname: string): Promis
 async function travelAdopt(cfg: AppConfig, a: AuthShape, lb: string): Promise<boolean> {
   if (adoptTried.get(a.uid) === travelDay()) return false;
   try {
-    await reportChatActivity(cfg, a, "wb2api-adopt-" + Date.now(), "");
+    // 会话 ID 用官方形态（UUID v4）：旧值 wb2api-adopt-<毫秒> 把项目缩写 + 时间戳
+    // 直接写进上报体（上游 issue #51）。
+    await reportChatActivity(cfg, a, newConversationID(), "");
     await sleep(reportGapMs);
   } catch (e) {
     // 前置上报失败不阻塞，让 buddy/first 按既有错误路径暴露。
@@ -353,7 +356,7 @@ export async function runActivityNow(): Promise<{ reported: number; failed: numb
     first = false;
     const lb = label(row.uid, row.nickname);
     try {
-      await reportChatActivity(cfg, row.auth, "wb2api-" + Date.now(), "");
+      await reportChatActivity(cfg, row.auth, newConversationID(), "");
       reported++;
       await checkActivityStreak(cfg, row.auth, lb); // 上报成功 → 回读 streak 自检
     } catch (e) {

@@ -31,7 +31,8 @@ export function verifyBearer(req: Request, key: string): boolean {
 }
 
 // KeyIdentity 请求凭证的归属与供应商授权面。unrestricted 仅用于主密钥 / 未启用
-// 鉴权的部署；子密钥一律按 providers 白名单判定（DB 异常时 fail closed）。
+// 鉴权的部署；子密钥一律按 providers 白名单判定，未授权任何供应商 = 全拒绝
+// （DB 异常同样 fail closed）。
 export interface KeyIdentity {
   name: string;
   providers: string;
@@ -39,8 +40,8 @@ export interface KeyIdentity {
 }
 
 // parseProviderAccess 解析 ApiKey.providers 存储串：
-//   "*"        → ["*"]
-//   ""         → []（未绑定；由 providerAllowed / providerAllowlist 解释为不限制）
+//   "*"        → ["*"]（全部供应商）
+//   ""         → []（未授权任何供应商；新建密钥的默认态）
 //   "foo,bar"  → ["foo", "bar"]
 export function parseProviderAccess(raw: string): string[] {
   const s = (raw ?? "").trim();
@@ -51,10 +52,11 @@ export function parseProviderAccess(raw: string): string[] {
 }
 
 // providerAllowed 判断指定供应商是否在该 key 的授权名单内。
+// 未授权任何供应商（空串）→ 一律拒绝（fail closed）；"*" → 全部放行。
 export function providerAllowed(providersRaw: string, provider: string): boolean {
   const list = parseProviderAccess(providersRaw);
-  // 未绑定任何供应商 = 不限制（面板允许把绑定留空）。
-  if (list.length === 0) return true;
+  // 未授权任何供应商 = 拒绝（新建密钥默认态，需在面板显式勾选）。
+  if (list.length === 0) return false;
   return list.includes("*") || list.includes(provider);
 }
 
@@ -87,13 +89,13 @@ export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | n
 }
 
 // providerAllowlist 把身份折算成供应商白名单：
-//   null       = 不限制（主密钥 / 未启用鉴权 / 子密钥未绑定或显式 "*"）
-//   空集合     = 禁止所有供应商（身份缺失也按空集合处理，fail closed）
+//   null       = 不限制（主密钥 / 未启用鉴权 / 子密钥显式 "*"）
+//   空集合     = 禁止所有供应商（子密钥未授权任何供应商 / 身份缺失，fail closed）
 export function providerAllowlist(id: KeyIdentity | null): Set<string> | null {
   if (!id) return new Set();
   if (id.unrestricted) return null;
   const list = parseProviderAccess(id.providers);
-  if (list.length === 0 || list.includes("*")) return null;
+  if (list.includes("*")) return null;
   return new Set(list);
 }
 

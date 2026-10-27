@@ -19,7 +19,7 @@ export async function GET(req: Request) {
   const state = new URL(req.url).searchParams.get("state") ?? "";
   if (!state) return fail(400, "missing state");
   const sess = await prisma.loginSession.findUnique({ where: { state } });
-  if (!sess) return fail(404, "unknown or expired state（请重新发起添加账号）");
+  if (!sess) return fail(404, "登录会话不存在或已过期（请重新发起添加账号）");
   const ep = loginEndpoints(sess.realm);
 
   // auth/token 是权威登录状态端点：pending 时业务 code 非 0（"login ing"）。

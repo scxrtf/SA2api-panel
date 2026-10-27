@@ -32,6 +32,9 @@ export async function GET(req: Request) {
   }
   const key = q.get("key") ?? "";
   if (key) where["keyName"] = { contains: key };
+  // 报错内容过滤：按上游响应正文/网关报错片段检索（如 12153、rate limit、WAF）。
+  const err = q.get("err") ?? "";
+  if (err) where["errMsg"] = { contains: err, mode: "insensitive" };
 
   const from = parseTime(q.get("from"));
   const to = parseTime(q.get("to"));

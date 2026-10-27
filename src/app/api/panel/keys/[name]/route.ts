@@ -26,7 +26,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 
   // providers 接收字符串数组（兼容逗号分隔字符串）；[] / "" / null / 缺省 =
-  // 清空绑定（未绑定 = 不限制供应商）。
+  // 撤销全部授权（空 = 未授权任何供应商，fail closed，与新建密钥默认态一致）。
   let rawList: unknown[];
   if (body.providers === undefined || body.providers === null) {
     rawList = [];

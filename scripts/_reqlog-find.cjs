@@ -1,0 +1,1 @@
+const {PrismaClient}=require('@prisma/client'); const p=new PrismaClient(); (async()=>{ const r=await p.requestLog.findUnique({where:{id:'cmvk8l7h0000po51t6qfhkm4a'}}); console.log(JSON.stringify(r,null,1)); await p[''](); })().catch(e=>{console.error(e.message);process.exit(1)});

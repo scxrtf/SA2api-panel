@@ -6,11 +6,11 @@ export interface StatusRow {
   uid: string; nickname: string; realm: string; enterprise: boolean;
   credits: number; credits_total: number; credits_expiring: number;
   credits_earliest_expiry: number; credits_earliest_remaining: number;
-  cooling: boolean; cool_kind: string; cool_remaining_sec: number; reason: string;
+  cooling: boolean; cool_kind: string; cool_remaining_sec: number; reason: string; raw_reason?: string;
   disabled: boolean; disabled_reason: string; paused: boolean; checkin_done: boolean;
   soft_streak: number; in_flight: number; breaker_fails: number;
   breaker_until: number; degrade_until: number;
-  rate_limited_models: { model: string; kind: string; until: number; reason: string }[];
+  rate_limited_models: { model: string; kind: string; until: number; reason: string; raw_reason?: string }[];
   model_costs: { model: string; cost_per_1k: number; last_seen: number }[];
   success_count: number;
   err_total: number;
@@ -26,6 +26,9 @@ export interface Overview {
   sticky_sessions: number; accounts: StatusRow[];
   // 模型锁池（Go ModelLockRow）：服务端聚合的 (域,模型) 限流清单，无锁为 null。
   model_locks?: ModelLockRow[] | null;
+  // model_fallback 降级路由表（上游 f1eca4a）：限流中的模型若配了等价模型，
+  // 请求已被自动改道继续服务——面板需标注，否则运维会误判为不可用。
+  model_fallback?: Record<string, string>;
   gateway: { enabled: boolean; providers: number; keys: number };
 }
 // ModelLockRow 对齐 Go pool.ModelLockRow（服务端 modelLockView 输出）。

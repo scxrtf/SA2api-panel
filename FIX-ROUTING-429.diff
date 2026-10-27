@@ -1,0 +1,315 @@
+diff --git a/src/lib/pool.ts b/src/lib/pool.ts
+index c338455..d741880 100644
+--- a/src/lib/pool.ts
++++ b/src/lib/pool.ts
+@@ -8,6 +8,7 @@
+ // 每次 pick 把候选行读入内存后纯计算（权重/分层/抽签），写回只落持久字段。
+ import { prisma } from "./db";
+ import { modelLockViewPure, type ModelLockRow, type LockViewEntry } from "./modelview";
++import { accountReasonKind, accountReasonSummary } from "./logfmt";
+ import type { AppConfig } from "./config";
+ import type { Account, AccountState, ModelCooldown, ModelCost } from "@prisma/client";
+ import {
+@@ -235,8 +236,9 @@ function defaultState(uid: string): AccountState {
+   } as AccountState;
+ }
+ 
+-// pick 在 healthy 候选集中按权重选出账号（Go pick 全语义：成本分层硬过滤 +
+-// 条件探索 + top5 截断 + 加权随机 + minPickGap 防撞号 + LRU 兜底 + 全冷却兜底）。
++// pick 只从健康候选中按权重选号（成本分层 + top5 + 加权随机 + LRU 兜底）。
++// 不把仍在冷却的账号当候补：刚出现的 429 会再次命中同一批账号，既放大限流，
++// 又让客户端重试在冷却结束前稳定失败。
+ export async function pick(
+   cfg: AppConfig,
+   opts: PickOpts = {},
+@@ -248,7 +250,7 @@ export async function pick(
+   const skipped = (e: PoolEntry) => tried?.has(e.account.uid) ?? false;
+   const realmOK = (e: PoolEntry) => realm === "" || e.account.realm === realm;
+ 
+-  let cands: PoolEntry[] = [];
++  const cands: PoolEntry[] = [];
+   for (const e of all) {
+     if (skipped(e) || !realmOK(e)) continue;
+     if (!healthyForModel(e, now, model)) continue;
+@@ -257,7 +259,7 @@ export async function pick(
+     cands.push(e);
+   }
+   if (cands.length === 0) {
+-    return pickEarliestExpiry(all, tried, now, realm, model, cfg, modelRateOf);
++    return null;
+   }
+ 
+   // maxCredits 统一用全集口径（tier 过滤前）。
+@@ -333,36 +335,43 @@ export async function pick(
+   return chosen;
+ }
+ 
+-// pickEarliestExpiry 全冷却兜底：非禁用/非暂停的软冷却/熔断账号中选截止最早者。
+-// CoolHard（等签到的号）排除——调了必 402；积分保底同判据生效。
+-function pickEarliestExpiry(
+-  all: PoolEntry[],
+-  tried: Set<string> | undefined,
+-  now: number,
+-  realm: string,
++export interface PoolRetryStatus {
++  retryAfterMs: number; // 最早可重新路由的健康账号等待时长；无法估计为 0
++  cooling: number;
++  accountCooling: number;
++}
++
++// retryStatus 用于无健康候选时的快速失败。只报告墙钟，不在服务端睡眠或提前探测。
++export async function retryStatus(
+   model: string,
+-  cfg: AppConfig,
+-  modelRateOf?: ModelRateOf,
+-): PoolEntry | null {
+-  let best: PoolEntry | null = null;
+-  let bestExp = 0;
+-  for (const e of all) {
+-    if (tried?.has(e.account.uid)) continue;
++  realm: string,
++): Promise<PoolRetryStatus> {
++  const now = Date.now();
++  let earliest = 0;
++  let cooling = 0;
++  let accountCooling = 0;
++  for (const e of await loadEntries()) {
+     if (realm !== "" && e.account.realm !== realm) continue;
+     const s = e.state;
+-    if (s.disabled || s.paused) continue;
+-    if (s.cooldownReason === "hard_credit" && s.cooldownUntil > now) continue;
+-    if (floorBlocked(e, model, realm, cfg, now, modelRateOf)) continue;
+-    if (inFlightFull(e, cfg)) continue;
+-    const exp = Math.max(Number(s.cooldownUntil), Number(s.breakerUntil));
+-    if (exp <= 0) continue;
+-    if (!best || exp < bestExp) {
+-      best = e;
+-      bestExp = exp;
+-    }
++    if (
++      s.disabled || s.paused ||
++      (s.cooldownReason === "hard_credit" && s.cooldownUntil > now)
++    ) continue;
++    const modelLock = e.cooldowns.find((c) => c.model === model);
++    const accountUntil = Math.max(
++      Number(s.cooldownUntil), Number(s.breakerUntil), Number(s.degradeUntil),
++    );
++    const until = Math.max(accountUntil, Number(modelLock?.until ?? 0));
++    if (until <= now) continue;
++    cooling++;
++    if (accountUntil > now) accountCooling++;
++    if (earliest === 0 || until < earliest) earliest = until;
+   }
+-  if (best) markUsed(best.account.uid);
+-  return best;
++  return {
++    retryAfterMs: earliest > now ? earliest - now : 0,
++    cooling,
++    accountCooling,
++  };
+ }
+ 
+ // PickByUIDForModel 粘性路径：绑定号在当前模型健康且未占满才返回，否则 null
+@@ -574,15 +583,17 @@ export interface ModelBlockStatus {
+   count: number;
+ }
+ 
+-export async function modelBlocked(model: string): Promise<ModelBlockStatus> {
++export async function modelBlocked(model: string, realm = ""): Promise<ModelBlockStatus> {
+   const empty: ModelBlockStatus = { blocked: false, reason: "", until: 0, count: 0 };
+   if (!model) return empty;
+   const now = Date.now();
+   const all = await loadEntries();
+   const st: ModelBlockStatus = { ...empty };
+   for (const e of all) {
++    if (realm !== "" && e.account.realm !== realm) continue;
+     if (e.state.disabled || e.state.paused) continue;
+-    if (!modelCooled(e, now, model)) return empty; // 还有号能服务 → 非全池阻塞
++    // 账号级冷却不是模型级阻塞：否则普通 429 会被末端错误映射覆盖成 503/400。
++    if (!modelCooled(e, now, model)) return empty;
+     st.count++;
+     const mc = e.cooldowns.find((c) => c.model === model);
+     if (mc) {
+@@ -864,6 +875,7 @@ export interface StatusRow {
+   cool_kind: string;
+   cool_remaining_sec: number;
+   reason: string;
++  raw_reason: string;
+   disabled: boolean;
+   disabled_reason: string;
+   paused: boolean;
+@@ -949,7 +961,8 @@ export async function statusList(): Promise<StatusRow[]> {
+         model: c.model,
+         kind: c.reason.startsWith("11102") ? "model_unavailable" : "rate_limit",
+         until: Number(c.until),
+-        reason: c.reason,
++        reason: accountReasonSummary(c.reason),
++        raw_reason: c.reason,
+       }))
+       .sort((a, b) => (a.model < b.model ? -1 : 1));
+     const modelCosts = e.costs
+@@ -971,9 +984,10 @@ export async function statusList(): Promise<StatusRow[]> {
+       credits_earliest_expiry: Number(s.earliestAt),
+       credits_earliest_remaining: Number(s.earliestRemain),
+       cooling,
+-      cool_kind: cooling ? coolKind : "",
++      cool_kind: cooling ? accountReasonKind(coolKind) : "",
+       cool_remaining_sec: remaining,
+-      reason: s.cooldownReason,
++      reason: accountReasonSummary(s.cooldownReason),
++      raw_reason: s.cooldownReason,
+       disabled: s.disabled,
+       disabled_reason: s.disabled ? s.disableReason : "",
+       paused: s.paused,
+diff --git a/src/lib/chat.ts b/src/lib/chat.ts
+index 4a11c59..7078ffd 100644
+--- a/src/lib/chat.ts
++++ b/src/lib/chat.ts
+@@ -427,6 +427,7 @@ export async function handleChat(opts: {
+   const tried = new Set<string>();
+   let lastErr: { kind: ErrKind; status: number; msg: string; retryAfterMs: number } | null = null;
+   let modelBlock: pool.ModelBlockStatus | null = null;
++  let retryAfterMs = 0;
+   let heldUID = "";
+ 
+   const releaseHeld = () => {
+@@ -508,7 +509,17 @@ export async function handleChat(opts: {
+           runlog("model fallback: " + bare + " -> " + to + " (no account for model, 6004 blocked)");
+           continue;
+         }
+-        modelBlock = await pool.modelBlocked(curModel);
++        modelBlock = await pool.modelBlocked(curModel, realm);
++        const unavailable = await pool.retryStatus(curModel, realm);
++        retryAfterMs = unavailable.retryAfterMs;
++        // 模型级全冷却使用既有 model_unavailable 语义；仅账号级冷却是 429。
++        if (unavailable.accountCooling > 0 && modelBlock) modelBlock.blocked = false;
++        if (!lastErr && unavailable.accountCooling > 0) {
++          lastErr = {
++            kind: "soft_rate", status: 429,
++            msg: "all candidate accounts are cooling down", retryAfterMs,
++          };
++        }
+         break;
+       }
+       const acct = entry.account;
+@@ -782,7 +793,9 @@ export async function handleChat(opts: {
+             "rotation stopped; retry after the block window expires",
+           );
+         }
+-        await sleep(backoffAfter(i)); // 分类错误换号退避（WAF fail-fast 优先于退避）
++        // 普通 429 已把该账号置为冷却；健康账号切换不需要等待或指数退避。
++        // 只有非限流故障保留短退避，避免客户端为每次换号承担数十秒延迟。
++        if (kind !== "soft_rate") await sleep(backoffAfter(i));
+         continue;
+       }
+ 
+@@ -934,6 +947,13 @@ export async function handleChat(opts: {
+   }
+ 
+   // ── 末端错误透传（与 Go 同口径映射） ────────────────────────────────────
++  // max_rotate 用尽时同样需要反映路由后的真实冷却墙钟：否则所有健康账号已在
++  // 请求期间进入冷却，却仍让客户端立即重试。只取当前候选集合，不能用最后一次
++  // 上游 Retry-After 覆盖其他账号更早的恢复时间。
++  if (lastErr) {
++    const unavailable = await pool.retryStatus(curModel, realm);
++    retryAfterMs = unavailable.retryAfterMs;
++  }
+   let status = 503;
+   let code = "no_healthy_account";
+   let msg = "all accounts are temporarily unavailable, please retry later";
+@@ -1022,5 +1042,8 @@ export async function handleChat(opts: {
+     hint = kindHint ? kindHint + "; " + lockDetail : lockDetail;
+   }
+   finishLog(status, "", lastErr?.kind ?? "", undefined, lastErr?.msg ?? "");
+-  return openAIError(status, code, msg, hint);
++  const headers = status === 429 && retryAfterMs > 0
++    ? { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1000))) }
++    : undefined;
++  return openAIError(status, code, msg, hint, headers);
+ }
+diff --git a/src/lib/agenttool-route.ts b/src/lib/agenttool-route.ts
+index b1dadb9..57cf1e8 100644
+--- a/src/lib/agenttool-route.ts
++++ b/src/lib/agenttool-route.ts
+@@ -35,6 +35,7 @@ export interface AgentToolOutcome {
+   code: string;
+   msg: string;
+   data?: string; // 上游原文（成功）
++  retryAfterMs?: number;
+ }
+ 
+ // runAgentTool 取号执行一次 agenttool 调用，带 3 次换号。
+@@ -45,9 +46,23 @@ export async function runAgentTool(
+   const cfg = await getConfig();
+   const tried = new Set<string>();
+   let lastErr: UpstreamError | Error | null = null;
++  let retryAfterMs = 0;
+   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+     const entry = await pool.pick(cfg, { tried, realm });
+-    if (!entry) break;
++    if (!entry) {
++      const unavailable = await pool.retryStatus("", realm);
++      retryAfterMs = unavailable.retryAfterMs;
++      if (unavailable.accountCooling > 0) {
++        return {
++          status: 429,
++          code: "rate_limit_exceeded",
++          msg: lastErr?.message || "all candidate accounts are cooling down, please retry later",
++          retryAfterMs,
++        };
++      }
++      break;
++    }
++    if (tried.size === 0 && lastErr) break;
+     if (!pool.acquire(entry, cfg)) {
+       tried.add(entry.account.uid);
+       continue;
+@@ -72,19 +87,21 @@ export async function runAgentTool(
+       pool.release(entry.account.uid);
+     }
+   }
+-  if (tried.size === 0) {
+-    return { status: 503, code: "no_healthy_account", msg: `没有可用的 ${realm} 账号` };
+-  }
+   const status = lastErr instanceof UpstreamError && lastErr.status >= 400 ? lastErr.status : 502;
++  if (status === 429) retryAfterMs = (await pool.retryStatus("", realm)).retryAfterMs;
+   return {
+     status,
+-    code: "upstream_error",
++    code: status === 429 ? "rate_limit_exceeded" : "upstream_error",
+     msg: lastErr instanceof Error ? lastErr.message : "upstream failed",
++    retryAfterMs,
+   };
+ }
+ 
+ export function agentToolError(o: AgentToolOutcome): Response {
+-  return openAIError(o.status, o.code, o.msg);
++  return openAIError(o.status, o.code, o.msg, undefined,
++    o.status === 429 && (o.retryAfterMs ?? 0) > 0
++      ? { "Retry-After": String(Math.max(1, Math.ceil((o.retryAfterMs ?? 0) / 1000))) }
++      : undefined);
+ }
+ 
+ // deepSeekSearchClient 判定请求是否来自 DSH（DeepSeek Harness）。兼容补丁只对这类
+diff --git a/src/lib/upstream/agenttool.ts b/src/lib/upstream/agenttool.ts
+index dc38ff3..b8bacd6 100644
+--- a/src/lib/upstream/agenttool.ts
++++ b/src/lib/upstream/agenttool.ts
+@@ -11,7 +11,7 @@
+ //   - provider 是响应字段，请求里带上任何值都 400 {code:15003}；
+ //   - max_results 是上限不是保证（服务端硬上限约 10），官方固定用 5。
+ import type { AppConfig } from "../config";
+-import { classify, UpstreamError } from "./errors";
++import { classify, parseRetryAfter, UpstreamError } from "./errors";
+ import { chatBase, chatHeaders, truncate, type AuthShape } from "./client";
+ 
+ const WEB_SEARCH_PATH = "/agenttool/v1/search";
+@@ -45,7 +45,7 @@ async function agentTool(
+   if (resp.status >= 400) {
+     let kind = classify(resp.status, raw);
+     if (kind === "none") kind = "client";
+-    throw new UpstreamError(kind, resp.status, truncate(raw, 200));
++    throw new UpstreamError(kind, resp.status, truncate(raw, 200), parseRetryAfter(resp.headers));
+   }
+   try {
+     const env = JSON.parse(raw) as { code?: number; msg?: string };

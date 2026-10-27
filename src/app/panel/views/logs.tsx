@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { req, fmtNum, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
+import { errKindLabel, knownText, uaDisplay } from "@/lib/logfmt";
 
 interface LogEntry { ts: number; ch: "task" | "chat" | "sys"; text: string }
 interface ReqLog {
@@ -14,6 +15,8 @@ interface ReqLog {
   credit?: number; hasCredit?: boolean;
   cacheHitTok?: number; cacheMissTok?: number;
   keyName?: string; slot?: string; machineId?: string; path?: string;
+  // 报错内容：失败请求的上游响应正文摘要（成功请求为空）。
+  errMsg?: string;
 }
 
 // fmtTok token 缩写（Go app.js fmtTok 同口径）：1000+ 用 k 缩写避免表列撑宽。
@@ -60,7 +63,7 @@ export function LogsView({ flash }: { flash: Flash }) {
   const [ch, setCh] = useState<"all" | "task" | "chat" | "sys">("all");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [reqs, setReqs] = useState<ReqLog[]>([]);
-  const [filter, setFilter] = useState({ account: "", model: "", outcome: "", key: "" });
+  const [filter, setFilter] = useState({ account: "", model: "", outcome: "", key: "", err: "" });
   const [ipFilter, setIpFilter] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -74,6 +77,7 @@ export function LogsView({ flash }: { flash: Flash }) {
       if (filter.model) q.set("model", filter.model);
       if (filter.outcome) q.set("outcome", filter.outcome);
       if (filter.key) q.set("key", filter.key);
+      if (filter.err) q.set("err", filter.err);
       if (ipFilter) q.set("client_ip", ipFilter);
       req<{ entries: ReqLog[] }>("request_logs?" + q.toString()).then((r) => setReqs(r.entries))
         .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
@@ -100,6 +104,9 @@ export function LogsView({ flash }: { flash: Flash }) {
           onChange={(e) => setIpFilter(e.target.value)} />
         <input className="input" style={{ width: 110 }} placeholder="Key 过滤" value={filter.key}
           onChange={(e) => setFilter({ ...filter, key: e.target.value })} />
+        <input className="input" style={{ width: 150 }} placeholder="报错内容过滤" value={filter.err}
+          title="按上游报错正文检索，如 12153 / rate limit / WAF"
+          onChange={(e) => setFilter({ ...filter, err: e.target.value })} />
       </>}
       <button className="btn xs" onClick={load}>刷新</button>
       {mode === "runtime" && <>
@@ -135,27 +142,40 @@ export function LogsView({ flash }: { flash: Flash }) {
               {reqs.map((r) => {
                 const open = expanded === r.id;
                 const total = r.totalTokens || ((r.promptTokens ?? 0) + (r.completionTok ?? 0));
-                const uaS = uaSummary(r.ua);
-                const mid = machineShort(r.machineId);
+                // 展示层先折叠上游/客户端发来的占位值（unknown/null/…），DB 原文不动。
+                const uaText = uaDisplay(knownText(r.ua));
+                const uaS = uaSummary(uaText);
+                const mid = machineShort(knownText(r.machineId));
+                const modelText = knownText(r.model);
+                const uidText = knownText(r.uid);
+                const ipText = knownText(r.clientIp);
+                const keyText = knownText(r.keyName);
+                const providerText = knownText(r.provider);
+                const slotText = knownText(r.slot);
+                const realmText = knownText(r.realm);
+                const errText = knownText(r.errMsg);
+                const kindLabel = errKindLabel(r.errKind);
                 return (
                   <React.Fragment key={r.id}>
                     <tr onClick={() => setExpanded(open ? null : r.id)}
                       style={{ cursor: "pointer", ...(open ? { background: "var(--bg-soft)" } : {}) }}>
                       <td className="dim mono">{new Date(r.at).toLocaleTimeString("zh-CN", { hour12: false })}</td>
-                      <td><span className={"tag " + (r.status < 400 && !r.errKind ? "ok" : "err")}>
-                        {r.status}{r.errKind ? " " + r.errKind : r.status < 400 ? " 成功" : " 错误"}</span></td>
-                      <td className="mono">{r.model || <span className="dim">—</span>}</td>
-                      <td className="mono">{r.uid || <span className="dim">—</span>}</td>
-                      <td className="mono">{r.clientIp || <span className="dim">—</span>}</td>
-                      <td title={r.ua || undefined} style={{ maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td><span className={"tag " + (r.status < 400 && !kindLabel ? "ok" : "err")}
+                        title={errText || undefined}>
+                        {r.status}{kindLabel ? " " + kindLabel : r.status < 400 ? " 成功" : " 错误"}
+                        {errText ? " · 报错" : ""}</span></td>
+                      <td className="mono">{modelText || <span className="dim">—</span>}</td>
+                      <td className="mono">{uidText || <span className="dim">—</span>}</td>
+                      <td className="mono">{ipText || <span className="dim">—</span>}</td>
+                      <td title={uaText || undefined} style={{ maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {uaS || <span className="dim">—</span>}
                       </td>
-                      <td className="mono" title={r.machineId || undefined}>{mid || <span className="dim">—</span>}</td>
-                      <td>{r.keyName ? <span className="tag">{r.keyName}</span> : <span className="dim">—</span>}</td>
-                      <td>{r.provider
-                        ? <span className="mono" title={r.provider + (r.slot ? " · " + r.slot : "")}>
-                          {r.provider}{r.slot ? " · " + r.slot : ""}</span>
-                        : (r.realm ? <span className="tag">{r.realm === "global" ? "国际版池" : "国内版池"}</span> : <span className="dim">—</span>)}</td>
+                      <td className="mono" title={knownText(r.machineId) || undefined}>{mid || <span className="dim">—</span>}</td>
+                      <td>{keyText ? <span className="tag">{keyText}</span> : <span className="dim">—</span>}</td>
+                      <td>{providerText
+                        ? <span className="mono" title={providerText + (slotText ? " · " + slotText : "")}>
+                          {providerText}{slotText ? " · " + slotText : ""}</span>
+                        : (realmText ? <span className="tag">{realmText === "global" ? "国际版池" : "国内版池"}</span> : <span className="dim">—</span>)}</td>
                       <td className="mono">{fmtMs(r.durationMs)}</td>
                       <td className="mono">{r.stream ? fmtMs(r.ttfbMs) : <span className="dim">—</span>}</td>
                       <td className="mono" title={r.totalTokens
@@ -175,14 +195,14 @@ export function LogsView({ flash }: { flash: Flash }) {
                           <div className="kv-grid">
                             <span className="dim">请求 ID</span><span className="mono">{r.id}</span>
                             <span className="dim">时间</span><span>{new Date(r.at).toLocaleString("zh-CN", { hour12: false })}</span>
-                            <span className="dim">状态 / 结果</span><span>{r.status}{r.errKind ? " · " + r.errKind : r.status < 400 ? " · 成功" : " · 错误"}</span>
+                            <span className="dim">状态 / 结果</span><span>{r.status}{kindLabel ? " · " + kindLabel : r.status < 400 ? " · 成功" : " · 错误"}</span>
                             <span className="dim">流式</span><span>{r.stream ? "SSE" : "一次性"}</span>
-                            <span className="dim">账号 UID</span><span className="mono">{r.uid || "—"}</span>
-                            <span className="dim">机器码（完整）</span><span className="mono">{r.machineId || "—"}</span>
-                            <span className="dim">Key 归属</span><span>{r.keyName || "—"}</span>
-                            <span className="dim">供应商槽位</span><span>{r.provider ? r.provider + (r.slot ? " · " + r.slot : "") : (r.realm || "—")}</span>
-                            <span className="dim">模型</span><span className="mono">{r.model || "—"}</span>
-                            <span className="dim">路径</span><span className="mono">{r.path || "—"}</span>
+                            <span className="dim">账号 UID</span><span className="mono">{uidText || "—"}</span>
+                            <span className="dim">机器码（完整）</span><span className="mono">{knownText(r.machineId) || "—"}</span>
+                            <span className="dim">Key 归属</span><span>{keyText || "—"}</span>
+                            <span className="dim">供应商槽位</span><span>{providerText ? providerText + (slotText ? " · " + slotText : "") : (realmText || "—")}</span>
+                            <span className="dim">模型</span><span className="mono">{modelText || "—"}</span>
+                            <span className="dim">路径</span><span className="mono">{knownText(r.path) || "—"}</span>
                             <span className="dim">轮转尝试</span><span>{r.attempts ? r.attempts + " 次" : "—"}</span>
                             <span className="dim">耗时 / TTFB</span><span>{fmtMs(r.durationMs)}{r.stream ? " / " + fmtMs(r.ttfbMs) : ""}</span>
                             <span className="dim">Token</span><span>{total > 0
@@ -190,8 +210,12 @@ export function LogsView({ flash }: { flash: Flash }) {
                             <span className="dim">积分</span><span>{fmtCredit(r.credit, r.hasCredit)}{r.hasCredit ? " pts" : ""}</span>
                             <span className="dim">缓存命中</span><span>{(r.cacheHitTok ?? 0) > 0 || (r.cacheMissTok ?? 0) > 0
                               ? `hit ${fmtNum(r.cacheHitTok ?? 0)} · miss ${fmtNum(r.cacheMissTok ?? 0)}` : "—"}</span>
-                            <span className="dim">客户端 IP</span><span className="mono">{r.clientIp || "—"}</span>
-                            <span className="dim">User-Agent</span><span style={{ wordBreak: "break-all" }}>{r.ua || "—"}</span>
+                            {errText && <>
+                              <span className="dim">报错内容</span>
+                              <span className="mono" style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{errText}</span>
+                            </>}
+                            <span className="dim">客户端 IP</span><span className="mono">{ipText || "—"}</span>
+                            <span className="dim">User-Agent</span><span style={{ wordBreak: "break-all" }}>{uaText || "—"}</span>
                           </div>
                         </td>
                       </tr>

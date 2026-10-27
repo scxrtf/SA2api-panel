@@ -1,0 +1,106 @@
+VERIFICATION — 新建 key 默认无供应商授权（fail closed）
+============================================================
+范围：子密钥（ApiKey.providers）对聚合供应商通道的准入判定。
+改动文件：
+  src/lib/auth-guard.ts                      （providerAllowed / providerAllowlist 语义）
+  src/lib/chat.ts                            （准入注释，逻辑随 auth-guard）
+  src/app/api/panel/keys/route.ts            （POST 新建显式 providers=""）
+  src/app/api/panel/keys/[name]/route.ts     （PATCH 注释：空 = 撤销全部授权）
+  src/app/panel/views/gateway.tsx            （标签/提示文案）
+  README.md                                  （文档口径）
+
+契约（与迁移 prisma/migrations/20261020120000_api_key_provider_access 一致）：
+  providers = ""      → 未授权任何供应商（新建密钥默认态，fail closed）
+  providers = "*"     → 全部供应商
+  providers = "a,b"   → 白名单
+
+[1] 语义单测（真跑，npx tsx，直接 import 真实模块 src/lib/auth-guard.ts）
+------------------------------------------------------------
+命令：npx tsx scripts/_verify-key-auth.mts
+输出（节选，全 13 项）：
+  PASS | parse("")                  | got=[]        want=[]
+  PASS | parse("*")                 | got=["*"]     want=["*"]
+  PASS | parse("foo, bar")          | got=["foo","bar"] want=["foo","bar"]
+  PASS | allowed("", "alpha")       | got=false     want=false
+  PASS | allowed("*", "alpha")      | got=true      want=true
+  PASS | allowed("alpha", "alpha")  | got=true      want=true
+  PASS | allowed("alpha", "beta")   | got=false     want=false
+  PASS | allowed("alpha,beta","beta") | got=true    want=true
+  PASS | allowlist(未授权子密钥)      | got=[]        want=[]
+  PASS | allowlist(子密钥 "*")        | got=null      want=null
+  PASS | allowlist(子密钥白名单)      | got=["alpha"] want=["alpha"]
+  PASS | allowlist(主密钥)            | got=null      want=null
+  PASS | allowlist(身份缺失)          | got=[]        want=[]
+  ALL PASS
+  exit=0
+
+[2] 改动前基线对照（证明行为确实变化）
+------------------------------------------------------------
+命令：git show HEAD:src/lib/auth-guard.ts > src/lib/_orig-auth-guard.ts
+      npx tsx scripts/_verify-key-auth-baseline.mts
+输出：
+  baseline allowed("", "alpha") = true        ← 改前：空 = 不限制（全放行）
+  baseline allowlist(未授权子密钥) = null      ← 改前：空 = 不限目录
+  exit=0
+改后同输入：false / []（见 [1]）。差异即本次修复目标。
+
+[3] 静态检查（真跑）
+------------------------------------------------------------
+命令：npx tsc --noEmit
+输出：（无输出）tsc_exit=0
+
+命令：npx eslint src/lib/auth-guard.ts src/lib/chat.ts \
+        src/app/api/panel/keys/route.ts "src/app/api/panel/keys/[name]/route.ts" \
+        src/app/panel/views/gateway.tsx
+输出：（无输出）eslint_exit=0
+
+命令：npx next build
+输出：路由表正常（含 ƒ /api/panel/keys、ƒ /api/v1/models、○ /panel）build_exit=0
+
+[4] 影响面（读码确认，非推测）
+------------------------------------------------------------
+- 准入执行点：src/lib/chat.ts:305-306（供应商前缀通道）。
+  改后 keyIdentity 非 unrestricted 且 providers="" → allowed=false → 403
+  provider_not_authorized。
+- 目录过滤点：src/app/api/v1/models/route.ts:113 providerAllowlist →
+  未授权子密钥得到空集合 → 目录不含任何供应商模型。
+- 池通道（模型名无供应商前缀 / cn: / global:）不经过供应商准入，不受影响。
+- 主密钥与未启用鉴权的部署走 unrestricted 分支，不受影响。
+
+[5] 既有数据提示
+------------------------------------------------------------
+providers="" 的既有子密钥在改后即视为「未授权」：无法再调用聚合供应商，
+需在面板「网关密钥环 → 授权」显式勾选（或设 "*"）恢复。此为本次需求的
+预期行为（fail closed）；如需保留旧行为，对存量行执行：
+  UPDATE "ApiKey" SET "providers" = '*' WHERE "providers" = '';
+
+[6] 临时校验脚本已删除
+------------------------------------------------------------
+scripts/_verify-key-auth.mts、scripts/_verify-key-auth-baseline.mts、
+src/lib/_orig-auth-guard.ts 均为一次性证据，验证后已删除（未纳入提交）。
+
+[7] 四件套（真跑）
+------------------------------------------------------------
+MODIFIED_FILE（改动后各文件 SHA256，工作区实取）：
+  652C15F47AA3A3DF1D917BCA20A667D96731A5DC942664B2F4ED5A0C0290B637  README.md
+  D79EA94AD2A797AD515F003618A9FA938C9D70625E0FD66574D8C8A87688012F  src/lib/auth-guard.ts
+  24908A2D0FA17C0CE19454BDC1D784599022ADA9F987F4CD59AD05A5047C85F8  src/lib/chat.ts
+  1C4EE573824A6C5EC3F533DDE4331341E184194585E97BE7C15C417024CB3269  src/app/api/panel/keys/route.ts
+  7587781FF768C4D5CA8F6BF929DFD2F86086A0625C17D70AD292AD0239DF0731  src/app/api/panel/keys/[name]/route.ts
+  773BFB9A521BF8D5FCDC9F1EB8019EF20AC5C40F3A220E7BD3E3C60A9F7D2006  src/app/panel/views/gateway.tsx
+
+DIFF_FILE：FIX-KEY-AUTH.diff（8826 bytes；由 git diff --output 生成，避免
+  PowerShell 重定向改写为 UTF-16/BOM 导致 patch 不可用）
+  反向可用性校验：git apply -R --check FIX-KEY-AUTH.diff → check_exit=0
+  （注：先前一次 Set-Content 生成的 8826-byte 版本因 BOM/CRLF 导致
+   "patch does not apply"；已改用 --output 重新生成，此为唯一有效补丁。）
+
+ROLLBACK.sh：ROLLBACK-KEY-AUTH.cmd
+  流程：git apply -R --check → git apply -R → 失败时 git checkout 兜底
+  → git diff --stat 应为空。
+  三腿验证（BASELINE / MODIFIED / ROLLBACK）：
+    BASELINE 见 [2]（allowed=false→true 反向对照）
+    MODIFIED 见 [1]（ALL PASS）+ [3]（tsc/eslint/build 全 0）
+    ROLLBACK：反向补丁可应用性已实跑通过（check_exit=0）；
+      完整回滚演练 NOT RUN —— 若执行会丢弃当前未提交改动，需先提交再演练
+      或另建副本。回滚命令：ROLLBACK-KEY-AUTH.cmd
