@@ -120,11 +120,12 @@ const sse = () => new Response(new ReadableStream({
   },
 }), { headers: { "Content-Type": "text/event-stream" } });
 
-const queueBody = JSON.stringify({
+const queueEnvelope = (retryAfter: number) => JSON.stringify({
   code: 6020,
   msg: "queue.waiting.title",
-  data: { queue_position: 1847, retry_after: 40 },
+  data: { queue_position: 1847, retry_after: retryAfter },
 });
+const queueBody = queueEnvelope(40);
 
 const request = () => handleChat({
   body: {
@@ -208,6 +209,47 @@ try {
   assert.equal(hits.length, ACCOUNT_COUNT,
     `exhaustion must try every account exactly once, got ${hits.length}`);
   console.log(`PASS queue exhaustion terminates after all ${hits.length} accounts`);
+
+  // 场景 4：单账号连续短 6020，必须在同一等待预算内继续重试到成功。
+  resetAccounts();
+  hits.length = 0;
+  const single = byUID.get(OK_UID);
+  if (!single) throw new Error("missing single-account fixture");
+  accounts.splice(0, accounts.length, single);
+  byUID.clear();
+  byUID.set(single.uid, single);
+  globalWithDb.prisma = {
+    ...db,
+    setting: {
+      findUnique: async () => ({
+        key: "config",
+        value: JSON.stringify({ max_rotate: 1, pool_wait_ms: 1_000, pool_wait_poll_ms: 50 }),
+      }),
+    },
+  };
+  globalThis.fetch = async (_url, init) => {
+    hits.push(uidOfAuth(init).auth);
+    return hits.length <= 2
+      ? new Response(queueEnvelope(0.03), { status: 429 })
+      : sse();
+  };
+  const recovered = await request();
+  assert.equal(recovered.status, 200,
+    "two consecutive short queue responses must not exhaust ordinary rotation budget");
+  assert.equal(hits.length, 3);
+  console.log("PASS single account recovers after consecutive short 6020 responses");
+
+  // 场景 5：持续短排队有独立硬上限，不能形成上游请求风暴。
+  resetAccounts();
+  hits.length = 0;
+  globalThis.fetch = async (_url, init) => {
+    hits.push(uidOfAuth(init).auth);
+    return new Response(queueEnvelope(0.01), { status: 429 });
+  };
+  const bounded = await request();
+  assert.equal(bounded.status, 429);
+  assert.equal(hits.length, 4, "initial attempt plus at most three queue retry rounds");
+  console.log("PASS persistent 6020 retries stop at the independent hard cap");
 } finally {
   globalThis.fetch = oldFetch;
   if (oldPrisma === undefined) delete globalWithDb.prisma;

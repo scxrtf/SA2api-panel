@@ -61,7 +61,8 @@ export async function POST(req: Request): Promise<Response> {
     return openAIError(400, "invalid_request", "url must be an absolute http(s) URL");
   }
   const realm = resolveRealm(body["model"], body["realm"]);
-  const outcome = await runAgentTool(realm, (cfg, auth) => webFetch(cfg, auth, target));
+  const outcome = await runAgentTool(realm,
+    (cfg, auth) => webFetch(cfg, auth, target, req.signal), req.signal);
   if (outcome.data === undefined) return agentToolError(outcome);
   const norm = normalizeFetchResponse(outcome.data, target);
   if (norm.err) {

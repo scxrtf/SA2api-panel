@@ -289,6 +289,14 @@ body {
   margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1.2px;
 }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 16px; }
+.fallback-editor { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.fallback-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fallback-head .form-hint { max-width: 720px; }
+.fallback-empty { margin-top: 12px; font-size: 13px; }
+.fallback-list { display: grid; gap: 8px; margin-top: 12px; }
+.fallback-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.fallback-columns { color: var(--fg-dim); font-size: 12px; }
+.fallback-row .input { width: 100%; min-width: 0; }
 
 /* 待测模型选择器：触发器只显示截断 ID，浮层内搜索 ID/名称，避免长模型名撑破表单 */
 .model-picker { position: relative; min-width: 0; }
@@ -1214,6 +1222,10 @@ button, a, input, select, textarea {
 
   .stat-grid, .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-grid { grid-template-columns: 1fr; }
+  .fallback-head { align-items: center; }
+  .fallback-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .fallback-row .input:first-child { grid-column: 1 / -1; }
+  .fallback-columns { display: none; }
   .md-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .scan-current { max-width: 100%; margin-left: 0; }
 

@@ -11,7 +11,7 @@
 //   - provider 是响应字段，请求里带上任何值都 400 {code:15003}；
 //   - max_results 是上限不是保证（服务端硬上限约 10），官方固定用 5。
 import type { AppConfig } from "../config";
-import { classify, parseRetryAfter, UpstreamError } from "./errors";
+import { classify, parseQueueRetryAfter, parseRetryAfter, UpstreamError } from "./errors";
 import { chatBase, chatHeaders, truncate, type AuthShape } from "./client";
 
 const WEB_SEARCH_PATH = "/agenttool/v1/search";
@@ -27,6 +27,7 @@ async function agentTool(
   a: AuthShape,
   path: string,
   body: unknown,
+  signal?: AbortSignal,
 ): Promise<string> {
   const h = chatHeaders(cfg, a, "", {
     conversationID: "",
@@ -39,22 +40,26 @@ async function agentTool(
     method: "POST",
     headers: h,
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+      : AbortSignal.timeout(120_000),
     cache: "no-store",
   });
   const raw = await resp.text();
   if (resp.status >= 400) {
     let kind = classify(resp.status, raw);
     if (kind === "none") kind = "client";
-    throw new UpstreamError(kind, resp.status, truncate(raw, 200), parseRetryAfter(resp.headers));
+    throw new UpstreamError(kind, resp.status, truncate(raw, 200),
+      parseRetryAfter(resp.headers) || parseQueueRetryAfter(raw));
   }
   try {
     const env = JSON.parse(raw) as { code?: number; msg?: string };
     if (env && typeof env.code === "number" && env.code !== 0) {
-      let kind = classify(resp.status, env.msg ?? "");
+      // 完整信封包含嵌套 code/retry_after；只传 msg 会漏掉 6020 和等待提示。
+      let kind = classify(resp.status, raw);
       if (kind === "none") kind = "client";
       throw new UpstreamError(kind, resp.status,
-        `code=${env.code} msg=${truncate(env.msg ?? "", 160)}`);
+        `code=${env.code} msg=${truncate(env.msg ?? "", 160)}`, parseQueueRetryAfter(raw));
     }
   } catch (e) {
     if (e instanceof UpstreamError) throw e;
@@ -69,16 +74,19 @@ export async function webSearch(
   a: AuthShape,
   query: string,
   maxResults: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   const n = maxResults > 0 ? maxResults : WEB_SEARCH_DEFAULT_MAX_RESULTS;
   return agentTool(cfg, a, WEB_SEARCH_PATH, {
     query,
     type: "text2text",
     max_results: n,
-  });
+  }, signal);
 }
 
 // webFetch 抓取网页正文，返回上游原文 JSON（{url,title,content}，content 为 markdown）。
-export async function webFetch(cfg: AppConfig, a: AuthShape, url: string): Promise<string> {
-  return agentTool(cfg, a, WEB_FETCH_PATH, { url });
+export async function webFetch(
+  cfg: AppConfig, a: AuthShape, url: string, signal?: AbortSignal,
+): Promise<string> {
+  return agentTool(cfg, a, WEB_FETCH_PATH, { url }, signal);
 }

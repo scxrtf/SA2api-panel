@@ -35,3 +35,20 @@ export function backoffAfter(n: number, base: number = ROTATE_BACKOFF_BASE_MS): 
 export function sleep(ms: number): Promise<void> {
   return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
 }
+
+// sleepAbortable 服务端容量等待：客户端断开后立刻释放计时器，不留下空转请求。
+// 返回 false 表示等待被中止；signal 缺省时与普通 sleep 等价。
+export function sleepAbortable(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+  if (ms <= 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", aborted);
+      resolve(ok);
+    };
+    const aborted = () => done(false);
+    const timer = setTimeout(() => done(true), ms);
+    signal?.addEventListener("abort", aborted, { once: true });
+  });
+}

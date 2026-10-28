@@ -29,6 +29,7 @@ import {
   gatewayHint,
   noHealthyAccountHint,
   frameHint,
+  parseQueueRetryAfter,
   type HintContext,
   type ErrKind,
 } from "./upstream/errors";
@@ -44,6 +45,8 @@ import { currentModelRate } from "./upstream/modelCatalog";
 import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
 import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import {   assistantMessageForLog,   errorText,   failureDetail,   parameterOverrides,   requestMessagesForLog,   responseMessageFromObject,   type AttemptDetail, } from "./request-log-detail";
+
+import { sleepAbortable } from "./backoff";
 
 type Obj = Record<string, unknown>;
 
@@ -303,6 +306,30 @@ export async function handleChat(opts: {
 }): Promise<Response> {
   const started = Date.now();
   const cfg = await getConfig();
+  const capacityDeadline = started + cfg.pool_wait_ms;
+  let capacityQueueRetry = false;
+  let queueRetryRounds = 0;
+  const MAX_QUEUE_RETRY_ROUNDS = 3;
+  const waitForCapacity = async (model: string, realm: string, tried: Set<string>): Promise<boolean> => {
+    const remaining = capacityDeadline - Date.now();
+    const capacity = await pool.capacityWaitStatus(cfg, { model, realm, tried }, remaining);
+    if (capacity.waitMs <= 0) {
+      if (capacity.reason === "queue" && capacity.nextRetryMs > 0) {
+        retryAfterMs = Math.max(retryAfterMs, capacity.nextRetryMs);
+      }
+      return false;
+    }
+    if (!await sleepAbortable(Math.max(1, capacity.waitMs), opts.req?.signal)) return false;
+    if (capacity.reason === "queue") {
+      // 短 6020 重试不消耗普通换号预算，但必须有独立硬上限。
+      if (queueRetryRounds >= MAX_QUEUE_RETRY_ROUNDS) return false;
+      queueRetryRounds++;
+      rotationBudget += tried.size; // 允许完整重扫本轮排队账号，而非只重试第一个。
+      tried.clear(); // 仅在短 6020 冷却结束后允许复用本轮账号。
+      capacityQueueRetry = true;
+    }
+    return true;
+  };
   const { body, clientIP, ua, path } = opts;
   const stream = body["stream"] === true;
   const rawModel = typeof body["model"] === "string" ? (body["model"] as string) : "";
@@ -583,6 +610,10 @@ export async function handleChat(opts: {
           runlog("model fallback: " + bare + " -> " + to + " (no account for model, 6004 blocked)");
           continue;
         }
+        if (await waitForCapacity(curModel, realm, tried)) {
+          i--; // 本地等待不消耗账号轮换预算。
+          continue;
+        }
         modelBlock = await pool.modelBlocked(curModel, realm);
         const unavailable = await pool.retryStatus(curModel, realm);
         retryAfterMs = unavailable.retryAfterMs;
@@ -597,18 +628,19 @@ export async function handleChat(opts: {
         break;
       }
       const acct = entry.account;
-      tried.add(acct.uid);
-      attemptCount++;
 
       if (!pool.acquire(entry, cfg)) {
         if (stickyUID && acct.uid === stickyUID) {
           void unbindSticky(sessKey);
           stickyUID = "";
         }
-        // 名额被并发抢走 → 换号；先退避（Go rotateBackoff 同位，打散并发重试相位）。
-        await sleep(backoffAfter(i));
+        // 名额被并发抢走：不持租约短等，而不是指数退避后过早失败。
+        if (await waitForCapacity(curModel, realm, tried)) i--;
         continue;
       }
+      // 获取在途名额失败不是上游失败，不能提前加入 tried，否则单账号无法等待释放。
+      tried.add(acct.uid);
+      attemptCount++;
       heldUID = acct.uid;
 
       const authShape: AuthShape = {
@@ -677,7 +709,7 @@ export async function handleChat(opts: {
       logAttemptStarted = attemptStarted;
       let res;
       try {
-        res = await chatStream(cfg, authShape, outBody, clientIP, chatMeta);
+        res = await chatStream(cfg, authShape, outBody, clientIP, chatMeta, opts.req?.signal);
         snapshotOutbound(res.preparedBody);
       } catch (e) {
         // 传输层失败：不换号语义区分超时——AbortError/超时不停轮换止损；
@@ -816,9 +848,10 @@ export async function handleChat(opts: {
         // 6020 队列等待只冷却当前账号的当前模型，不能假定其他账号也在排队。
         // 立即换号且不退避；全部候选都排队时才由末端返回 429 + Retry-After。
         if (kind === "soft_queue") {
+          const bodyRetryMs = parseQueueRetryAfter(respBody);
           const retryMs = res.error?.retryAfterMs && res.error.retryAfterMs > 0
             ? res.error.retryAfterMs
-            : cfg.soft_cooldown_ms;
+            : bodyRetryMs > 0 ? bodyRetryMs : cfg.soft_cooldown_ms;
           await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, retryMs);
           await extendRotationBudget(kind);
           lastErr = { kind, status: 429, msg: respBody, retryAfterMs: retryMs };
@@ -953,7 +986,8 @@ export async function handleChat(opts: {
           try {
             if (stats.errorFrame) {
               // 上游 200 已开流 + error 帧：按帧分类处置，不记成功不绑粘性。
-              await pool.applyErrorKind(cfg, uidCaptured, frameKind, stats.errorFrame, bare, 0);
+              await pool.applyErrorKind(cfg, uidCaptured, frameKind, stats.errorFrame, bare,
+                parseQueueRetryAfter(stats.errorFrame));
               await recordAttempt({
                 uid: uidCaptured, model: bare, realm, provider: "",
                 ok: false, errKind: frameKind, stats,
@@ -1182,6 +1216,9 @@ export async function handleChat(opts: {
   if (lastErr) {
     const unavailable = await pool.retryStatus(curModel, realm);
     retryAfterMs = unavailable.retryAfterMs;
+    if (!capacityQueueRetry && retryAfterMs <= 0 && lastErr.retryAfterMs > 0) {
+      retryAfterMs = lastErr.retryAfterMs;
+    }
   }
   let status = 503;
   let code = "no_healthy_account";

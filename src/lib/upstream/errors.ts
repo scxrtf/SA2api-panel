@@ -98,6 +98,52 @@ const queuePositionKeys = [
   "queue_position", "queuePosition", "queue_position_index", "queuePositionIndex",
 ];
 
+const queueRetryAfterSecondsKeys = ["retry_after", "retryAfter", "retry_after_seconds"];
+const queueRetryAfterMsKeys = ["retry_after_ms", "retryAfterMs"];
+
+// parseQueueRetryAfter 从 6020 的嵌套 data 信封读取重试提示（毫秒）。
+// 响应头优先于本函数；找不到或数值异常时返回 0，不把队列位置误作等待时长。
+export function parseQueueRetryAfter(body: string): number {
+  if (!body) return 0;
+  let root: unknown;
+  try {
+    root = JSON.parse(body);
+  } catch {
+    return 0;
+  }
+  let seconds = 0;
+  let millis = 0;
+  const walk = (value: unknown): void => {
+    if (millis > 0 || !value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+    const node = value as Record<string, unknown>;
+    for (const key of queueRetryAfterMsKeys) {
+      const raw = node[key];
+      const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : 0;
+      if (Number.isFinite(n) && n > 0 && n <= RETRY_AFTER_SANITY_MS) {
+        millis = n;
+        return;
+      }
+    }
+    if (seconds <= 0) {
+      for (const key of queueRetryAfterSecondsKeys) {
+        const raw = node[key];
+        const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : 0;
+        if (Number.isFinite(n) && n > 0 && n * 1000 <= RETRY_AFTER_SANITY_MS) {
+          seconds = n;
+          break;
+        }
+      }
+    }
+    for (const item of Object.values(node)) walk(item);
+  };
+  walk(root);
+  return millis > 0 ? Math.ceil(millis) : Math.ceil(seconds * 1000);
+}
+
 // parseQueuePosition 从排队信封里取队列位置（仅真值 >0 才返回；0 = 未提供/不可解析）。
 // 只认精确键名，避免 queue_position_total 之类的总数被误当位置。
 export function parseQueuePosition(body: string): number {

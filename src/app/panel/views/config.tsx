@@ -5,7 +5,13 @@ import React, { useEffect, useState } from "react";
 import { req } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
-type Config = Record<string, string | number | boolean | number[]>;
+type Config = Record<string, string | number | boolean | number[] | Record<string, string>>;
+type FallbackRow = { id: number; from: string; to: string };
+
+function toFallbackRows(value: Config[string] | undefined): FallbackRow[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value).map(([from, to], id) => ({ id, from, to }));
+}
 
 interface Field {
   key: string; label: string;
@@ -51,6 +57,8 @@ const SCHEDULE: Field[] = [
 const POOL: Field[] = [
   { key: "max_in_flight", label: "单账号最大在途", type: "number", hint: "0 = 不限制" },
   { key: "max_in_flight_global", label: "国际版在途上限", type: "number", hint: "global 域风控更紧，默认 2（0=同上）" },
+  { key: "pool_wait_ms", label: "上游短等待预算（秒）", type: "number", hint: "在途占满或 6020 短排队时等待容量，0=立即失败；不会等待长时间限流" },
+  { key: "pool_wait_poll_ms", label: "容量探测间隔（毫秒）", type: "number", hint: "仅重新读取本地账号池，不会发送探测请求" },
   { key: "breaker_threshold", label: "连续失败熔断阈值", type: "number", hint: "" },
   { key: "breaker_cooldown_ms", label: "熔断基础时长（秒）", type: "number", hint: "连败 N 次临时出池" },
   { key: "breaker_cooldown_max_ms", label: "熔断退避上限（秒）", type: "number", hint: "" },
@@ -81,25 +89,59 @@ const UPSTREAM: Field[] = [
 const MS_FIELDS = new Set([
   "breaker_cooldown_ms", "breaker_cooldown_max_ms", "cost_explore_interval_ms",
   "header_timeout_ms", "stream_idle_ms", "soft_cooldown_ms", "soft_rate_max_ms",
-  "schedule_keepalive_time_budget_ms",
+  "schedule_keepalive_time_budget_ms", "pool_wait_ms",
 ]);
 
 export function ConfigView({ flash }: { flash: Flash }) {
   const [cfg, setCfg] = useState<Config | null>(null);
+  const [fallbackRows, setFallbackRows] = useState<FallbackRow[]>([]);
+
+  const loadConfig = (config: Config) => {
+    setCfg(config);
+    setFallbackRows(toFallbackRows(config.model_fallback));
+  };
 
   useEffect(() => {
     req<{ config: Config }>("config")
-      .then((r) => setCfg(r.config))
+      .then((r) => loadConfig(r.config))
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [flash]);
 
   if (!cfg) return <Box title="运行配置" pad><div className="dim">加载配置…</div></Box>;
 
-  const set = (k: string, v: string | number | boolean | number[]) => setCfg({ ...cfg, [k]: v });
+  const set = (k: string, v: Config[string]) => setCfg({ ...cfg, [k]: v });
+
+  const updateFallback = (id: number, field: "from" | "to", value: string) => {
+    setFallbackRows((rows) => rows.map((row) => row.id === id ? { ...row, [field]: value } : row));
+  };
+
+  const addFallback = () => {
+    setFallbackRows((rows) => [
+      ...rows,
+      { id: Math.max(-1, ...rows.map((row) => row.id)) + 1, from: "", to: "" },
+    ]);
+  };
 
   const save = async () => {
     try {
-      await req("config", { method: "POST", body: cfg });
+      const modelFallback: Record<string, string> = {};
+      for (const row of fallbackRows) {
+        const from = row.from.trim();
+        const to = row.to.trim();
+        if (!from || !to) {
+          flash("err", "保存失败：模型降级路由表不能包含空模型名");
+          return;
+        }
+        if (Object.hasOwn(modelFallback, from)) {
+          flash("err", `保存失败：原模型“${from}”重复，请合并或删除重复行`);
+          return;
+        }
+        modelFallback[from] = to;
+      }
+      const r = await req<{ config: Config }>("config", {
+        method: "POST", body: { ...cfg, model_fallback: modelFallback },
+      });
+      loadConfig(r.config);
       flash("ok", "配置已保存并立即生效（调度时点已重排）");
     } catch (e) {
       flash("err", "保存失败：" + (e instanceof Error ? e.message : String(e)));
@@ -155,13 +197,46 @@ export function ConfigView({ flash }: { flash: Flash }) {
       </Box>
       <Box title="账号池与流量治理" pad>
         <div className="form-grid">{POOL.map(renderField)}</div>
+        <div className="fallback-editor">
+          <div className="fallback-head">
+            <div>
+              <label className="form-label">模型降级路由表</label>
+              <div className="form-hint">原模型触发模型级限流时，在同账号改用降级模型；支持 cn: / global: 前缀。</div>
+            </div>
+            <button type="button" className="btn small" onClick={addFallback}>添加映射</button>
+          </div>
+          {fallbackRows.length === 0 ? (
+            <div className="dim fallback-empty">暂无降级映射，点击“添加映射”创建。</div>
+          ) : (
+            <div className="fallback-list">
+              <div className="fallback-row fallback-columns" aria-hidden="true">
+                <span>原模型</span><span>降级模型</span><span></span>
+              </div>
+              {fallbackRows.map((row) => (
+                <div className="fallback-row" key={row.id}>
+                  <input className="input" aria-label="原模型" value={row.from}
+                    placeholder="如 cn:model-a"
+                    onChange={(e) => updateFallback(row.id, "from", e.target.value)} />
+                  <input className="input" aria-label="降级模型" value={row.to}
+                    placeholder="如 cn:model-b"
+                    onChange={(e) => updateFallback(row.id, "to", e.target.value)} />
+                  <button type="button" className="btn small danger"
+                    aria-label={`删除 ${row.from || "空白"} 映射`}
+                    onClick={() => setFallbackRows((rows) => rows.filter((item) => item.id !== row.id))}>
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </Box>
       <Box title="上游与高级" pad>
         <div className="form-grid">{UPSTREAM.map(renderField)}</div>
       </Box>
       <div className="savebar">
         <span className="grow"></span>
-        <button className="btn" onClick={() => req<{ config: Config }>("config").then((r) => setCfg(r.config)).catch(() => null)}>放弃修改</button>
+        <button className="btn" onClick={() => req<{ config: Config }>("config").then((r) => loadConfig(r.config)).catch(() => null)}>放弃修改</button>
         <button className="btn primary" onClick={save}>保存配置</button>
       </div>
     </>

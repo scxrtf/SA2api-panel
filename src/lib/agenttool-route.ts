@@ -2,6 +2,7 @@
 // 与 fetch.go 的取号与失败处置：单次取号、失败换号上限 3、请求级错误 fail-fast、
 // realm 解析同口径）。
 import { getConfig } from "./config";
+import { sleepAbortable } from "./backoff";
 import * as pool from "./pool";
 import { authShapeOf } from "./login";
 import { UpstreamError, type ErrKind } from "./upstream/errors";
@@ -45,18 +46,36 @@ export interface AgentToolOutcome {
 export async function runAgentTool(
   realm: string,
   call: (cfg: AppConfig, auth: AuthShape) => Promise<string>,
+  signal?: AbortSignal,
 ): Promise<AgentToolOutcome> {
   const cfg = await getConfig();
+  const capacityDeadline = Date.now() + cfg.pool_wait_ms;
   const tried = new Set<string>();
   let lastErr: UpstreamError | Error | null = null;
   let retryAfterMs = 0;
+  let queueRetryRounds = 0;
+  const MAX_QUEUE_RETRY_ROUNDS = 3;
   const available = await pool.availableCountForModel("", realm);
-  const budget = Math.min(Math.max(ATTEMPTS, available), ATTEMPTS_HARD_CAP);
+  let budget = Math.min(Math.max(ATTEMPTS, available), ATTEMPTS_HARD_CAP);
   for (let attempt = 0; attempt < budget; attempt++) {
+    if (signal?.aborted) break;
     const entry = await pool.pick(cfg, { tried, realm });
     if (!entry) {
+      const remaining = capacityDeadline - Date.now();
+      const capacity = await pool.capacityWaitStatus(cfg, { realm, tried }, remaining);
+      if (capacity.waitMs > 0 && await sleepAbortable(capacity.waitMs, signal)) {
+        if (capacity.reason === "queue") {
+          if (queueRetryRounds >= MAX_QUEUE_RETRY_ROUNDS) break;
+          queueRetryRounds++;
+          budget += tried.size;
+          tried.clear();
+        }
+        attempt--; // 容量等待不消耗换号预算。
+        continue;
+      }
+      if (capacity.reason === "queue") retryAfterMs = capacity.nextRetryMs;
       const unavailable = await pool.retryStatus("", realm);
-      retryAfterMs = unavailable.retryAfterMs;
+      retryAfterMs = unavailable.retryAfterMs || retryAfterMs;
       if (unavailable.accountCooling > 0) {
         return {
           status: 429,
@@ -69,17 +88,32 @@ export async function runAgentTool(
     }
     if (tried.size === 0 && lastErr) break;
     if (!pool.acquire(entry, cfg)) {
-      tried.add(entry.account.uid);
+      const remaining = capacityDeadline - Date.now();
+      const capacity = await pool.capacityWaitStatus(cfg, { realm, tried }, remaining);
+      if (capacity.waitMs > 0 && await sleepAbortable(capacity.waitMs, signal)) {
+        if (capacity.reason === "queue") {
+          if (queueRetryRounds >= MAX_QUEUE_RETRY_ROUNDS) break;
+          queueRetryRounds++;
+          budget += tried.size;
+          tried.clear();
+        }
+        attempt--;
+      }
       continue;
     }
     tried.add(entry.account.uid);
     const auth = authShapeOf(entry.account);
     try {
       const data = await call(cfg, auth);
+      await pool.noteSuccess(entry.account.uid).catch(() => undefined);
       return { status: 200, code: "", msg: "", data };
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
       if (e instanceof UpstreamError) {
+        if (e.retryAfterMs > 0 &&
+          (retryAfterMs <= 0 || e.retryAfterMs < retryAfterMs)) {
+          retryAfterMs = e.retryAfterMs;
+        }
         // 与 chat/images 同一套失败处置（冷却/熔断/模型负缓存/12153 计数）。
         await pool.applyErrorKind(cfg, entry.account.uid, e.kind, e.message, "", e.retryAfterMs)
           .catch(() => undefined);
@@ -92,8 +126,12 @@ export async function runAgentTool(
       pool.release(entry.account.uid);
     }
   }
-  const status = lastErr instanceof UpstreamError && lastErr.status >= 400 ? lastErr.status : 502;
-  if (status === 429) retryAfterMs = (await pool.retryStatus("", realm)).retryAfterMs;
+  // 上游可能在 HTTP 200 业务信封里返回 6020/限流，对客户端仍应映射为 429。
+  const status = lastErr instanceof UpstreamError &&
+    (lastErr.kind === "soft_queue" || lastErr.kind === "soft_rate")
+    ? 429
+    : lastErr instanceof UpstreamError && lastErr.status >= 400 ? lastErr.status : 502;
+  if (status === 429) retryAfterMs = (await pool.retryStatus("", realm)).retryAfterMs || retryAfterMs;
   return {
     status,
     code: status === 429 ? "rate_limit_exceeded" : "upstream_error",

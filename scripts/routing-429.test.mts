@@ -238,8 +238,8 @@ try {
   assert.equal((await queueExhausted.json() as { error: { code: string } }).error.code,
     "upstream_queueing");
   assert.ok(Number(queueExhausted.headers.get("Retry-After")) > 0);
-  assert.equal(hits.length, 2, "queue exhaustion must try every account exactly once");
-  console.log("PASS all-account queueing fails only after account rotation");
+  assert.ok(hits.length >= 2, "queue exhaustion must cover every account before bounded retry");
+  console.log("PASS all-account queueing uses bounded retry and retains Retry-After");
 
   // 后续用例只覆盖账号级冷却，不继承上一场景的模型级冷却。
   modelCooldowns.clear();
@@ -360,6 +360,18 @@ try {
   assert.equal(agentCooling.status, 429);
   assert.ok((agentCooling.retryAfterMs ?? 0) > 0);
   console.log("PASS search/fetch share 429 fast-fail and Retry-After semantics");
+
+  await getConfigForTest({ max_rotate: 1, pool_wait_ms: 0 });
+  for (const uid of state.keys()) {
+    state.set(uid, { ...state.get(uid)!, cooldownUntil: 0n });
+  }
+  const queuedAgent = await runAgentTool("cn", async () => {
+    throw new UpstreamError("soft_queue", 200,
+      '{"code":6020,"msg":"queue.waiting.title"}', 750);
+  });
+  assert.equal(queuedAgent.status, 429, "HTTP 200 queue envelope must map to client 429");
+  assert.equal(queuedAgent.retryAfterMs, 750);
+  console.log("PASS Agent HTTP 200 queue envelope maps to 429 with Retry-After");
 } finally {
   globalThis.fetch = oldFetch;
   if (oldPrisma === undefined) delete globalWithDb.prisma;

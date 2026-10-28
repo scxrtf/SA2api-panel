@@ -35,6 +35,10 @@ export type PickOpts = {
 
 const MIN_PICK_GAP_MS = 100; // 防并发撞号窗口（Go minPickGap）
 const inFlight = new Map<string, number>();
+// 上游压力只用于临时收缩本地并发，不替代持久化冷却。
+const pressure = new Map<string, { successes: number; until: number }>();
+const PRESSURE_TTL_MS = 30_000;
+const PRESSURE_RECOVER_SUCCESSES = 3;
 const lastUsedMap = new Map<string, number>();
 const usedSeqMap = new Map<string, number>();
 let pickSeq = 0;
@@ -53,10 +57,18 @@ const MODEL_BLOCK_MAX_TTL_MS = 24 * 3600_000;
 export const inFlightCount = (uid: string) => inFlight.get(uid) ?? 0;
 
 function inFlightLimit(state: AccountState, account: Account, cfg: AppConfig): number {
-  if (cfg.max_in_flight_global > 0 && account.realm === "global") {
-    return cfg.max_in_flight_global;
+  const configured = cfg.max_in_flight_global > 0 && account.realm === "global"
+    ? cfg.max_in_flight_global
+    : cfg.max_in_flight;
+  // 0 是用户显式配置的不限并发，压力窗口不能把该语义改成单并发。
+  if (configured <= 0) return configured;
+  const p = pressure.get(account.uid);
+  if (!p) return configured;
+  if (p.until <= Date.now()) {
+    pressure.delete(account.uid);
+    return configured;
   }
-  return cfg.max_in_flight;
+  return 1;
 }
 
 function inFlightFull(e: PoolEntry, cfg: AppConfig): boolean {
@@ -79,6 +91,22 @@ export function release(uid: string): void {
   const cur = inFlight.get(uid) ?? 0;
   if (cur <= 1) inFlight.delete(uid);
   else inFlight.set(uid, cur - 1);
+}
+
+export function noteUpstreamPressure(uid: string): void {
+  pressure.set(uid, { successes: 0, until: Date.now() + PRESSURE_TTL_MS });
+}
+
+function notePressureSuccess(uid: string): void {
+  const p = pressure.get(uid);
+  if (!p) return;
+  if (p.until <= Date.now()) {
+    pressure.delete(uid);
+    return;
+  }
+  p.successes++;
+  p.until = Date.now() + PRESSURE_TTL_MS;
+  if (p.successes >= PRESSURE_RECOVER_SUCCESSES) pressure.delete(uid);
 }
 
 function markUsed(uid: string): void {
@@ -339,6 +367,59 @@ export interface PoolRetryStatus {
   retryAfterMs: number; // 最早可重新路由的健康账号等待时长；无法估计为 0
   cooling: number;
   accountCooling: number;
+}
+
+export interface CapacityWaitStatus {
+  waitMs: number; // 0=立即可重选；-1=不存在可安全等待的短时容量
+  nextRetryMs: number; // 最短真实恢复时间，用于预算不足时保留 Retry-After
+  reason: "ready" | "in_flight" | "queue" | "none";
+}
+
+// 只等待健康账号的在途占满与 6020 短模型冷却；长限流与熔断不挂起请求。
+export async function capacityWaitStatus(
+  cfg: AppConfig,
+  opts: PickOpts = {},
+  remainingBudgetMs = cfg.pool_wait_ms,
+): Promise<CapacityWaitStatus> {
+  if (remainingBudgetMs <= 0 || cfg.pool_wait_ms <= 0) {
+    return { waitMs: -1, nextRetryMs: 0, reason: "none" };
+  }
+  const now = Date.now();
+  const { tried, model = "", realm = "" } = opts;
+  let waitMs = -1;
+  let nextRetryMs = 0;
+  let reason: CapacityWaitStatus["reason"] = "none";
+  for (const e of await loadEntries()) {
+    if (realm !== "" && e.account.realm !== realm) continue;
+    if (e.state.disabled || e.state.paused || !isHealthy(e, now)) continue;
+    if (floorBlocked(e, model, realm, cfg, now)) continue;
+    const mc = model ? e.cooldowns.find((c) => c.model === model) : undefined;
+    if (mc && Number(mc.until) > now) {
+      // 已尝试账号只允许在其 6020 短冷却结束后重试；其它失败仍不重复打上游。
+      if (!mc.reason.startsWith("6020 queue:")) continue;
+      const untilMs = Number(mc.until) - now;
+      if (nextRetryMs <= 0 || untilMs < nextRetryMs) nextRetryMs = untilMs;
+      if (untilMs > remainingBudgetMs) continue;
+      const wait = Math.min(untilMs, cfg.pool_wait_ms);
+      if (waitMs < 0 || wait < waitMs) {
+        waitMs = wait;
+        reason = "queue";
+      }
+      continue;
+    }
+    if (tried?.has(e.account.uid)) continue;
+    if (inFlightFull(e, cfg)) {
+      const wait = Math.min(cfg.pool_wait_poll_ms, remainingBudgetMs);
+      if (nextRetryMs <= 0 || wait < nextRetryMs) nextRetryMs = wait;
+      if (waitMs < 0 || wait < waitMs) {
+        waitMs = wait;
+        reason = "in_flight";
+      }
+      continue;
+    }
+    return { waitMs: 0, nextRetryMs: 0, reason: "ready" };
+  }
+  return { waitMs, nextRetryMs, reason };
 }
 
 // retryStatus 用于无健康候选时的快速失败。只报告墙钟，不在服务端睡眠或提前探测。
@@ -712,6 +793,7 @@ export async function clearSessionDead(uid: string): Promise<void> {
 // noteSuccess 成功迁移：清 fails/retryCount/breakerUntil/softStreak/sessionStrikes/
 // degrade，**不清 modelCooldowns**（6004 各自独立计时；11102 由 blockModelClear 显式清）。
 export async function noteSuccess(uid: string): Promise<void> {
+  notePressureSuccess(uid);
   breakerRetryCount.delete(uid);
   consecutiveFails.delete(uid);
   degradeRetryCount.delete(uid);
@@ -1106,6 +1188,7 @@ export async function applyErrorKind(
   model: string,
   retryAfterMs: number,
 ): Promise<void> {
+  if (kind === "soft_queue" || kind === "soft_rate") noteUpstreamPressure(uid);
   switch (kind) {
     case "hard_credit":
       await cooldownHardCredit(uid, "hard_credit: " + body.slice(0, 120));
@@ -1115,7 +1198,9 @@ export async function applyErrorKind(
       // 不罚账号——队列是上游容量现象，换号/换模型仍可能立刻可用。
       if (!model) return;
       const retry = retryAfterMs > 0 ? retryAfterMs : cfg.soft_cooldown_ms;
-      const resetAt = Date.now() + Math.min(cfg.soft_cooldown_ms, retry);
+      const cap = Math.min(cfg.soft_cooldown_ms, cfg.pool_wait_ms > 0 ? cfg.pool_wait_ms : 5_000);
+      // 缺失提示时仅短冷却，优先换号，而不是挡住该模型的后续请求一分钟。
+      const resetAt = Date.now() + Math.min(Math.max(250, cap), Math.max(250, retry));
       await cooldownSoftForModel(cfg, uid, resetAt, model, "6020 queue: " + body.slice(0, 110));
       return;
     }

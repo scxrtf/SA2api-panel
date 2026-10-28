@@ -8,6 +8,7 @@ import {
   gatewayHint,
   isQueueWait,
   parseQueuePosition,
+  parseQueueRetryAfter,
 } from "file:///C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next/src/lib/upstream/errors.ts";
 
 // 用户现场 body（data 被截断也照判，分类只依赖正则）。
@@ -45,6 +46,14 @@ assert.equal(parseQueuePosition('{"data":{"queuePosition":"7"}}'), 7, "camelCase
 assert.equal(parseQueuePosition('{"data":{"queue_position_total":10}}'), 0, "total ignored");
 assert.equal(parseQueuePosition(liveBody), 0, "truncated JSON returns 0");
 assert.equal(parseQueuePosition("not json"), 0, "non-JSON returns 0");
+assert.equal(parseQueueRetryAfter('{"data":{"retry_after":1.25}}'), 1250, "nested seconds parsed");
+assert.equal(parseQueueRetryAfter('{"data":{"retryAfter":"2"}}'), 2000, "camelCase seconds parsed");
+assert.equal(parseQueueRetryAfter('{"data":{"retry_after_ms":"750"}}'), 750, "nested milliseconds parsed");
+assert.equal(parseQueueRetryAfter('{"data":{"retryAfterMs":750.1}}'), 751, "milliseconds rounded up");
+assert.equal(parseQueueRetryAfter('{"data":{"retry_after_seconds":3}}'), 3000, "explicit seconds parsed");
+assert.equal(parseQueueRetryAfter('{"data":{"retry_after":-1}}'), 0, "negative retry ignored");
+assert.equal(parseQueueRetryAfter('{"data":{"retry_after":"later"}}'), 0, "invalid retry ignored");
+assert.equal(parseQueueRetryAfter(liveBody), 0, "truncated retry body returns 0");
 
 // 5. gateway_hint 与 SSE error 帧。
 assert.match(gatewayHint("soft_queue", fullBody, {}), /queue position 3/, "hint carries position");

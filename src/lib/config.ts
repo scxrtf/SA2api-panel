@@ -12,6 +12,8 @@ export interface AppConfig {
   breaker_cooldown_max_ms: number;
   max_in_flight: number; // 单账号最大在途（0=不限）
   max_in_flight_global: number; // global 域账号在途上限（0=用 max_in_flight）
+  pool_wait_ms: number; // 短排队/在途占满时的服务端等待总预算（0=立即失败）
+  pool_wait_poll_ms: number; // 容量重试间隔
   idle_weight_per_hour: number; // 闲置补偿权重（每小时）
   idle_weight_max: number; // 闲置补偿上限
   prefer_expiring: boolean; // 快过期积分优先
@@ -77,6 +79,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   breaker_cooldown_max_ms: 10 * 60_000,
   max_in_flight: 2,
   max_in_flight_global: 0,
+  pool_wait_ms: 15_000,
+  pool_wait_poll_ms: 200,
   idle_weight_per_hour: 0.1,
   idle_weight_max: 0.5,
   prefer_expiring: true,
@@ -123,6 +127,20 @@ import { prisma } from "./db";
 
 let cache: { cfg: AppConfig; at: number } | null = null;
 const CACHE_TTL_MS = 5_000;
+const POOL_WAIT_MAX_MS = 120_000;
+const POOL_WAIT_POLL_MIN_MS = 50;
+const POOL_WAIT_POLL_MAX_MS = 10_000;
+
+function normalizeCapacityConfig(cfg: AppConfig): void {
+  // 0 保留“立即失败”语义；其余值限制在请求可接受的总挂起时间内。
+  cfg.pool_wait_ms = Number.isFinite(cfg.pool_wait_ms)
+    ? Math.min(POOL_WAIT_MAX_MS, Math.max(0, Math.floor(cfg.pool_wait_ms)))
+    : DEFAULT_CONFIG.pool_wait_ms;
+  cfg.pool_wait_poll_ms = Number.isFinite(cfg.pool_wait_poll_ms)
+    ? Math.min(POOL_WAIT_POLL_MAX_MS,
+      Math.max(POOL_WAIT_POLL_MIN_MS, Math.floor(cfg.pool_wait_poll_ms)))
+    : DEFAULT_CONFIG.pool_wait_poll_ms;
+}
 
 export async function getConfig(force = false): Promise<AppConfig> {
   if (!force && cache && Date.now() - cache.at < CACHE_TTL_MS) {
@@ -136,6 +154,7 @@ export async function getConfig(force = false): Promise<AppConfig> {
     // DB 未就绪/表未建：回落默认值（部署迁移前的引导窗口）。
   }
   const cfg: AppConfig = { ...DEFAULT_CONFIG, ...stored };
+  normalizeCapacityConfig(cfg);
   // 环境变量覆盖主密钥（Railway 部署首选方式；面板里的密钥仍走 Setting）。
   if (process.env.WB2A_API_KEY) cfg.api_key = process.env.WB2A_API_KEY;
   // 对齐 Go normalize：<=0 回落 5（不是「全部展开」）。
@@ -195,12 +214,26 @@ export async function saveConfig(raw: unknown): Promise<AppConfig> {
     } else if (typeof def === "boolean") {
       if (typeof v !== "boolean") throw new Error(`字段 ${k} 必须是布尔值`);
       (next as unknown as Record<string, unknown>)[k] = v;
+    } else if (k === "model_fallback") {
+      // 降级表是 { 请求模型: 等价模型 } 对象，不是文本字段。
+      if (typeof v !== "object" || v === null || Array.isArray(v)) {
+        throw new Error("字段 model_fallback 必须是模型映射对象");
+      }
+      const fallback: Record<string, string> = {};
+      for (const [from, to] of Object.entries(v)) {
+        if (!from.trim() || typeof to !== "string" || !to.trim()) {
+          throw new Error("model_fallback 的模型名和降级目标必须是非空字符串");
+        }
+        fallback[from.trim()] = to.trim();
+      }
+      next.model_fallback = fallback;
     } else {
       if (typeof v !== "string") throw new Error(`字段 ${k} 必须是字符串`);
       (next as unknown as Record<string, unknown>)[k] = v;
     }
   }
   if (next.max_rotate < 1) throw new Error("max_rotate 至少为 1");
+  normalizeCapacityConfig(next);
   if (next.schedule_keepalive_refresh_before_hours > 24 * 365) {
     throw new Error("schedule_keepalive_refresh_before_hours 不能超过 8760");
   }

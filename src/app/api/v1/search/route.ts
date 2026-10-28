@@ -46,7 +46,8 @@ export async function POST(req: Request): Promise<Response> {
   if (dshClient && maxResults <= 0 && typeof body["count"] === "number") {
     maxResults = body["count"] as number;
   }
-  const outcome = await runAgentTool(realm, (cfg, auth) => webSearch(cfg, auth, query, maxResults));
+  const outcome = await runAgentTool(realm,
+    (cfg, auth) => webSearch(cfg, auth, query, maxResults, req.signal), req.signal);
   if (outcome.data === undefined) return agentToolError(outcome);
   const payload = dshClient ? compatDeepSeekSearch(outcome.data) : outcome.data;
   return new Response(payload, {
