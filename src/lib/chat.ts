@@ -478,6 +478,24 @@ export async function handleChat(opts: {
   };
 
   let attemptCount = 0;
+  // max_rotate 是「单请求轮转预算」，不是「账号覆盖上限」。账号级 429（6020
+  // 排队 / 软限流）只影响当前账号，池里还有健康账号就必须继续试——实测 24 号池
+  // 在 8 个号全部排队时提前返回 429，而其余账号仍能正常服务。命中这类错误时把
+  // 预算扩到「已尝试数 + 当前可用账号数」，硬上限防止超大池把单请求放大成无限轮转。
+  const ROTATION_HARD_CAP = 64;
+  let rotationBudget = cfg.max_rotate;
+  let budgetExtendedModel = "";
+  const extendRotationBudget = async (kind: ErrKind) => {
+    if (budgetExtendedModel === curModel) return;
+    budgetExtendedModel = curModel;
+    const candidates = await pool.availableCountForModel(curModel, realm);
+    const capped = Math.min(attemptCount + candidates, Math.max(ROTATION_HARD_CAP, cfg.max_rotate));
+    if (capped > rotationBudget) {
+      runlog("rotation budget: " + rotationBudget + " -> " + capped +
+        " (" + kind + ", candidates=" + candidates + ")");
+      rotationBudget = capped;
+    }
+  };
   // finishLog 落一条请求日志 + 一行运行日志。errMsg 为失败请求的报错内容
   // （上游正文，已 clip）；缺省空串——成功路径不写，日志表不带噪声。
   const finishLog = (
@@ -538,7 +556,7 @@ export async function handleChat(opts: {
 
   let logAttemptStarted = started;
   try {
-    for (let i = 0; i < cfg.max_rotate; i++) {
+    for (let i = 0; i < rotationBudget; i++) {
       // 选号：粘性优先，否则普通轮换。
       let entry: pool.PoolEntry | null = null;
       if (stickyUID) {
@@ -802,6 +820,7 @@ export async function handleChat(opts: {
             ? res.error.retryAfterMs
             : cfg.soft_cooldown_ms;
           await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, retryMs);
+          await extendRotationBudget(kind);
           lastErr = { kind, status: 429, msg: respBody, retryAfterMs: retryMs };
           fail(acct.uid);
           continue;
@@ -866,6 +885,8 @@ export async function handleChat(opts: {
           retryAfterMs: res.error?.retryAfterMs ?? 0,
         };
         await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, lastErr.retryAfterMs);
+        // 账号级软限流同样只影响当前号且不退避：让轮转预算覆盖可用账号。
+        if (kind === "soft_rate") await extendRotationBudget(kind);
         fail(acct.uid);
         // WAF IP 级 fail-fast（优先于轮转退避——IP 级拦截时退避无意义）：
         // 该次 WAF 403 喂入 IP 级状态机，若激活（短窗多号命中，IP 被拦而非账号）

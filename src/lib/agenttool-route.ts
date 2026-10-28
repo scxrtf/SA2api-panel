@@ -10,6 +10,9 @@ import type { AuthShape } from "./upstream/client";
 import { openAIError } from "./chat";
 
 const ATTEMPTS = 3;
+// 换号预算至少覆盖当前可用账号：账号级 429 只影响当前号，池里还有号时
+// 固定 3 次会提前把可用账号判成耗尽（大池场景与 chat 轮转同根因）。
+const ATTEMPTS_HARD_CAP = 64;
 
 // 请求级错误：换号必然同样被拒，直接透传上游原文（不烧全池）。
 const failFastKinds: ErrKind[] = [
@@ -47,7 +50,9 @@ export async function runAgentTool(
   const tried = new Set<string>();
   let lastErr: UpstreamError | Error | null = null;
   let retryAfterMs = 0;
-  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+  const available = await pool.availableCountForModel("", realm);
+  const budget = Math.min(Math.max(ATTEMPTS, available), ATTEMPTS_HARD_CAP);
+  for (let attempt = 0; attempt < budget; attempt++) {
     const entry = await pool.pick(cfg, { tried, realm });
     if (!entry) {
       const unavailable = await pool.retryStatus("", realm);

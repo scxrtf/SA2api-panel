@@ -293,7 +293,7 @@ export async function pick(
     }
   }
 
-  let ws = cands
+  const ws = cands
     .map((e) => {
       const t = costTier(e);
       return { e, w: routingWeightOf(e, maxCredits, cfg, now), tier: t.tier, cost1k: t.cost1k };
@@ -415,6 +415,22 @@ export async function availableUIDsForModel(model: string, realm = ""): Promise<
   return out;
 }
 
+// availableCountForModel 当前可服务该模型的账号数（健康 + 未被模型冷却）。
+// 仅用于把「单请求轮转预算」与池规模对齐——max_rotate 是轮转预算，不是账号
+// 覆盖上限；候选数大于预算时，账号级 429 不应提前把可用账号判成耗尽。
+// 不计在途/积分保底（调用方只把它当上界，实际选号仍由 pick 决定）。
+export async function availableCountForModel(model: string, realm = ""): Promise<number> {
+  const now = Date.now();
+  const all = await loadEntries();
+  let count = 0;
+  for (const e of all) {
+    if (realm !== "" && e.account.realm !== realm) continue;
+    if (!healthyForModel(e, now, model)) continue;
+    count++;
+  }
+  return count;
+}
+
 // ─── 冷却/熔断/状态迁移（cooldown.go + transition.go 同语义） ─────────────
 
 async function getState(uid: string): Promise<AccountState | null> {
@@ -532,7 +548,7 @@ export async function cooldownHardCredit(uid: string, reason: string): Promise<v
   }).formatToParts(now);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
   const hour = Number(get("hour"));
-  let dayOffset = hour < 4 ? 0 : 1;
+  const dayOffset = hour < 4 ? 0 : 1;
   const base = new Date(`${get("year")}-${get("month")}-${get("day")}T04:00:00+08:00`);
   const until = base.getTime() + dayOffset * 24 * 3600_000;
   await patchState(uid, {
@@ -548,7 +564,6 @@ export async function cooldownHardCredit(uid: string, reason: string): Promise<v
 export async function blockModelBackoff(uid: string, model: string, reason: string): Promise<void> {
   if (!uid || !model) return;
   const now = Date.now();
-  const prev = await prisma.modelCooldown.findUnique({ where: { uid_model: { uid, model } } });
   // hits 复用 id 之外的持久载体：用 reason 前缀计数不可行，这里单独读 hits 无字段——
   // 本实现把 hits 编码进 audit 维度不可行，改为在内存 Map 记命中数（单实例语义）。
   const hits = (modelBlockHits.get(uid + "\x1f" + model) ?? 0) + 1;
@@ -612,7 +627,7 @@ export async function modelBlocked(model: string, realm = ""): Promise<ModelBloc
 async function noteBreakerFailure(cfg: AppConfig, uid: string): Promise<void> {
   const s = await getState(uid);
   if (!s) return;
-  let fails = s.breakerFails + 1;
+  const fails = s.breakerFails + 1;
   if (fails < cfg.breaker_threshold) {
     await patchState(uid, { breakerFails: fails });
     return;
