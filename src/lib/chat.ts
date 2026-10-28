@@ -542,7 +542,11 @@ export async function handleChat(opts: {
       // 选号：粘性优先，否则普通轮换。
       let entry: pool.PoolEntry | null = null;
       if (stickyUID) {
-        entry = await pool.pickByUIDForModel(cfg, stickyUID, curModel);
+        // tried 中的账号已在本请求内失败；即使粘性解析发生在模型冷却写入之前，
+        // 也不能跳过 tried 再选一次，否则单账号池会在每次循环开头反复选中它。
+        entry = tried.has(stickyUID)
+          ? null
+          : await pool.pickByUIDForModel(cfg, stickyUID, curModel);
         if (!entry || (realm !== "" && entry.account.realm !== realm)) {
           void unbindSticky(sessKey);
           stickyUID = "";
@@ -791,24 +795,16 @@ export async function handleChat(opts: {
           }
         }
 
-        // 6020 队列等待：模型级短冷却后立即返回 429，不换号不退避。
-        // 继续轮转只会把一次排队放大成 max_rotate 次上游请求；落到末端还会
-        // 被误报成 503 no_healthy_account。Retry-After 给客户端明确等待口径。
+        // 6020 队列等待只冷却当前账号的当前模型，不能假定其他账号也在排队。
+        // 立即换号且不退避；全部候选都排队时才由末端返回 429 + Retry-After。
         if (kind === "soft_queue") {
           const retryMs = res.error?.retryAfterMs && res.error.retryAfterMs > 0
             ? res.error.retryAfterMs
             : cfg.soft_cooldown_ms;
-          const effectiveMs = Math.min(cfg.soft_cooldown_ms, retryMs);
           await pool.applyErrorKind(cfg, acct.uid, kind, respBody, bare, retryMs);
+          lastErr = { kind, status: 429, msg: respBody, retryAfterMs: retryMs };
           fail(acct.uid);
-          finishLog(429, acct.uid, kind, undefined, attemptFailure);
-          return openAIError(
-            429,
-            "upstream_queueing",
-            respBody.trim() || "upstream is queueing this request; retry shortly",
-            hintOf(kind, respBody),
-            { "Retry-After": String(Math.max(1, Math.ceil(effectiveMs / 1000))) },
-          );
+          continue;
         }
 
         // 内容拦截误报（passthrough/append 首遇）→ 触发降级同请求内重试。
@@ -1239,7 +1235,9 @@ export async function handleChat(opts: {
       upstreamMsgPassed = true;
     }
   }
-  if (modelBlock?.blocked) {
+  // 6020 是本请求刚观察到的排队结果，优先于末端 model_blocked 聚合：
+  // 它不是模型永久不可用，必须保留 429 + Retry-After 的客户端等待语义。
+  if (modelBlock?.blocked && lastErr?.kind !== "soft_queue") {
     code = "model_unavailable";
     status = 400;
     if (!upstreamMsgPassed) {

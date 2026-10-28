@@ -144,8 +144,11 @@ try {
     requestLog: { create: async () => ({}) },
   };
   globalWithDb.prisma = db;
-  const request = () => handleChat({
-    body: { model: "cn:test-model", messages: [{ role: "user", content: "offline" }] },
+  const request = (conversationId = "offline") => handleChat({
+    body: {
+      model: "cn:test-model", conversation_id: conversationId,
+      messages: [{ role: "user", content: "offline" }],
+    },
     clientIP: "", inboundHeaders: new Headers(), ua: "", path: "/v1/chat/completions",
   });
   const hits: string[] = [];
@@ -177,6 +180,69 @@ try {
   assert.equal(state.get(limitedUID)!.cooldownUntil > BigInt(Date.now()), true);
   console.log("PASS upstream 429 rotates immediately to a different healthy account");
 
+  // 6020 是 (账号, 模型) 级排队，不是全池不可用；先尝试其他健康账号。
+  const modelCooldowns = new Map<string, { uid: string; model: string; until: bigint; reason: string }>();
+  for (const uid of state.keys()) {
+    state.set(uid, { ...state.get(uid)!, cooldownUntil: 0n, cooldownReason: "" });
+  }
+  db.account.findMany = async () => [...state.keys()].map((uid) => ({
+    ...account(uid), state: state.get(uid)!,
+    modelCooldowns: [...modelCooldowns.values()].filter((item) => item.uid === uid),
+  }));
+  db.modelCooldown = {
+    deleteMany: async ({ where }: { where: { uid: string } }) => {
+      for (const [key, item] of modelCooldowns) {
+        if (item.uid === where.uid) modelCooldowns.delete(key);
+      }
+      return { count: 0 };
+    },
+    upsert: async ({ where, create, update }: {
+      where: { uid_model: { uid: string; model: string } };
+      create: { uid: string; model: string; until: bigint; reason: string };
+      update: { until: bigint; reason: string };
+    }) => {
+      const key = where.uid_model.uid + "\0" + where.uid_model.model;
+      const next = { ...(modelCooldowns.get(key) ?? create), ...update };
+      modelCooldowns.set(key, next);
+      return next;
+    },
+  };
+  hits.length = 0;
+  const queueBody = JSON.stringify({
+    code: 6020,
+    msg: "queue.waiting.title",
+    data: { queue_position: 1847, retry_after: 40 },
+  });
+  const queueStarted = Date.now();
+  const responseAfterQueue = await request("offline-queue");
+  assert.equal(responseAfterQueue.status, 200);
+  assert.equal(hits.length, 2);
+  assert.notEqual(hits[0], hits[1]);
+  assert.ok(Date.now() - queueStarted < 1_000, "queue rotation must not wait for Retry-After");
+  console.log("PASS upstream 6020 queue rotates to a different healthy account");
+
+  globalThis.fetch = async (_url, init) => {
+    hits.push(String((init?.headers as Record<string, string>).Authorization));
+    return new Response(queueBody, {
+      status: 429, headers: { "Retry-After": "20" },
+    });
+  };
+  // 各场景必须独立于前一轮的账号级和模型级冷却。
+  for (const uid of state.keys()) {
+    state.set(uid, { ...state.get(uid)!, cooldownUntil: 0n, cooldownReason: "" });
+  }
+  modelCooldowns.clear();
+  hits.length = 0;
+  const queueExhausted = await request("offline-queue-exhausted");
+  assert.equal(queueExhausted.status, 429);
+  assert.equal((await queueExhausted.json() as { error: { code: string } }).error.code,
+    "upstream_queueing");
+  assert.ok(Number(queueExhausted.headers.get("Retry-After")) > 0);
+  assert.equal(hits.length, 2, "queue exhaustion must try every account exactly once");
+  console.log("PASS all-account queueing fails only after account rotation");
+
+  // 后续用例只覆盖账号级冷却，不继承上一场景的模型级冷却。
+  modelCooldowns.clear();
   hits.length = 0;
   for (const uid of state.keys()) {
     state.set(uid, { ...state.get(uid)!, cooldownUntil: BigInt(Date.now() + 15_000) });
