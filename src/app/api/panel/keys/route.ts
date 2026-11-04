@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
 import { mask, parseProviderAccess } from "@/lib/auth-guard";
 import { prisma } from "@/lib/db";
+import { getOrCreateMachineId, machineKeyAuthorized } from "@/lib/machine-key";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +25,10 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
+  const machine = await getOrCreateMachineId();
+  if (!(await machineKeyAuthorized(machine.id))) {
+    return fail(403, "当前机器尚未授权：请先添加一个账号，或输入密码完成机器授权");
+  }
   let body: { name?: string };
   try {
     body = (await req.json()) as { name?: string };

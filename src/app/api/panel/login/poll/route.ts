@@ -8,6 +8,7 @@ import { claimTrial, dailyCheckin, userResource, expiringSoonMs } from "@/lib/up
 import { globalCompleteRegistration } from "@/lib/upstream/global_register";
 import { runlogAccount } from "@/lib/runlog";
 import { label } from "@/lib/logfmt";
+import { authorizeMachineForAccount, getOrCreateMachineId } from "@/lib/machine-key";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,6 +78,9 @@ export async function GET(req: Request) {
   });
   // 全新登录 = 人工恢复口径：清掉旧号遗留的禁用/冷却/熔断。
   await pool.revive(acct.uid);
+  // 账号已成功落库即视为有效添加；后续签到/余额失败不影响机器授权。
+  const machine = await getOrCreateMachineId();
+  await authorizeMachineForAccount(machine.id, acct.uid);
   const who = label(acct.uid, acct.nickname ?? "");
   runlogAccount(
     "添加账号",

@@ -3,27 +3,40 @@
 import React, { useEffect, useRef, useState } from "react";
 import { req } from "../lib";
 
-export function AddAccountModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+export function AddAccountModal({ onClose, onDone, onAuthorized, embedded = false }: {
+  onClose: () => void;
+  onDone: () => void;
+  onAuthorized?: () => void;
+  embedded?: boolean;
+}) {
   const [tab, setTab] = useState<"login" | "import">("login");
-  return (
-    <div className="modal-mask" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal">
+  // 建 Key 授权弹窗中嵌入时不再叠一层全屏遮罩；账号池仍使用独立弹窗。
+  const content = (
+    <>
         <div className="modal-title">添加账号</div>
         <div className="btn-row" style={{ marginBottom: 14 }}>
           <button className={"btn small" + (tab === "login" ? " primary" : "")} onClick={() => setTab("login")}>浏览器登录</button>
           <button className={"btn small" + (tab === "import" ? " primary" : "")} onClick={() => setTab("import")}>导入 JSON</button>
         </div>
-        {tab === "login" ? <LoginPane onDone={onDone} /> : <ImportPane onDone={onDone} />}
+        {tab === "login" ? <LoginPane onDone={onDone} onAuthorized={onAuthorized} />
+          : <ImportPane onDone={onDone} onAuthorized={onAuthorized} />}
         <div style={{ marginTop: 14, textAlign: "right" }}>
           <button className="btn" onClick={onClose}>关闭</button>
         </div>
+    </>
+  );
+  if (embedded) return content;
+  return (
+    <div className="modal-mask" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal">
+        {content}
       </div>
     </div>
   );
 }
 
 // 设备授权登录（login/start → login/poll 轮询）。
-function LoginPane({ onDone }: { onDone: () => void }) {
+function LoginPane({ onDone, onAuthorized }: { onDone: () => void; onAuthorized?: () => void }) {
   const [realm, setRealm] = useState("cn");
   const [url, setUrl] = useState("");
   const [state, setState] = useState("");
@@ -44,7 +57,11 @@ function LoginPane({ onDone }: { onDone: () => void }) {
         try {
           const p = await req<{ done: boolean; message?: string; uid?: string }>(
             "login/poll?state=" + encodeURIComponent(r.state));
-          if (p.done) { stop(); setStatus("登录成功，账号 " + (p.uid ?? "") + " 已入库。"); setTimeout(onDone, 1200); }
+          if (p.done) {
+            stop();
+            setStatus("登录成功，账号 " + (p.uid ?? "") + " 已入库，当前机器已获建 Key 权限。");
+            setTimeout(() => { onDone(); onAuthorized?.(); }, 1200);
+          }
           else if (p.message) setStatus("等待授权…（" + p.message + "）");
         } catch (e) { stop(); setErr(e instanceof Error ? e.message : String(e)); }
       }, 3000);
@@ -76,7 +93,7 @@ function LoginPane({ onDone }: { onDone: () => void }) {
 }
 
 // 导入 JSON（import/cockpit：粘贴账号 JSON 批量入库）。
-function ImportPane({ onDone }: { onDone: () => void }) {
+function ImportPane({ onDone, onAuthorized }: { onDone: () => void; onAuthorized?: () => void }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -89,7 +106,11 @@ function ImportPane({ onDone }: { onDone: () => void }) {
       try { parsed = JSON.parse(text); } catch { throw new Error("JSON 解析失败，请检查格式"); }
       const r = await req<{ imported?: number; message?: string }>("import/cockpit", { method: "POST", body: parsed });
       setOkMsg(r.message ?? ("导入完成 " + (r.imported ?? "") + " 个账号"));
-      setTimeout(onDone, 1200);
+      if ((r.imported ?? 0) > 0) {
+        setTimeout(() => { onDone(); onAuthorized?.(); }, 1200);
+      } else {
+        setErr("没有有效账号入库，请修正后重试");
+      }
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   };

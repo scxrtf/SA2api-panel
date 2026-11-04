@@ -382,8 +382,48 @@ body {
 }
 .modal-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
 
+/* 建 Key 前的机器码检测与授权状态 */
+.machine-modal { width: 520px; }
+.machine-modal-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.machine-state {
+  padding: 12px 14px; margin-bottom: 16px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--bg-soft); transition: border-color .2s, background .2s;
+}
+.machine-state.authorized { border-color: #bbf7d0; background: #f0fdf4; }
+.machine-state-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.machine-state-label { font-size: 12px; font-weight: 600; }
+.machine-badge {
+  padding: 2px 8px; border-radius: 999px; background: #fff7ed; color: var(--accent);
+  font-size: 11px; font-weight: 600; animation: machineContentIn .2s ease;
+}
+.machine-badge.checking { color: var(--fg-dim); background: var(--surface); }
+.machine-badge.ok { color: var(--ok); background: #dcfce7; }
+.machine-id { line-height: 1.6; }
+.machine-content { animation: machineContentIn .22s ease; }
+.machine-progress {
+  min-height: 116px; display: flex; align-items: center; justify-content: center; gap: 14px;
+  color: var(--fg); animation: machineContentIn .2s ease;
+}
+.machine-progress .dim { margin-top: 5px; font-size: 12px; }
+.machine-authorized-note { color: var(--fg-dim); line-height: 1.7; }
+.machine-submit { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.spinner {
+  width: 18px; height: 18px; flex: 0 0 auto; display: inline-block;
+  border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%;
+  animation: machineSpin .7s linear infinite;
+}
+.spinner.large { width: 28px; height: 28px; border-width: 3px; }
+.spinner.small { width: 14px; height: 14px; }
+.spinner.light { border-color: rgba(255,255,255,.45); border-top-color: #fff; }
+
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popIn { from { opacity: 0; transform: scale(.96) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes machineSpin { to { transform: rotate(360deg); } }
+@keyframes machineContentIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .machine-content, .machine-badge, .machine-progress { animation: none; }
+  .spinner { animation-duration: 1.5s; }
+}
 
 .mono { font-family: var(--mono); font-size: 12px; word-break: break-all; }
 .dim { color: var(--fg-dim); }

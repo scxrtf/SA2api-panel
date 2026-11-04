@@ -10,6 +10,7 @@ import { claimTrial, dailyCheckin, userResource, expiringSoonMs } from "@/lib/up
 import { globalCompleteRegistration } from "@/lib/upstream/global_register";
 import { runlogAccount } from "@/lib/runlog";
 import { label } from "@/lib/logfmt";
+import { authorizeMachineForAccount, getOrCreateMachineId } from "@/lib/machine-key";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,6 +93,8 @@ export async function POST(req: Request) {
       },
     });
     await pool.revive(uid);
+    const machine = await getOrCreateMachineId();
+    await authorizeMachineForAccount(machine.id, uid);
 
     // 顺带签到/激活/余额（幂等；失败不阻断导入，对齐 Go import.go）。
     const shape = {

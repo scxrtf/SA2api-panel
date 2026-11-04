@@ -1,8 +1,9 @@
 "use client";
 // 供应商与密钥视图（对齐 Go view-gateway：密钥环 + 聚合供应商合一页）。
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { req, useAutoRefresh, usePanelRefresh, emitPanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
+import { AddAccountModal } from "../components/addAccount";
 
 interface KeyRow { name: string; key_mask: string; providers: string[]; created_at: string }
 interface ProviderRow { name: string; base_url: string; key_mask: string; models: string; created_at: string }
@@ -20,6 +21,15 @@ function KeysBox({ flash }: { flash: Flash }) {
   const [keys, setKeys] = useState<KeyRow[] | null>(null);
   const [name, setName] = useState("");
   const [created, setCreated] = useState<{ name: string; key: string } | null>(null);
+  const [machine, setMachine] = useState<{ id: string; authorized: boolean } | null>(null);
+  const [machineOpen, setMachineOpen] = useState(false);
+  const [machineMode, setMachineMode] = useState<"account" | "password">("account");
+  const [machinePassword, setMachinePassword] = useState("");
+  const [machineError, setMachineError] = useState("");
+  const [machineBusy, setMachineBusy] = useState(false);
+  const [machineChecking, setMachineChecking] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const machineRequest = useRef(0);
   // 可授权的供应商名列表（来自「聚合供应商」）。
   const [providers, setProviders] = useState<string[]>([]);
   // 授权编辑器：all = 全部供应商；picked = 勾选的白名单；password = 超级密码。
@@ -38,12 +48,51 @@ function KeysBox({ flash }: { flash: Flash }) {
   useAutoRefresh(load, 30_000);
   usePanelRefresh(load);
 
-  const create = async () => {
+  const createAuthorized = async () => {
+    setCreating(true);
     try {
       const r = await req<{ name: string; key: string }>("keys", { method: "POST", body: { name } });
-      setCreated(r); setName(""); load();
+      setCreated(r); setName(""); setMachineOpen(false); setMachinePassword(""); load();
       flash("ok", "密钥已创建，请立即复制保存（仅显示一次）");
-    } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    } catch (e) {
+      // 账号可能刚被删除，机器授权随级联删除失效；重新弹出选择。
+      setMachineOpen(true);
+      setMachineError(e instanceof Error ? e.message : String(e));
+    } finally { setCreating(false); }
+  };
+
+  const create = async () => {
+    if (machineChecking || machineBusy || creating) return;
+    const requestId = ++machineRequest.current;
+    // 每次生成都打开授权弹窗并重新检测，不使用上次检测结果直接创建。
+    setMachineOpen(true);
+    setMachine(null);
+    setMachineMode("account");
+    setMachinePassword("");
+    setMachineChecking(true); setMachineError("");
+    try {
+      const r = await req<{ machine_id: string; authorized: boolean }>("machine");
+      if (requestId !== machineRequest.current) return;
+      setMachine({ id: r.machine_id, authorized: r.authorized });
+    } catch (e) {
+      if (requestId === machineRequest.current) {
+        setMachineError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      if (requestId === machineRequest.current) setMachineChecking(false);
+    }
+  };
+
+  const authorizeByPassword = async () => {
+    setMachineBusy(true); setMachineError("");
+    try {
+      const r = await req<{ machine_id: string }>("machine", {
+        method: "POST", body: { password: machinePassword },
+      });
+      setMachine({ id: r.machine_id, authorized: true });
+      await createAuthorized();
+    } catch (e) { setMachineError(e instanceof Error ? e.message : String(e)); }
+    finally { setMachineBusy(false); }
   };
   const remove = async (n: string) => {
     if (!window.confirm("确认删除密钥 " + n + "？")) return;
@@ -100,7 +149,10 @@ function KeysBox({ flash }: { flash: Flash }) {
         <div className="btn-row" style={{ marginBottom: 12 }}>
           <input className="input" style={{ width: 220 }} placeholder="密钥名称"
             value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn primary" onClick={create} disabled={!name.trim()}>新建密钥</button>
+          <button className="btn primary" onClick={create} disabled={!name.trim() || machineChecking || machineBusy || creating}>
+            {creating ? "创建中…" : "新建密钥"}
+          </button>
+          {machine?.authorized && <span className="dim" style={{ alignSelf: "center" }}>本机已获建 Key 权限</span>}
         </div>
         <div className="tbl-wrap">
           <table className="tbl tbl-gateway">
@@ -154,6 +206,94 @@ function KeysBox({ flash }: { flash: Flash }) {
                 onChange={(e) => setAuthEditor({ ...authEditor, password: e.target.value })} />
               <button className="btn primary" onClick={saveAuth} disabled={!authEditor.password}>保存授权</button>
               <button className="btn" onClick={() => setAuthEditor(null)}>取消</button>
+            </div>
+          </div>
+        )}
+        {machineOpen && (
+          <div className="modal-mask">
+            <div className="modal machine-modal" role="dialog" aria-modal="true" aria-labelledby="machine-auth-title" aria-busy={machineChecking || machineBusy || creating}>
+              <div className="machine-modal-heading">
+                <div className="modal-title" id="machine-auth-title">创建密钥 · 本机授权检测</div>
+                {(machineChecking || machineBusy || creating) && <span className="spinner" aria-label="处理中" />}
+              </div>
+              <div className={"machine-state" + (machine?.authorized ? " authorized" : "")}>
+                <div className="machine-state-top">
+                  <span className="machine-state-label">当前机器码</span>
+                  <span className={"machine-badge" + (machineChecking ? " checking" : machine?.authorized ? " ok" : "")}>
+                    {machineChecking ? "检测中" : machine?.authorized ? "已授权" : machine ? "待授权" : "检测失败"}
+                  </span>
+                </div>
+                <div className="mono machine-id">
+                  {machineChecking ? "正在读取机器码…" : machine?.id ?? "暂未获取到机器码"}
+                </div>
+              </div>
+              {machineChecking ? (
+                <div className="machine-progress" role="status">
+                  <span className="spinner large" />
+                  <div><b>正在检测本机状态</b><div className="dim">核对机器码记录与建 Key 权限…</div></div>
+                </div>
+              ) : machine?.authorized ? (
+                <div className="machine-content" key="authorized">
+                  <div className="machine-authorized-note">
+                    本机已具备创建权限。每次创建前仍会重新检测，确认后生成新密钥。
+                  </div>
+                  <div className="btn-row" style={{ marginTop: 16 }}>
+                    <button className="btn primary machine-submit" onClick={createAuthorized}
+                      disabled={creating || !name.trim()}>
+                      {creating && <span className="spinner small light" />}
+                      {creating ? "正在生成密钥…" : "确认生成密钥"}
+                    </button>
+                    <button className="btn" onClick={() => setMachineOpen(false)} disabled={creating}>取消</button>
+                  </div>
+                </div>
+              ) : machine ? (
+                <div className="machine-content" key="unauthorized">
+                  <div className="dim" style={{ marginBottom: 12, lineHeight: 1.7 }}>
+                    当前机器尚未授权。添加一个有效账号，或输入密码，任选其一完成授权。
+                  </div>
+                  <div className="btn-row" style={{ marginBottom: 14 }}>
+                    <button className={"btn small" + (machineMode === "account" ? " primary" : "")}
+                      onClick={() => { setMachineMode("account"); setMachineError(""); }} disabled={machineBusy || creating}>添加一个账号</button>
+                    <button className={"btn small" + (machineMode === "password" ? " primary" : "")}
+                      onClick={() => { setMachineMode("password"); setMachineError(""); }} disabled={machineBusy || creating}>输入密码</button>
+                  </div>
+                  {machineMode === "account" ? (
+                    <AddAccountModal embedded onClose={() => setMachineOpen(false)}
+                      onDone={() => { emitPanelRefresh(); }}
+                      onAuthorized={() => {
+                        setMachine({ ...machine, authorized: true });
+                        void createAuthorized();
+                      }} />
+                  ) : (
+                    <>
+                      <div className="form-row">
+                        <label className="form-label">机器授权密码</label>
+                        <input className="input" type="password" autoFocus value={machinePassword}
+                          placeholder="请输入密码" onChange={(e) => setMachinePassword(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && machinePassword && !machineBusy) void authorizeByPassword();
+                          }} />
+                      </div>
+                      <div className="btn-row" style={{ marginTop: 12 }}>
+                        <button className="btn primary machine-submit" onClick={authorizeByPassword}
+                          disabled={!machinePassword || machineBusy || creating}>
+                          {(machineBusy || creating) && <span className="spinner small light" />}
+                          {creating ? "正在生成密钥…" : machineBusy ? "正在验证授权…" : "授权并创建密钥"}
+                        </button>
+                        <button className="btn" onClick={() => setMachineOpen(false)} disabled={creating}>取消</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="machine-content">
+                  <div className="btn-row">
+                    <button className="btn primary" onClick={create}>重新检测</button>
+                    <button className="btn" onClick={() => setMachineOpen(false)}>取消</button>
+                  </div>
+                </div>
+              )}
+              {machineError && <div className="msg err" style={{ marginTop: 12 }}>{machineError}</div>}
             </div>
           </div>
         )}

@@ -39,6 +39,7 @@ model Account {
   modelCooldowns ModelCooldown[]
   modelCosts     ModelCost[]
   stickySessions StickySession[]
+  machineKeys    MachineKeyAuthorization[]
 }
 
 model AccountState {
@@ -101,6 +102,17 @@ model ApiKey {
   key       String   @unique
   providers String   @default("") // 供应商绑定：""=未绑定（不限制），"*"=全部允许，逗号分隔=白名单
   createdAt DateTime @default(now())
+}
+
+// 当前面板浏览器（机器码）的建 Key 授权。账号授权随账号删除而失效；
+// 密码授权的 uid 为空，不受账号池增删影响。
+model MachineKeyAuthorization {
+  machineId String   @id // 浏览器保存的 UUID，由服务端写入 HttpOnly cookie
+  uid       String?
+  account   Account? @relation(fields: [uid], references: [uid], onDelete: Cascade)
+  method    String // account | password
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Provider {
