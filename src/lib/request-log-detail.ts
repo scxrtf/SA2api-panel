@@ -1,11 +1,23 @@
 // 请求日志详情：集中处理大字段裁剪、图片脱敏和出站参数差异。
 
+// 单行日志体积上限：requestMessages + responseMessage 各自受 MAX_MESSAGE_CHARS 约束，
+// errorDetail 受 MAX_VALUE_CHARS 约束。原 320K/80K 会让单行 TOAST 逼近 700KB，
+// 16500 行就能吃掉 1.4GB 磁盘（Supabase 免费档直接触发只读），故收紧到 120K/40K，
+// 面板仍可展开阅读长对话，只是超长部分标注截断。
 const MAX_MESSAGE_ITEMS = 200;
-const MAX_MESSAGE_CHARS = 320_000;
-const MAX_VALUE_CHARS = 80_000;
+const MAX_MESSAGE_CHARS = 120_000;
+const MAX_VALUE_CHARS = 40_000;
 const MAX_OVERRIDE_ITEMS = 200;
 const MAX_OVERRIDE_VALUE_CHARS = 4_000;
 const MAX_DEPTH = 12;
+
+// 对话正文（requestMessages / responseMessage）默认不落库：这两列是 JSONB TOAST，
+// 单行可达数百 KB，既放大 Supabase 出网（面板列表/详情读取）也放大磁盘与备份流量。
+// 默认只保留统计列与失败详情；需要排查具体请求时临时置 REQUEST_LOG_DIALOG=1。
+export function logDialogEnabled(): boolean {
+  const raw = (process.env.REQUEST_LOG_DIALOG ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+}
 
 export interface ParameterOverride {
   path: string;

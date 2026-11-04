@@ -59,7 +59,12 @@ export function normalizeFrame(obj: Obj): Obj {
       const d = c["delta"];
       if (d && typeof d === "object") {
         const dm = d as Obj;
-        for (const k of ["role", "content", "reasoning_content", "refusal"]) {
+        const rc = dm["reasoning_content"];
+        if (rc === undefined || rc === null) {
+          const alt = dm["reasoning"] ?? dm["thinking"];
+          if (typeof alt === "string" && alt !== "") dm["reasoning_content"] = alt;
+        }
+        for (const k of ["role", "content", "reasoning_content", "reasoning", "thinking", "refusal"]) {
           const v = dm[k];
           if (typeof v === "string" && v !== "") delta[k] = v;
         }
@@ -149,8 +154,9 @@ function observeAssistantFrame(stats: StreamStats, obj: Obj): void {
       const d = delta as Obj;
       if (typeof d["role"] === "string" && d["role"]) stats.assistantRole = d["role"] as string;
       if (typeof d["content"] === "string") stats.assistantContent += d["content"] as string;
-      if (typeof d["reasoning_content"] === "string") {
-        stats.assistantReasoning += d["reasoning_content"] as string;
+      const rTxt = d["reasoning_content"] ?? d["reasoning"] ?? d["thinking"];
+      if (typeof rTxt === "string") {
+        stats.assistantReasoning += rTxt;
       }
       const toolCalls = d["tool_calls"];
       if (Array.isArray(toolCalls)) {
@@ -530,7 +536,8 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
           const dm = d as Obj;
           if (typeof dm["role"] === "string" && dm["role"]) role = dm["role"] as string;
           if (typeof dm["content"] === "string") content += dm["content"];
-          if (typeof dm["reasoning_content"] === "string") reasoning += dm["reasoning_content"];
+          const rTxt = dm["reasoning_content"] ?? dm["reasoning"] ?? dm["thinking"];
+          if (typeof rTxt === "string") reasoning += rTxt;
           const tcs = dm["tool_calls"];
           if (Array.isArray(tcs)) {
             for (const tc of tcs) {

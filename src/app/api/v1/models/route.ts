@@ -115,7 +115,16 @@ export async function GET(req: Request): Promise<Response> {
   const seen = new Set<string>();
 
   // 池通道：CN / global 各取一个可用账号探测（某域无账号则整域跳过）。
-  const accounts = await prisma.account.findMany({ include: { state: true } });
+  // 只取目录探测需要的 9 个认证字段 + 两条状态位。原先 include 会把
+  // Account 的 11 列整行拉回，其中机器绑定等大字段对目录无用。
+  const accounts = await prisma.account.findMany({
+    select: {
+      uid: true, nickname: true, realm: true,
+      accessToken: true, refreshToken: true, expiresAt: true,
+      domain: true, enterpriseId: true, deviceToken: true,
+      state: { select: { disabled: true, paused: true } },
+    },
+  });
   const usable = accounts.filter(
     (a) => !(a.state?.disabled ?? false) && !(a.state?.paused ?? false) && a.accessToken !== "",
   );

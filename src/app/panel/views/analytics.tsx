@@ -635,7 +635,7 @@ export function AnalyticsView({ flash }: { flash: Flash }) {
 
   useEffect(loadUsage, [loadUsage]);
   useEffect(() => { void loadStatus(); }, [loadStatus]);
-  useAutoRefresh(loadUsage, 30_000);
+  useAutoRefresh(loadUsage, 60_000);
   useAutoRefresh(loadStatus, 120_000);
   usePanelRefresh(() => { loadUsage(); void loadStatus(); });
 

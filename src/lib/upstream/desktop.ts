@@ -9,24 +9,27 @@ import {
   chatHeaders,
   newConversationID,
   newMessageID,
+  newTraceID,
+  rpcUserAgent,
   webBaseOf,
   type AuthShape,
 } from "./client";
+import { officialEgress } from "./official-egress";
 
-const DESKTOP_CLI_VERSION = "2.161.0";
+const DESKTOP_CLI_VERSION = "2.165.0";
 
 function desktopTriple(a: AuthShape): { version: string; commit: string; releaseDate: number } {
   if (a.realm === "global") {
     return {
-      version: "5.8.4",
-      commit: "73952edb48da46bd0b244661efe22f4f247c4977",
-      releaseDate: 1792063084107,
+      version: "5.9.4",
+      commit: "fa0a0901906addaa1a4259f6df347388a5563ded",
+      releaseDate: 1793288804029,
     };
   }
   return {
-    version: "5.8.3",
-    commit: "db0e9b51b7fa0b383f41f5b0b83dd442c8557918",
-    releaseDate: 1792029498676,
+    version: "5.9.3",
+    commit: "d46924219e79332f49c37ccebf27292f87001b19",
+    releaseDate: 1793093056315,
   };
 }
 
@@ -53,7 +56,7 @@ export function deriveID(a: { uid: string }, salt: string): string {
 export type DesktopEvent = Record<string, unknown>;
 
 // desktopFingerprint 每个桌面事件的公共指纹（业务字段优先，覆盖同名键）。
-function desktopFingerprint(a: AuthShape): DesktopEvent {
+export function desktopFingerprint(a: AuthShape): DesktopEvent {
   const now = Date.now();
   const { version, commit, releaseDate } = desktopTriple(a);
   return {
@@ -85,12 +88,11 @@ function desktopFingerprint(a: AuthShape): DesktopEvent {
 }
 
 async function reportJSON(url: string, headers: Record<string, string>, body: unknown, timeoutMs: number): Promise<void> {
-  const resp = await fetch(url, {
+  const resp = await officialEgress(url, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
-    cache: "no-store",
   });
   const raw = await resp.text();
   if (resp.status >= 400) throw new Error("http " + resp.status + ": " + raw.slice(0, 200));
@@ -105,7 +107,6 @@ export async function reportDesktopEvent(
   cfg: AppConfig, a: AuthShape, events: DesktopEvent[],
 ): Promise<void> {
   if (events.length === 0) throw new Error("desktop report: no events");
-  void cfg;
   const fp = desktopFingerprint(a);
   const arr = events.map((ev) => ({ ...fp, ...ev }));
   const base = chatBase(a);
@@ -113,7 +114,7 @@ export async function reportDesktopEvent(
     Authorization: "Bearer " + a.accessToken,
     Accept: "application/json, text/plain, */*",
     "Content-Type": "application/json;charset=UTF-8",
-    "User-Agent": desktopUAFor(a),
+    "User-Agent": rpcUserAgent(cfg, a),
     "X-Domain": desktopHost(a),
     "X-Product": "SaaS",
     "X-Request-ID": newMessageID(),
@@ -144,8 +145,7 @@ export async function reportWebEvent(
   cfg: AppConfig, a: AuthShape,
   eventCode: string, pageURL: string, elementID: string, elementName: string,
 ): Promise<void> {
-  void cfg;
-  const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
+  const ua = rpcUserAgent(cfg, a);
   const ev = {
     eventCode, timestamp: Date.now(), reportDelay: 0,
     pageURL, elementId: elementID, elementName,
@@ -155,11 +155,11 @@ export async function reportWebEvent(
   };
   const headers: Record<string, string> = {
     Authorization: "Bearer " + a.accessToken,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    "x-client-platform": "web",
-    Origin: webBaseOf(a),
-    Referer: pageURL,
+    "Content-Type": "application/json;charset=UTF-8",
+    Accept: "application/json, text/plain, */*",
+    "X-Request-ID": newTraceID(),
+    "X-Product": "SaaS",
+    "X-Domain": new URL(webBaseOf(a)).hostname,
     "User-Agent": ua,
   };
   if (a.uid) headers["X-User-Id"] = a.uid;
@@ -381,11 +381,10 @@ export async function desktopChatWithExpert(
     conversationRequestID: newMessageID(),
     traceID: "",
   });
-  h.Accept = "text/event-stream";
   if (expertID) h["X-Expert-Id"] = expertID;
-  const resp = await fetch(base + "/v2/chat/completions", {
+  const resp = await officialEgress(base + "/v2/chat/completions", {
     method: "POST", headers: h, body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000), cache: "no-store",
+    signal: AbortSignal.timeout(120_000),
   });
   if (resp.status !== 200) {
     const b = (await resp.text()).slice(0, 200);

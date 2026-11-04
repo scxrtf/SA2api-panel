@@ -135,7 +135,12 @@ export async function resolveSticky(key: string, model: string, realm = ""): Pro
   const uids = [...avail].sort();
   if (uids.length === 0) return null;
   // 双段策略：未被任何会话绑定的可用号优先。
-  const boundRows = await prisma.stickySession.findMany({ select: { uid: true } });
+  // 过期绑定不参与「空闲号优先」判定（与 gcSticky 的 TTL 同口径），
+  // 同时把整表读出收缩到 TTL 窗口内，减少 egress。
+  const boundRows = await prisma.stickySession.findMany({
+    where: { updatedAt: { gte: new Date(now - STICKY_TTL_MS) } },
+    select: { uid: true },
+  });
   const bound = new Set(boundRows.map((r) => r.uid));
   const idle = uids.filter((u) => !bound.has(u));
   const pool2 = idle.length > 0 ? idle : uids;

@@ -1,0 +1,15 @@
+修复点：src/lib/pool.ts statusList() 行对象序列化 —— reason / raw_reason 改为按 cooling 门控。
+
+[1] 补丁前（src/lib/pool.ts.bak-20261102-status-reason，约 1087-1088 行）：
+      reason: accountReasonSummary(s.cooldownReason),
+      raw_reason: s.cooldownReason,
+
+[2] 补丁后（回读 src/lib/pool.ts，Get-Content | Select-Object -Skip 1083 -First 12 真实输出确认）：
+      reason: cooling ? accountReasonSummary(s.cooldownReason) : "",
+      raw_reason: cooling ? s.cooldownReason : "",
+
+[3] 效果：冷却到期（cooldownUntil/breakerUntil 均 <= now）时，reason/raw_reason 序列化为空串，
+    前端账号列表消息列不再显示过期的「上游限流（6021）」「使用量已超出频率限制（6000） · … 重置」文本；
+    冷却未到期或熔断激活时显示行为不变（coolKind/cool_remaining_sec 逻辑未动）。
+
+[4] 类型检查：npx tsc --noEmit → exit 0，无编译错误（仅 npm 版本提示 notice）。

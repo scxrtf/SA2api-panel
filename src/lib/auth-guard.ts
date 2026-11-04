@@ -12,6 +12,33 @@ function constTimeEq(a: string, b: string): boolean {
   return timingSafeEqual(digest(a), digest(b));
 }
 
+// 密钥环进程内快照。原先 /api/v1/* 的每个请求都要扫两遍 ApiKey 全表
+// （verifyAny 一遍、identifyKeyIdentity 一遍），是 Supabase egress 的主要来源之一。
+// 30s TTL 覆盖突发流量；面板增删改密钥后立即失效（见 api/panel/keys 路由）。
+// DB 异常时若已有快照则继续用快照（更稳），无快照才按 dbOk=false 处理。
+const KEY_RING_TTL_MS = 30_000;
+export interface KeyRingRow {
+  name: string;
+  key: string;
+  providers: string;
+}
+type KeyRingCache = { at: number; rows: KeyRingRow[] };
+const keyRingGlobals = globalThis as unknown as { __wbKeyRing?: KeyRingCache };
+
+export function invalidateKeyRing(): void {
+  delete keyRingGlobals.__wbKeyRing;
+}
+
+async function loadKeyRing(): Promise<KeyRingRow[]> {
+  const cached = keyRingGlobals.__wbKeyRing;
+  if (cached && Date.now() - cached.at < KEY_RING_TTL_MS) return cached.rows.slice();
+  const rows = await prisma.apiKey.findMany({
+    select: { name: true, key: true, providers: true },
+  });
+  keyRingGlobals.__wbKeyRing = { at: Date.now(), rows };
+  return rows.slice();
+}
+
 // extractToken 提取请求凭证：优先 Authorization: Bearer，其次 x-api-key
 // （Anthropic/Claude Code 客户端默认凭证头）。
 export function extractToken(req: Request): string {
@@ -65,10 +92,10 @@ export function providerAllowed(providersRaw: string, provider: string): boolean
 export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | null> {
   const tok = extractToken(req);
   const cfg = await getConfig();
-  let rows: { name: string; key: string; providers: string }[] = [];
+  let rows: KeyRingRow[] = [];
   let dbOk = true;
   try {
-    rows = await prisma.apiKey.findMany({ select: { name: true, key: true, providers: true } });
+    rows = await loadKeyRing();
   } catch {
     dbOk = false;
   }
@@ -114,7 +141,7 @@ export async function verifyAny(req: Request): Promise<boolean> {
   const keys: string[] = [];
   if (cfg.api_key) keys.push(cfg.api_key);
   try {
-    const rows = await prisma.apiKey.findMany({ select: { key: true } });
+    const rows = await loadKeyRing();
     for (const r of rows) if (r.key) keys.push(r.key);
   } catch {
     // DB 不可用时仅按主密钥判定。

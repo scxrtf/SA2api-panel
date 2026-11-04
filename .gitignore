@@ -49,3 +49,6 @@ scripts-*.cjs
 /.workbuddy/
 /.drill-save-*/
 /backup-*/
+/.runtime/
+/.codex-backup/
+/native/official-tls/bin/

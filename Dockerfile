@@ -25,6 +25,13 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate && npm run build
 
+FROM golang:1.26-bookworm AS official-tls-build
+WORKDIR /src
+COPY native/official-tls/go.mod native/official-tls/go.sum ./
+RUN go mod download
+COPY native/official-tls/main.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/official-tls .
+
 FROM base AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -35,6 +42,7 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/next.config.ts ./next.config.ts
+COPY --from=official-tls-build /out/official-tls ./native/official-tls/bin/official-tls
 
 RUN chown -R node:node /app
 USER node

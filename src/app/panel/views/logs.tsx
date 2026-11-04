@@ -70,6 +70,37 @@ function machineShort(id: string | undefined): string {
   return id ? id.slice(0, 8) : "";
 }
 
+// ── 增量合并 ────────────────────────────────────────────────────────────────
+// 运行日志保持升序（旧→新，底部跟随最新），请求日志保持降序（新→旧）。
+// 服务端 since 模式返回的是新增行，这里按 id 去重后截到与全量页相同的条数。
+const RUNTIME_PAGE = 200;
+const REQUEST_PAGE = 50;
+
+function mergeRuntime(prev: LogEntry[], next: LogEntry[]): LogEntry[] {
+  const seen = new Set<string>();
+  const out: LogEntry[] = [];
+  for (const item of [...prev, ...next]) {
+    const key = item.id ?? item.ts + ":" + item.text;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  out.sort((a, b) => a.ts - b.ts || (a.id ?? "").localeCompare(b.id ?? ""));
+  return out.slice(-RUNTIME_PAGE);
+}
+
+function mergeRequests(prev: ReqLog[], next: ReqLog[]): ReqLog[] {
+  const seen = new Set<string>();
+  const out: ReqLog[] = [];
+  for (const item of [...next, ...prev]) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    out.push(item);
+  }
+  out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.id.localeCompare(a.id));
+  return out.slice(0, REQUEST_PAGE);
+}
+
 function recordValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
@@ -302,10 +333,21 @@ export function LogsView({ flash }: { flash: Flash }) {
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
   const logViewRef = useRef<HTMLDivElement>(null);
   const [followLogs, setFollowLogs] = useState(true);
+  // 增量游标（ms）：轮询只取游标之后的新行；手动刷新 / 改过滤 / 切模式时归零全量重拉。
+  const runtimeSinceRef = useRef(0);
+  const reqSinceRef = useRef(0);
 
-  const load = useCallback(() => {
+  const load = useCallback((delta = false) => {
     if (mode === "runtime") {
-      req<{ entries: LogEntry[] }>("logs").then((r) => setLogs(r.entries.filter((e) => ch === "all" || e.ch === ch)))
+      const since = delta ? runtimeSinceRef.current : 0;
+      req<{ entries: LogEntry[]; mode?: string }>("logs" + (since ? "?since=" + since : ""))
+        .then((r) => {
+          const incoming = r.entries.filter((e) => ch === "all" || e.ch === ch);
+          if (since && r.mode === "delta") setLogs((prev) => mergeRuntime(prev, incoming));
+          else setLogs(incoming);
+          const maxTs = r.entries.reduce((m, e) => (e.ts > m ? e.ts : m), 0);
+          if (maxTs > runtimeSinceRef.current) runtimeSinceRef.current = maxTs;
+        })
         .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
     } else {
       const q = new URLSearchParams();
@@ -315,13 +357,32 @@ export function LogsView({ flash }: { flash: Flash }) {
       if (filter.key) q.set("key", filter.key);
       if (filter.err) q.set("err", filter.err);
       if (ipFilter) q.set("client_ip", ipFilter);
-      req<{ entries: ReqLog[] }>("request_logs?" + q.toString()).then((r) => setReqs(r.entries))
+      // 只有无过滤且已有游标时才走增量：过滤条件变化必须全量重查，
+      // 否则会把「旧页里不满足新条件下拉」的行继续留在表上。
+      const filtered = !!(filter.account || filter.model || filter.outcome ||
+        filter.key || filter.err || ipFilter);
+      const useDelta = delta && !filtered && reqSinceRef.current > 0;
+      if (useDelta) q.set("since", String(reqSinceRef.current));
+      req<{ entries: ReqLog[]; mode?: string }>("request_logs?" + q.toString())
+        .then((r) => {
+          if (useDelta && r.mode === "delta") setReqs((prev) => mergeRequests(prev, r.entries));
+          else setReqs(r.entries);
+          const maxAt = r.entries.reduce((m, e) => {
+            const t = Date.parse(e.at);
+            return t > m ? t : m;
+          }, 0);
+          if (maxAt > reqSinceRef.current) reqSinceRef.current = maxAt;
+        })
         .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
     }
   }, [mode, filter, ch, ipFilter, flash]);
-  useEffect(load, [load]);
-  useAutoRefresh(load, 10_000);
-  usePanelRefresh(load);
+  useEffect(() => {
+    runtimeSinceRef.current = 0;
+    reqSinceRef.current = 0;
+    load(false);
+  }, [load]);
+  useAutoRefresh(() => load(true), 30_000);
+  usePanelRefresh(() => load(false));
 
   useEffect(() => {
     const view = logViewRef.current;
@@ -377,7 +438,7 @@ export function LogsView({ flash }: { flash: Flash }) {
           title="按上游报错正文检索，如 12153 / rate limit / WAF"
           onChange={(e) => setFilter({ ...filter, err: e.target.value })} />
       </>}
-      <button className="btn xs" onClick={load}>刷新</button>
+      <button className="btn xs" onClick={() => load(false)}>刷新</button>
       {mode === "runtime" && <>
         <select className="select" style={{ width: 104 }} value={ch}
           onChange={(e) => setCh(e.target.value as typeof ch)}>

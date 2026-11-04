@@ -245,7 +245,7 @@ export function UsageView({ flash }: { flash: Flash }) {
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [hours, chartDim, flash]);
   useEffect(load, [load]);
-  useAutoRefresh(load, 30_000);
+  useAutoRefresh(load, 60_000);
   // 顶栏「刷新」按钮广播的事件：否则在该 tab 点刷新只更新了侧边栏统计。
   usePanelRefresh(load);
 

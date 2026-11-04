@@ -7,7 +7,39 @@ import { idleMonitorBody } from "./upstream/idle";
 import { maybeProbeAfterModelCall } from "./model-health-trigger";
 import { providerEndpoint } from "./provider-endpoint";
 import { ProviderObservation, observeProviderStream } from "./provider-observation";
-import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import {   assistantMessageForLog,   failureDetail,   parameterOverrides,   requestMessagesForLog,   type AttemptDetail, } from "./request-log-detail";
+import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import {   assistantMessageForLog,   failureDetail,   parameterOverrides,   logDialogEnabled,   requestMessagesForLog,   type AttemptDetail, } from "./request-log-detail";
+
+// 供应商表进程内快照。原先每次 providerChat 都 findUnique 一次、每次
+// providerModels / modelhealth 目录刷新都 findMany 一次，是 egress 的固定开销。
+// 60s TTL + 面板写路径显式失效（见 api/panel/providers 路由）。
+const PROVIDERS_TTL_MS = 60_000;
+export type ProviderRow = {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  models: string;
+};
+type ProvidersCache = { at: number; rows: ProviderRow[] };
+const providerGlobals = globalThis as unknown as { __wbProviders?: ProvidersCache };
+
+export function invalidateProviders(): void {
+  delete providerGlobals.__wbProviders;
+}
+
+export async function loadProviders(): Promise<ProviderRow[]> {
+  const cached = providerGlobals.__wbProviders;
+  if (cached && Date.now() - cached.at < PROVIDERS_TTL_MS) return cached.rows.slice();
+  const rows = await prisma.provider.findMany({
+    select: { name: true, baseUrl: true, apiKey: true, models: true },
+  });
+  providerGlobals.__wbProviders = { at: Date.now(), rows };
+  return rows.slice();
+}
+
+export async function findProvider(name: string): Promise<ProviderRow | null> {
+  const rows = await loadProviders();
+  return rows.find((r) => r.name === name) ?? null;
+}
 
 interface ProviderRequestContext {
   started: number;
@@ -29,14 +61,16 @@ export async function providerChat(
   const started = context?.started ?? Date.now();
   const logModel = requestedModel || `${name}:${bareModel}`;
   const stats = new ProviderObservation(started);
-  const requestMessages = requestMessagesForLog((() => {
+  // 对话正文默认不落库（REQUEST_LOG_DIALOG=1 才记录），省掉清洗开销与 TOAST 写入。
+  const dialogOn = logDialogEnabled();
+  const requestMessages = dialogOn ? requestMessagesForLog((() => {
     try {
       const parsed = JSON.parse(body) as Record<string, unknown>;
       return parsed.messages;
     } catch {
       return [];
     }
-  })());
+  })()) : undefined;
   let outboundOverrides: ReturnType<typeof parameterOverrides> = [];
   let attempts = 0;
   let recorded = false;
@@ -93,8 +127,10 @@ export async function providerChat(
       status, stream, durationMs, attempts, ttfbMs: stream ? stats.ttfbMs : 0,
       clientIp: context?.clientIP ?? "", ua: context?.ua ?? "",
       path: context?.path ?? "/v1/chat/completions",
-      requestMessages: requestMessages as Prisma.InputJsonValue,
-      responseMessage: (response ?? undefined) as Prisma.InputJsonValue | undefined,
+      ...(dialogOn ? {
+        requestMessages: requestMessages as Prisma.InputJsonValue,
+        responseMessage: (response ?? undefined) as Prisma.InputJsonValue | undefined,
+      } : {}),
       errorDetail: detail,
       parameterOverrides: outboundOverrides.length
         ? outboundOverrides as unknown as Prisma.InputJsonValue : undefined,
@@ -138,7 +174,7 @@ export async function providerChat(
     return openAIError(status, kind, message);
   };
 
-  const p = await prisma.provider.findUnique({ where: { name } });
+  const p = await findProvider(name);
   if (!p) {
     return fail(400, "provider_not_found", `provider ${name} not registered`, "", "provider_lookup");
   }
@@ -239,7 +275,7 @@ export async function providerModels(
   allowed?: ReadonlySet<string> | null,
   errors?: string[],
 ): Promise<{ id: string; owned_by: string }[]> {
-  const providers = await prisma.provider.findMany();
+  const providers = await loadProviders();
   const out: { id: string; owned_by: string }[] = [];
   for (const p of providers) {
     if (allowed && !allowed.has(p.name)) continue;

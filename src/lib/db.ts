@@ -12,7 +12,9 @@ function createClient(): PrismaClient {
   if (!url) {
     throw new Error("DATABASE_URL 未配置（部署时由 Postgres 插件注入，或写入 .env）");
   }
-  const adapter = new PrismaPg({ connectionString: url });
+  // Supabase 免费档按连接数计费/限额，且连接池过大会放大 pg 侧往返与内存。
+  // 单容器语义下 3 条足够（面板 + 网关 + 调度器各占一条为主）。
+  const adapter = new PrismaPg({ connectionString: url, max: 3 });
   return new PrismaClient({ adapter });
 }
 

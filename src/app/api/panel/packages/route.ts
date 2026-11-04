@@ -22,7 +22,15 @@ export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const cfg = await getConfig();
-  const accounts = await prisma.account.findMany({ orderBy: { createdAt: "asc" } });
+  // 只取 AuthShape 需要的字段 + 展示名；BigInt 只有 expiresAt，其它大字段不落内存。
+  const accounts = await prisma.account.findMany({
+    orderBy: { createdAt: "asc" },
+    select: {
+      uid: true, nickname: true, realm: true,
+      accessToken: true, refreshToken: true, expiresAt: true,
+      domain: true, enterpriseId: true, deviceToken: true,
+    },
+  });
 
   type Row = {
     uid: string; nickname: string; realm: string;

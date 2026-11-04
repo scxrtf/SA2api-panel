@@ -1,4 +1,4 @@
-// GET /api/panel/request_logs — RequestLog 分页/过滤（limit 默认 200 上限 1000）。
+// GET /api/panel/request_logs — RequestLog 分页/过滤（limit 默认 50 上限 500）。
 import { panelAuth, ok } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 
@@ -16,6 +16,7 @@ const listSelect = {
   provider: true,
   status: true,
   errKind: true,
+  errMsg: true,
   stream: true,
   durationMs: true,
   ttfbMs: true,
@@ -40,14 +41,17 @@ export async function GET(req: Request) {
   if (auth) return auth;
   const q = new URL(req.url).searchParams;
   let limit = parseInt(q.get("limit") ?? "", 10);
-  if (!Number.isFinite(limit) || limit <= 0) limit = 200;
-  if (limit > 1000) limit = 1000;
+  if (!Number.isFinite(limit) || limit <= 0) limit = 50;
+  if (limit > 500) limit = 500;
 
   const where: Record<string, unknown> = {};
   const uid = q.get("account") ?? "";
-  if (uid) where["uid"] = { contains: uid };
+  // 账号过滤是前缀输入，用 startsWith 走 [uid, at] 索引；contains 会退化成全表扫描。
+  if (uid) where["uid"] = { startsWith: uid };
   const model = q.get("model") ?? "";
-  if (model) where["model"] = { contains: model };
+  // 模型名是前缀输入（gpt / claude / gemini …），startsWith 走 [model, at]；
+  // contains 无法命中 btree，会把过滤退化成全表扫描并整行回传。
+  if (model) where["model"] = { startsWith: model };
   const clientIp = q.get("client_ip") ?? "";
   if (clientIp) where["clientIp"] = { contains: clientIp };
   const ua = q.get("user_agent") ?? "";
@@ -61,27 +65,42 @@ export async function GET(req: Request) {
     where["OR"] = [{ status: { gte: 400 } }, { errKind: { not: "" } }];
   }
   const key = q.get("key") ?? "";
-  if (key) where["keyName"] = { contains: key };
+  // key 名同理按前缀匹配，走 [keyName, at]。
+  if (key) where["keyName"] = { startsWith: key };
   // 报错内容过滤：按上游响应正文/网关报错片段检索（如 12153、rate limit、WAF）。
   const err = q.get("err") ?? "";
   if (err) where["errMsg"] = { contains: err, mode: "insensitive" };
 
+  // since：增量轮询游标。合法时只回传该时刻之后的行（升序取满 limit），
+  // 面板 60s 轮询在无过滤时不再整页重拉 50 行 × 27 字段。
+  const since = parseTime(q.get("since"));
   const from = parseTime(q.get("from"));
   const to = parseTime(q.get("to"));
-  if (from || to) {
-    where["at"] = {};
-    if (from) (where["at"] as Record<string, unknown>)["gte"] = from;
-    if (to) (where["at"] as Record<string, unknown>)["lte"] = to;
-  }
+  // 列表页默认只看最近 7 天；无时间界时全表倒序会随日志增长线性放大扫描与回传。
+  const at: Record<string, unknown> = {
+    gte: since ?? from ?? new Date(Date.now() - 7 * 86400_000),
+  };
+  if (to) at["lte"] = to;
+  where["at"] = at;
 
   const rows = await prisma.requestLog.findMany({
     where,
     select: listSelect,
-    orderBy: { id: "desc" },
+    orderBy: since ? [{ at: "asc" }, { id: "asc" }] : [{ at: "desc" }, { id: "desc" }],
     take: limit,
   });
-  return ok({ entries: rows, limit });
+  // 列表侧截断 errMsg：上游报错正文常带整段 JSON/HTML，单条可达数 KB。
+  // 面板只用它做行内提示，完整原文在 GET /request_logs/[id] 的 errorDetail。
+  const entries = rows.map((row) => ({
+    ...row,
+    errMsg: row.errMsg.length > LIST_ERR_MSG_MAX
+      ? row.errMsg.slice(0, LIST_ERR_MSG_MAX) + "…（详情页看全文）"
+      : row.errMsg,
+  }));
+  return ok({ entries, limit, mode: since ? "delta" : "full" });
 }
+
+const LIST_ERR_MSG_MAX = 512;
 
 // parseTime 兼容 unix 秒/毫秒 与 RFC3339；非法值不设界。
 function parseTime(v: string | null): Date | null {

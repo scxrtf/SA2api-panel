@@ -10,10 +10,12 @@ export function setKey(k: string) {
   try { localStorage.setItem(KEY, k); } catch { /* 忽略 */ }
 }
 
-export interface ApiResp<T> {
+export interface ApiResp<T = unknown> {
+  // 泛型标记用于 req<T> 的返回类型组合。
   ok: boolean;
   error?: string;
   [k: string]: unknown;
+  readonly __type?: T;
 }
 
 // req 统一打面板 API；401 时抛出特殊错误由调用方跳回登录态。
@@ -31,7 +33,7 @@ export async function req<T = Record<string, unknown>>(
     cache: "no-store",
   });
   let j: ApiResp<T>;
-  try { j = (await r.json()) as ApiResp<T>; } catch { j = { ok: false, error: "HTTP " + r.status } as ApiResp<T>; }
+  try { j = (await r.json()) as ApiResp<T>; } catch { j = { ok: false, error: "HTTP " + r.status }; }
   if (r.status === 401) throw new Error("__AUTH__");
   if (!j.ok) throw new Error(j.error ?? "HTTP " + r.status);
   return j as T & ApiResp<T>;
@@ -56,14 +58,24 @@ export function fmtDur(sec: number): string {
 
 // useAutoRefresh：到点重跑一次 loader，页面不可见时暂停。
 // 用于面板视图轮询（对齐 Go app.js 的 setInterval 刷新约定）。
-import { useEffect } from "react";
+import React, { createContext, useContext, useEffect, type ReactNode } from "react";
+
+// 每个保持挂载的 ViewPane 提供自己的可见状态；隐藏视图不轮询、不响应全局刷新。
+export const PanelActivityContext = createContext(true);
+export function PanelActivityProvider({ active, children }: { active: boolean; children: ReactNode }) {
+  return React.createElement(PanelActivityContext.Provider, { value: active }, children);
+}
 export function useAutoRefresh(loader: () => void, ms: number, enabled = true): void {
+  const active = useContext(PanelActivityContext);
   useEffect(() => {
-    if (!enabled || ms <= 0) return;
+    // ms <= 0 表示调用方明确关停，必须保留这个语义；其余一律夹到最低 60s，
+    // 避免游离的短间隔轮询把 Supabase 免费档的 egress 打满。
+    if (!enabled || !active || ms <= 0) return;
+    const interval = Math.max(ms, 60_000);
     const tick = () => { if (document.visibilityState === "visible") loader(); };
-    const t = setInterval(tick, ms);
+    const t = setInterval(tick, interval);
     return () => clearInterval(t);
-  }, [loader, ms, enabled]);
+  }, [loader, ms, enabled, active]);
 }
 
 // PANEL_REFRESH_EVENT：顶栏「刷新」按钮广播的事件名。顶栏只刷 overview，
@@ -77,9 +89,11 @@ export function emitPanelRefresh(): void {
 
 // usePanelRefresh：视图订阅顶栏刷新事件，触发自己的 loader。
 export function usePanelRefresh(loader: () => void): void {
+  const active = useContext(PanelActivityContext);
   useEffect(() => {
+    if (!active) return;
     const h = () => loader();
     window.addEventListener(PANEL_REFRESH_EVENT, h);
     return () => window.removeEventListener(PANEL_REFRESH_EVENT, h);
-  }, [loader]);
+  }, [loader, active]);
 }

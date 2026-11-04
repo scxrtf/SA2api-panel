@@ -8,12 +8,12 @@
 //   4. models.dev 按需拉取（异步不阻塞；负缓存 24h；context_length 兜底 1M
 //      宁可高估不低估，max_output_tokens 未知 → 省略不编造）。
 //
-// global 域目录四路并发探测（global_models.go）：/v3/config 三种 UA
-// （桌面端主路 + IDE + CLI）+ 企业端点家族（/v2 → /console），
-// v3 条目字段权威、企业端点补缺 id。纯动态：拉不出即空名单，无静态回落。
+// global 域目录双路探测：/v3/config（官方两段式 UA）+ 企业端点家族
+// （/v2 → /console），v3 条目字段权威、企业端点补缺 id。纯动态：拉不出即空名单。
 
-import { CHAT_BASE_CN, GLOBAL_BASE, type AuthShape, commonHeaders } from "./client";
+import { CHAT_BASE_CN, GLOBAL_BASE, newTraceID, type AuthShape, commonHeaders } from "./client";
 import type { AppConfig } from "../config";
+import { officialEgress } from "./official-egress";
 
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s);
 
@@ -123,13 +123,11 @@ function nonChatModel(id: string, maxOutputTokens: number, tags?: string[]): boo
   return false;
 }
 
-// ---------- UA 常量（对齐 Go headers.go / client.go） ----------
-
-// /v3/config 要求能解析出 CodeBuddy 版本号的 UA：CLI 三段式 UA 会拿到精简目录
-// （无 supportedEfforts），官方 IDE 头才返回完整能力。
-const CODEBUDDY_IDE_UA = "CodeBuddyIDE/4.12.0 CodeBuddy/4.12.0";
-// CLI 三段式 UA：该端点对不同 UA 下发不同模型集合。
-const CODEBUDDY_CLI_UA = "CLI/2.63.2 CodeBuddy/2.63.2";
+function v3ProbeUA(cfg: AppConfig, a: AuthShape): string {
+  if (cfg.user_agent) return cfg.user_agent;
+  const version = cfg.client_version || (a.realm === "global" ? "5.9.4" : "5.9.3");
+  return `WorkBuddy/${version} CLI/${cfg.cli_version || "2.165.0"}`;
+}
 
 // ---------- 静态种子表（context_catalog.go contextCapFallback，CN/global 共用） ----------
 
@@ -664,46 +662,23 @@ export function applyModelPromotions(out: Map<string, ModelInfoFull>, promos: V3
   }
 }
 
-// ---------- /v3/config 拉取（官方 IDE 配置目录） ----------
-
-// v3ConfigDomain /v3/config 的 X-Domain：优先账号落盘 domain，否则 chatBase host。
-function v3ConfigDomain(a: AuthShape, chatBaseUrl: string): string {
-  let d = (a.domain ?? "").trim();
-  if (d) {
-    d = d.replace(/^https?:\/\//, "");
-    return d.replace(/\/+$/, "");
-  }
-  try {
-    const u = new URL(chatBaseUrl);
-    if (u.host) return u.host;
-  } catch {
-    // fallthrough
-  }
-  return "copilot.tencent.com";
-}
-
-// fetchV3ConfigModelMap 拉官方 IDE 配置目录，按模型 id 建能力表。
-// 该端点对 UA 敏感：必须带 CodeBuddy/CodeBuddyIDE 版本号，否则 400 code=12403；
-// 且不同 UA 下发不同模型集合（见 UA 常量注释）。ua 空串等价 CODEBUDDY_IDE_UA。
+// ---------- /v3/config 拉取（官方真机目录探测） ----------
 export async function fetchV3ConfigModelMap(
   cfg: AppConfig,
   a: AuthShape,
-  ua: string,
 ): Promise<Map<string, ModelInfoFull>> {
   const base = chatBaseOf(a);
-  const resp = await fetch(base + "/v3/config", {
+  const resp = await officialEgress(base + "/v3/config", {
     method: "GET",
     headers: {
       Accept: "application/json, text/plain, */*",
-      "X-Requested-With": "XMLHttpRequest",
-      Authorization: "Bearer " + a.accessToken,
-      ...(a.uid ? { "X-User-Id": a.uid } : {}),
-      "X-Domain": v3ConfigDomain(a, base),
+      Connection: "close",
+      "X-Request-ID": newTraceID(),
       "X-Product": "SaaS",
-      "User-Agent": ua || CODEBUDDY_IDE_UA,
-      "X-CodeBuddy-Request": "1",
+      "User-Agent": v3ProbeUA(cfg, a),
     },
     signal: AbortSignal.timeout(30_000),
+    timeoutMs: 30_000,
   });
   const raw = await resp.text();
   if (resp.status !== 200) {
@@ -940,7 +915,7 @@ function extractEffortsFromInfos(infos: ModelInfoFull[]): {
 export async function fetchModelsFull(cfg: AppConfig, a: AuthShape): Promise<ModelInfoFull[]> {
   const [v3, enterprise] = await Promise.allSettled([
     (async () => {
-      const byID = await fetchV3ConfigModelMap(cfg, a, CODEBUDDY_IDE_UA);
+      const byID = await fetchV3ConfigModelMap(cfg, a);
       const out: ModelInfoFull[] = [];
       for (const mi of byID.values()) {
         if (nonChatModel(mi.id, mi.maxTokens, mi.tags)) continue;
@@ -969,7 +944,7 @@ export async function fetchModelsFull(cfg: AppConfig, a: AuthShape): Promise<Mod
   return out;
 }
 
-// ---------- global 域四路探测（纯动态：拉不出即空名单，无静态回落） ----------
+// ---------- global 域双路探测（纯动态：拉不出即空名单，无静态回落） ----------
 
 // GLOBAL_MODELS_PROBE_PATHS 企业模型目录端点候选序列：/v2 家族优先，/console 兜底。
 const GLOBAL_MODELS_PROBE_PATHS = [
@@ -1231,11 +1206,7 @@ function mergeEffortDefaults(
   return out;
 }
 
-// probeGlobalModels 发起一次 global 模型目录探测：/v3/config 三路 UA（桌面端主路 +
-// IDE + CLI）与企业端点家族（/v2 → /console 兜底）并发后并集合并。
-// 三路 UA 缺一不可（实测同一 global 账号不同 UA 拿到不同模型集合）；
-// 合并口径：桌面端条目字段权威，IDE/CLI 只补桌面端缺失的模型 id。
-// 全部 v3 路失败且企业端点也失败才抛错；单路失败降级为其余路结果。
+// probeGlobalModels：/v3/config 与企业端点家族并发，v3 权威、企业端点补缺。
 async function probeGlobalModels(
   cfg: AppConfig,
   a: AuthShape,
@@ -1245,8 +1216,8 @@ async function probeGlobalModels(
   efforts: Record<string, string[]>;
   defaults: Record<string, string>;
 }> {
-  const probeV3 = async (ua: string) => {
-    const byID = await fetchV3ConfigModelMap(cfg, a, ua);
+  const probeV3 = async () => {
+    const byID = await fetchV3ConfigModelMap(cfg, a);
     const names: string[] = [];
     const infos: ModelInfoFull[] = [];
     for (const mi of byID.values()) {
@@ -1257,11 +1228,8 @@ async function probeGlobalModels(
     names.sort(); // map 迭代序随机，排序保输出稳定
     return { names, infos };
   };
-  const desktopUA = `WorkBuddy/5.5.4 WorkBuddy AI/5.5.4 CLI/2.137.1`;
-  const [v3Desktop, v3IDE, v3CLI, enterprise] = await Promise.allSettled([
-    probeV3(desktopUA),
-    probeV3(CODEBUDDY_IDE_UA),
-    probeV3(CODEBUDDY_CLI_UA),
+  const [v3Result, enterprise] = await Promise.allSettled([
+    probeV3(),
     (async () => {
       let lastErr: unknown = new Error("no probe path");
       for (const path of GLOBAL_MODELS_PROBE_PATHS) {
@@ -1275,17 +1243,7 @@ async function probeGlobalModels(
     })(),
   ]);
 
-  // v3 三路按权威序合并：桌面端 > IDE > CLI（前序路字段权威，后续路只补缺失 id）。
-  let v3: { names: string[]; infos: ModelInfoFull[] } | null = null;
-  for (const r of [v3Desktop, v3IDE, v3CLI]) {
-    if (r.status !== "fulfilled") continue;
-    if (!v3) {
-      v3 = r.value;
-    } else {
-      const merged = mergeGlobalCatalog(v3.names, v3.infos, r.value.names, r.value.infos);
-      v3 = { names: merged.names, infos: merged.infos ?? v3.infos };
-    }
-  }
+  const v3 = v3Result.status === "fulfilled" ? v3Result.value : null;
 
   if (!v3 && enterprise.status === "rejected") {
     throw enterprise.reason instanceof Error ? enterprise.reason : new Error(String(enterprise.reason));

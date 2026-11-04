@@ -74,7 +74,7 @@ export function useModelScan(flash: Flash, onDone: () => Promise<void>) {
     if (!scan?.running) return;
     const t = setInterval(() => {
       void load().catch(() => { /* 轮询失败下一轮重试 */ });
-    }, 2000);
+    }, 15_000);
     return () => clearInterval(t);
   }, [scan?.running, load]);
 

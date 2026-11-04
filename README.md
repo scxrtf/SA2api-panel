@@ -17,8 +17,12 @@
 
 ## 本地开发
 
+官方真机 HTTPS 出口使用 `native/official-tls` 中的 uTLS helper，本地需安装 Go 1.26+；
+Docker 构建会在独立阶段自动编译并带入运行镜像。
+
 ```bash
 npm ci
+npm run build:official-tls  # 生成 native/official-tls/bin/official-tls[.exe]
 cp .env.example .env        # 填 DATABASE_URL 与 WB2A_API_KEY
 npx prisma migrate dev      # 建表
 npm run dev                 # http://localhost:3000/panel
@@ -36,6 +40,7 @@ npm run dev                 # http://localhost:3000/panel
 
 ```bash
 npm ci
+npm run build:official-tls
 cp .env.example .env        # 填 DATABASE_URL / DIRECT_URL / WB2A_API_KEY
 npx prisma migrate dev      # 建表（走 DIRECT_URL）
 npm run dev                 # http://localhost:3000/panel
@@ -56,8 +61,21 @@ npm run dev                 # http://localhost:3000/panel
 | 每天 09:00 / 21:00（Asia/Shanghai） | `POST /api/cron/checkin` | 全账号签到 |
 | 每 5 分钟 | `POST /api/cron/balance` | 余额台账刷新 |
 | 每 30 分钟 | `POST /api/cron/keepalive` | 仅续期临期 token；可安全高频调用 |
+| 每 6 小时 | `POST /api/cron/retention` | 数据库保留策略：清老日志详情、删过期日志与健康检查 |
 
 请求头：`Authorization: Bearer $WB2A_API_KEY`。主密钥为空时 cron 端点返回 503（拒绝未鉴权触发）。
+
+### 磁盘 / 保留策略（Supabase 免费档必看）
+
+`RequestLog` 每行带请求对话与回复 JSON（TOAST），是最容易吃满磁盘的表。Supabase 磁盘超限时会把
+数据库切成只读（`default_transaction_read_only=on`），表现为整站写入失败。
+
+- 保留参数（环境变量）：`REQUEST_LOG_RETENTION_DAYS`（默认 7）、`REQUEST_LOG_DETAIL_HOURS`（默认 24，
+  超过就清空 4 个 JSON 字段但保留统计列）、`MODEL_HEALTH_RETENTION_DAYS`（默认 3）。
+- 定时打 `/api/cron/retention`（每 6~12 小时）即可自动维持；临时收紧可带 `?days=3&detailHours=12`。
+- 紧急救火（平台已只读、连清理都跑不动时）：`node scripts/db-truncate.mjs --yes` 直接 `TRUNCATE`
+  归还物理空间并附带 `ALTER DATABASE ... SET default_transaction_read_only = off` 解除只读；
+  需要立即把回收的空间还给文件系统时跑 `node scripts/db-vacuum-full.mjs ModelHealthCheck`。
 
 Token 保活默认只处理 24 小时内到期或过期时间未知的账号；本进程调度器默认仍在
 22:00 触发一次。所有自动/外部/面板触发共用数据库租约，同一时间只跑一轮；单轮

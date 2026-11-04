@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "./db";
 import { getConfig, type AppConfig } from "./config";
 import { authShapeOf } from "./login";
-import { providerModels } from "./provider";
+import { findProvider, loadProviders, providerModels } from "./provider";
 import { providerEndpoint } from "./provider-endpoint";
 import { runlog } from "./runlog";
 import { chatStream } from "./upstream/client";
@@ -16,7 +16,12 @@ const PROBE_TIMEOUT_MS = 30_000;
 const FRAME_WAIT_MS = 12_000;
 const FINAL_USAGE_WAIT_MS = 1_000;
 const PROBE_CONCURRENCY = 4;
-const HEALTH_RETENTION_MS = 30 * 24 * 3600_000;
+// 健康检查保留窗口：默认 3 天（原 30 天，会在 Supabase 免费档把磁盘吃满）。
+// 需要长历史时用 MODEL_HEALTH_RETENTION_DAYS 覆盖。
+const HEALTH_RETENTION_MS =
+  (Number(process.env.MODEL_HEALTH_RETENTION_DAYS) > 0
+    ? Number(process.env.MODEL_HEALTH_RETENTION_DAYS)
+    : 3) * 24 * 3600_000;
 const API_HISTORY_MS = 24 * 3600_000;
 const API_HISTORY_LIMIT = 65;
 
@@ -236,6 +241,11 @@ async function discoverTarget(cfg: AppConfig, modelKey: string): Promise<HealthT
         accessToken: { not: "" },
         state: { is: { disabled: false, paused: false } },
       },
+      select: {
+        uid: true, nickname: true, realm: true,
+        accessToken: true, refreshToken: true, expiresAt: true,
+        domain: true, enterpriseId: true, deviceToken: true,
+      },
       orderBy: { createdAt: "asc" },
     });
     const account = accounts.find((a) => realmOf(a) === realm);
@@ -248,7 +258,7 @@ async function discoverTarget(cfg: AppConfig, modelKey: string): Promise<HealthT
     };
   }
 
-  const provider = await prisma.provider.findUnique({ where: { name: prefix } });
+  const provider = await findProvider(prefix);
   if (!provider) return null;
   return {
     channel: "provider",
@@ -270,7 +280,12 @@ async function discoverTargets(cfg: AppConfig): Promise<{
       accessToken: { not: "" },
       state: { is: { disabled: false, paused: false } },
     },
-    include: { state: true },
+    select: {
+      uid: true, nickname: true, realm: true,
+      accessToken: true, refreshToken: true, expiresAt: true,
+      domain: true, enterpriseId: true, deviceToken: true,
+      state: { select: { disabled: true, paused: true } },
+    },
     orderBy: { createdAt: "asc" },
   });
 
@@ -303,7 +318,7 @@ async function discoverTargets(cfg: AppConfig): Promise<{
   const providerErrors: string[] = [];
   try {
     const models = await providerModels(undefined, providerErrors);
-    const providers = await prisma.provider.findMany();
+    const providers = await loadProviders();
     const byName = new Map(providers.map((p) => [p.name, p]));
     for (const model of models) {
       const provider = byName.get(model.owned_by);

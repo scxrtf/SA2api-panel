@@ -53,7 +53,7 @@ export interface AppConfig {
   schedule_growth_disabled: boolean;
   // 保号类四任务（签到/活跃/保活/余额）对已禁用账号也执行（禁用只关选号，不停保号）。
   schedule_include_disabled_in_tasks: boolean;
-  // 余额刷新：false=关停循环；分钟 <=0 回落 5。
+  // 余额刷新：false=关停循环；分钟 <=0 回落 30。
   schedule_balance_refresh_enabled: boolean;
   schedule_balance_refresh_minutes: number;
   // 模型可用率探测：对所有目录模型发送最小真实聊天请求并逐次落库。
@@ -115,9 +115,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   schedule_growth_disabled: false,
   schedule_include_disabled_in_tasks: false,
   schedule_balance_refresh_enabled: true,
-  schedule_balance_refresh_minutes: 5,
+  schedule_balance_refresh_minutes: 30,
   schedule_model_health_enabled: true,
-  schedule_model_health_minutes: 15,
+  schedule_model_health_minutes: 60,
   schedule_model_health_every_calls: 0,
   expiring_soon_hours: 168, // 默认 7 天：官方活动奖励积分多在两周内过期
   package_detail_limit: 5,
@@ -126,7 +126,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 import { prisma } from "./db";
 
 let cache: { cfg: AppConfig; at: number } | null = null;
-const CACHE_TTL_MS = 5_000;
+const CACHE_TTL_MS = 30_000;
 const POOL_WAIT_MAX_MS = 120_000;
 const POOL_WAIT_POLL_MIN_MS = 50;
 const POOL_WAIT_POLL_MAX_MS = 10_000;
@@ -160,6 +160,14 @@ export async function getConfig(force = false): Promise<AppConfig> {
   // 对齐 Go normalize：<=0 回落 5（不是「全部展开」）。
   if (!Number.isFinite(cfg.package_detail_limit) || cfg.package_detail_limit <= 0) {
     cfg.package_detail_limit = 5;
+  }
+  // Egress 降频迁移：老库里存的正是旧默认值（余额 5 / 健康 15 分钟）时，
+  // 升级到新默认（30 / 60）。用户手工改成其它值的不动。
+  if (cfg.schedule_balance_refresh_minutes === 5) {
+    cfg.schedule_balance_refresh_minutes = DEFAULT_CONFIG.schedule_balance_refresh_minutes;
+  }
+  if (cfg.schedule_model_health_minutes === 15) {
+    cfg.schedule_model_health_minutes = DEFAULT_CONFIG.schedule_model_health_minutes;
   }
   if (!Number.isFinite(cfg.schedule_keepalive_refresh_before_hours)
     || cfg.schedule_keepalive_refresh_before_hours < 0
@@ -255,7 +263,7 @@ export async function saveConfig(raw: unknown): Promise<AppConfig> {
     if (next[k].length === 0) (next as unknown as Record<string, unknown>)[k] = [...DEFAULT_CONFIG[k]];
   }
   if (next.schedule_balance_refresh_enabled && next.schedule_balance_refresh_minutes <= 0) {
-    next.schedule_balance_refresh_minutes = 5;
+    next.schedule_balance_refresh_minutes = 30;
   }
   if (next.schedule_model_health_enabled && next.schedule_model_health_minutes <= 0) {
     next.schedule_model_health_minutes = DEFAULT_CONFIG.schedule_model_health_minutes;
@@ -265,7 +273,7 @@ export async function saveConfig(raw: unknown): Promise<AppConfig> {
     || next.schedule_model_health_every_calls > 100_000) {
     throw new Error("schedule_model_health_every_calls 必须是 0-100000 的整数");
   }
-  // 与 getConfig 同一归一化：保存 0/负值后内存配置也必须是 5，不能等 5s 缓存过期。
+  // 与 getConfig 同一归一化：保存 0/负值后内存配置也必须是 30，不能等 5s 缓存过期。
   if (!Number.isFinite(next.package_detail_limit) || next.package_detail_limit <= 0) {
     next.package_detail_limit = 5;
   }

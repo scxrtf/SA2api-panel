@@ -220,7 +220,21 @@ function pickWeighted(ws: { e: PoolEntry; w: number }[]): PoolEntry {
   return ws[ws.length - 1].e;
 }
 
+// loadEntries 是全池唯一的大读取：account 全列 + 三条关系。面板多个端点
+// 在一个请求内会重复调用（overview 原先 4 次），而账号/状态变化本身是低频的，
+// 因此加 30s 进程内 TTL 缓存 + 写路径显式失效。返回浅拷贝数组，entry 对象本身
+// 只读（全文件没有对 state/cooldowns/costs 的原地写）。
+const ENTRIES_TTL_MS = 30_000;
+type EntriesCache = { at: number; rows: PoolEntry[] };
+const poolGlobals = globalThis as unknown as { __wbPoolEntries?: EntriesCache };
+
+export function invalidateEntries(): void {
+  delete poolGlobals.__wbPoolEntries;
+}
+
 async function loadEntries(): Promise<PoolEntry[]> {
+  const cached = poolGlobals.__wbPoolEntries;
+  if (cached && Date.now() - cached.at < ENTRIES_TTL_MS) return cached.rows.slice();
   const accounts = await prisma.account.findMany({
     include: { state: true, modelCooldowns: true, modelCosts: true },
   });
@@ -233,7 +247,8 @@ async function loadEntries(): Promise<PoolEntry[]> {
       costs: account.modelCosts,
     });
   }
-  return out;
+  poolGlobals.__wbPoolEntries = { at: Date.now(), rows: out };
+  return out.slice();
 }
 
 function defaultState(uid: string): AccountState {
@@ -524,6 +539,7 @@ async function patchState(uid: string, data: Record<string, unknown>): Promise<v
     create: { uid, ...(data as object) },
     update: data as object,
   });
+  invalidateEntries();
 }
 
 // cappedSoftUntil 把上游重置墙钟截断到 softRateMax。
@@ -576,6 +592,7 @@ export async function cooldownSoftRate(
   await prisma.modelCooldown.deleteMany({
     where: { uid, reason: { not: { startsWith: "11102" } } },
   });
+  invalidateEntries();
 }
 
 // cooldownSoftForModel 6004 模型级软冷却（issue #31）：
@@ -596,6 +613,7 @@ export async function cooldownSoftForModel(
       create: { uid, model, until: BigInt(until), reason },
       update: { until: BigInt(until), reason },
     });
+    invalidateEntries();
     return;
   }
   // 无解析时间：账号级有界退避（与 CooldownSoftForModel 无解析分支一致）。
@@ -616,6 +634,7 @@ export async function cooldownSoftForModel(
   await prisma.modelCooldown.deleteMany({
     where: { uid, reason: { not: { startsWith: "11102" } } },
   });
+  invalidateEntries();
 }
 
 // cooldownHardCredit 余额耗尽 → 冷却到下一个 04:00（Asia/Shanghai，等签到恢复）。
@@ -639,6 +658,7 @@ export async function cooldownHardCredit(uid: string, reason: string): Promise<v
   await prisma.modelCooldown.deleteMany({
     where: { uid, reason: { not: { startsWith: "11102" } } },
   });
+  invalidateEntries();
 }
 
 // blockModelBackoff 11102 负缓存：首次 6h，TTL = base × 2^min(hits-1, 4)，封顶 24h。
@@ -659,6 +679,7 @@ export async function blockModelBackoff(uid: string, model: string, reason: stri
     create: { uid, model, until: BigInt(now + ttl), reason: r },
     update: { until: BigInt(now + ttl), reason: r },
   });
+  invalidateEntries();
 }
 
 const modelBlockHits = new Map<string, number>();
@@ -670,6 +691,7 @@ export async function blockModelClear(uid: string, model: string): Promise<void>
   await prisma.modelCooldown.deleteMany({
     where: { uid, model, reason: { startsWith: "11102" } },
   });
+  invalidateEntries();
 }
 
 // ModelBlockStatus 全池模型级阻塞快照（Go ModelBlocked 同语义）。
@@ -862,6 +884,7 @@ export async function noteModelCost(
       },
     });
   }
+  invalidateEntries();
 }
 
 // ─── 管理操作（面板用） ───────────────────────────────────────────────────
@@ -879,6 +902,7 @@ export async function disable(uid: string, reason: string): Promise<void> {
     softStreak: 0,
   });
   await prisma.modelCooldown.deleteMany({ where: { uid } });
+  invalidateEntries();
 }
 
 // reviveDisabled 人工复活：清禁用与冷却域，重学窗口开始。
@@ -900,6 +924,7 @@ export async function revive(uid: string): Promise<void> {
   consecutiveFails.delete(uid);
   degradeRetryCount.delete(uid);
   await prisma.modelCooldown.deleteMany({ where: { uid } });
+  invalidateEntries();
 }
 
 export async function pause(uid: string): Promise<void> {
@@ -998,9 +1023,9 @@ export interface StatusRow {
   };
 }
 
-export async function statusList(): Promise<StatusRow[]> {
+export async function statusList(preloaded?: PoolEntry[]): Promise<StatusRow[]> {
   const now = Date.now();
-  const all = await loadEntries();
+  const all = preloaded ?? await loadEntries();
   const today = todayShanghai();
   // 用量台账一次性按 uid 聚合（Go 从进程内 metrics 取，这里从 UsageEvent 表取——
   // 语义等价：都是「该账号历史请求观测累计」）。失败时降级为空聚合，不拖垮 overview。
@@ -1009,6 +1034,7 @@ export async function statusList(): Promise<StatusRow[]> {
   try {
     aggs = await prisma.usageEvent.groupBy({
       by: ["uid", "ok"],
+      where: { at: { gte: new Date(now - 7 * 86400_000) } },
       _count: { _all: true },
       _sum: { totalTokens: true, latencyMs: true },
       _max: { at: true },
@@ -1119,9 +1145,13 @@ export async function statusList(): Promise<StatusRow[]> {
 // 无锁时返回 null（前端按空态渲染）。
 export type { ModelLockRow } from "./modelview";
 
-export async function modelLockView(cfg: AppConfig): Promise<ModelLockRow[] | null> {
+export async function modelLockView(
+  cfg: AppConfig,
+  preloaded?: PoolEntry[],
+): Promise<ModelLockRow[] | null> {
   const now = Date.now();
-  const all = await loadEntries();
+  const all = preloaded ?? await loadEntries();
+  const byUID = new Map(all.map((e) => [e.account.uid, e] as const));
   const entries: LockViewEntry[] = all.map((e) => ({
     uid: e.account.uid,
     realm: e.account.realm,
@@ -1135,16 +1165,14 @@ export async function modelLockView(cfg: AppConfig): Promise<ModelLockRow[] | nu
     })),
   }));
   return modelLockViewPure(entries, now, (uid) => {
-    const e = all.find((x) => x.account.uid === uid);
+    const e = byUID.get(uid);
     return e ? inFlightFull(e, cfg) : false;
   });
 }
 // Counts 池计数（面板概况）。
-export async function counts(): Promise<{
+function countsOf(all: PoolEntry[], now: number): {
   total: number; healthy: number; cooling: number; disabled: number; paused: number;
-}> {
-  const now = Date.now();
-  const all = await loadEntries();
+} {
   let healthy = 0, cooling = 0, disabled = 0, paused = 0;
   for (const e of all) {
     const s = e.state;
@@ -1156,20 +1184,51 @@ export async function counts(): Promise<{
   return { total: all.length, healthy, cooling, disabled, paused };
 }
 
+export async function counts(): Promise<{
+  total: number; healthy: number; cooling: number; disabled: number; paused: number;
+}> {
+  return countsOf(await loadEntries(), Date.now());
+}
+
 // countsDetailed 对齐 Go Pool.CountsDetailed：在 counts 之上附 in_flight_full
 //（在途打满上限的账号数，含域上限口径），供 /status 与面板 overview。
 export async function countsDetailed(cfg: AppConfig): Promise<{
   total: number; healthy: number; cooling: number; disabled: number; paused: number;
   in_flight_full: number;
 }> {
-  const base = await counts();
   const all = await loadEntries();
+  const base = countsOf(all, Date.now());
   let inFlightFullN = 0;
   for (const e of all) {
     if (e.state.disabled || e.state.paused) continue;
     if (inFlightFull(e, cfg)) inFlightFullN++;
   }
   return { ...base, in_flight_full: inFlightFullN };
+}
+
+// overviewSnapshot 一次全池读取产出 overview 需要的三块数据，避免
+// countsDetailed + statusList + modelLockView 各拉一遍全表。
+export async function overviewSnapshot(cfg: AppConfig): Promise<{
+  count: {
+    total: number; healthy: number; cooling: number; disabled: number; paused: number;
+    in_flight_full: number;
+  };
+  accounts: StatusRow[];
+  model_locks: ModelLockRow[] | null;
+}> {
+  const all = await loadEntries();
+  const now = Date.now();
+  const base = countsOf(all, now);
+  let inFlightFullN = 0;
+  for (const e of all) {
+    if (e.state.disabled || e.state.paused) continue;
+    if (inFlightFull(e, cfg)) inFlightFullN++;
+  }
+  const [accounts, model_locks] = await Promise.all([
+    statusList(all),
+    modelLockView(cfg, all),
+  ]);
+  return { count: { ...base, in_flight_full: inFlightFullN }, accounts, model_locks };
 }
 
 export function costExploreStatus(): { events: number; last: Record<string, number> } {

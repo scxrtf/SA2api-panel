@@ -102,7 +102,9 @@ export function TasksCenterView({ flash }: { flash: Flash }) {
       if (r.started) {
         flash("ok", "队列已启动：" + r.total + " 项待办");
         stopPoll();
-        poll.current = setInterval(refreshQueue, 2000);
+        // 队列进度用 60s 轮询即可：一次 queue 请求会回传全部条目，15s 会让
+        // 单面板常年占掉数倍 egress；队列页停留在前台时才重建，切走即由 unmount 清掉。
+        poll.current = setInterval(refreshQueue, 60_000);
       } else {
         flash("err", r.msg ?? r.message ?? "队列未启动");
       }

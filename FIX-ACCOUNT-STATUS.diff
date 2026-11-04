@@ -1,0 +1,15 @@
+diff --git a/src/lib/pool.ts.bak-20261102-status-reason b/src/lib/pool.ts
+index ac2fac1..fe267ad 100644
+--- a/src/lib/pool.ts.bak-20261102-status-reason
++++ b/src/lib/pool.ts
+@@ -1084,8 +1084,8 @@ export async function statusList(): Promise<StatusRow[]> {
+       cooling,
+       cool_kind: cooling ? accountReasonKind(coolKind) : "",
+       cool_remaining_sec: remaining,
+-      reason: accountReasonSummary(s.cooldownReason),
+-      raw_reason: s.cooldownReason,
++      reason: cooling ? accountReasonSummary(s.cooldownReason) : "",
++      raw_reason: cooling ? s.cooldownReason : "",
+       disabled: s.disabled,
+       disabled_reason: s.disabled ? s.disableReason : "",
+       paused: s.paused,

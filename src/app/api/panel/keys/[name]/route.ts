@@ -2,6 +2,7 @@
 // PATCH 属于权限划分操作，必须携带超级密码二次确认。
 import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
+import { invalidateKeyRing } from "@/lib/auth-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,6 +71,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
   const stored = list.includes("*") ? "*" : list.join(",");
   await prisma.apiKey.update({ where: { name }, data: { providers: stored } });
+  invalidateKeyRing();
   return ok({ name, providers: list });
 }
 
@@ -90,5 +92,6 @@ export async function DELETE(req: Request, ctx: Ctx) {
     return fail(403, "超级密码错误");
   }
   await prisma.apiKey.delete({ where: { name } });
+  invalidateKeyRing();
   return ok();
 }

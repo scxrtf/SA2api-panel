@@ -303,6 +303,58 @@ async function healthLoop(): Promise<void> {
 }
 
 // ─── 对外接口 ────────────────────────────────────────────────────────────────
+// ─── 日志保留策略独立循环 ────────────────────────────────────────────────────
+// Egress/Disk 收口：RequestLog 的四个 JSON 大字段是 TOAST 与回传字节的主来源。
+// 启动后延迟 5min 跑首轮（避开进程启动时的建连与配置读取高峰），之后默认每 6h 跑一次：
+// 详情窗口 24h，间隔 6h 把「过期详情实际滞留」的最大值从 48h 压到 30h，TOAST 更早释放，
+// 后续查询扫的堆页更少。可用 REQUEST_LOG_RETENTION_INTERVAL_MINUTES 覆盖（最小 30 分钟）。
+// 保留天数与详情窗口由 retention.ts 的 envNum 决定（REQUEST_LOG_RETENTION_DAYS /
+// REQUEST_LOG_DETAIL_HOURS），循环本身不再重复解析。
+const RETENTION_FIRST_DELAY_MS = 5 * 60_000;
+const RETENTION_INTERVAL_MS = (() => {
+  const raw = Number(process.env.REQUEST_LOG_RETENTION_INTERVAL_MINUTES);
+  const minutes = Number.isFinite(raw) && raw > 0 ? raw : 360;
+  return Math.max(30, minutes) * 60_000;
+})();
+
+async function retentionLoop(): Promise<void> {
+  let seenRearm = st.rearmSeq;
+  // 首轮延迟：分段睡眠，期间响应 stop/rearm。
+  let waited = 0;
+  while (waited < RETENTION_FIRST_DELAY_MS) {
+    if (st.stop) return;
+    const step = Math.min(RETENTION_FIRST_DELAY_MS - waited, WALLCLOCK_CHECK_STEP_MS);
+    await sleep(step);
+    waited += step;
+  }
+  for (;;) {
+    if (st.stop) return;
+    try {
+      const { runRetention } = await import("./retention");
+      const r = await runRetention();
+      console.log(
+        "[scheduler] retention: 清详情 " + r.detailCleared +
+        " · 删日志 " + r.rowsDeleted +
+        " · 删健康检查 " + r.healthDeleted +
+        " · " + r.durationMs + "ms",
+      );
+    } catch (e) {
+      console.log("[scheduler] retention error: " + (e instanceof Error ? e.message : String(e)));
+    }
+    // 间隔睡眠：每段 60s 重判 stop/rearm，保证热配与停机响应性。
+    let slept = 0;
+    while (slept < RETENTION_INTERVAL_MS) {
+      if (st.stop) return;
+      if (st.rearmSeq !== seenRearm) break;
+      const step = Math.min(RETENTION_INTERVAL_MS - slept, WALLCLOCK_CHECK_STEP_MS);
+      await sleep(step);
+      slept += step;
+    }
+    if (st.stop) return;
+    seenRearm = st.rearmSeq;
+  }
+}
+
 // startScheduler 幂等启动主循环 + 余额循环 + 模型健康循环（instrumentation register 调用一次）。
 export function startScheduler(): void {
   if (st.started) return;
@@ -311,6 +363,7 @@ export function startScheduler(): void {
   void mainLoop();
   void balanceLoop();
   void healthLoop();
+  void retentionLoop();
   console.log("[scheduler] started (Asia/Shanghai 整点时口径)");
 }
 

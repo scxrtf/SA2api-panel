@@ -195,6 +195,12 @@ model RequestLog {
 
   @@index([at])
   @@index([uid, at])
+  // 面板过滤器的复合索引：列表页同时按 at 倒序取最近 N 条，
+  // 前缀列过滤 + at 排序可让 Postgres 走 index scan 而不是全表排序回传。
+  @@index([status, at])
+  @@index([errKind, at])
+  @@index([model, at])
+  @@index([keyName, at])
 }
 
 model StickySession {

@@ -182,6 +182,40 @@ export function verdictFromState(
   return { measured: null, verdict: "inconclusive", note: st.evidence.join("；") || "未测出", elapsed_s: elapsedS };
 }
 
+// 探测结果进程内快照：面板多个视图会轮询 /api/panel/model_probes，
+// 原先每次都整表 findMany（含 note 这类长文本）。60s TTL + 写点失效。
+const PROBES_TTL_MS = 60_000;
+type ProbeRow = {
+  key: string;
+  claimed: number | null;
+  measured: number | null;
+  verdict: string;
+  note: string;
+  source: string;
+  testedAt: Date;
+  updatedAt: Date;
+};
+type ProbesCache = { at: number; rows: ProbeRow[] };
+const probeGlobals = globalThis as unknown as { __wbProbes?: ProbesCache };
+
+export function invalidateProbeList(): void {
+  delete probeGlobals.__wbProbes;
+}
+
+async function loadProbeRows(): Promise<ProbeRow[]> {
+  const cached = probeGlobals.__wbProbes;
+  if (cached && Date.now() - cached.at < PROBES_TTL_MS) return cached.rows.slice();
+  const rows = await prisma.modelProbe.findMany({
+    orderBy: { updatedAt: "desc" },
+    select: {
+      key: true, claimed: true, measured: true, verdict: true,
+      note: true, source: true, testedAt: true, updatedAt: true,
+    },
+  });
+  probeGlobals.__wbProbes = { at: Date.now(), rows };
+  return rows.slice();
+}
+
 // saveProbe 落库（合并语义：未重测的模型保留旧记录，上游改限后重跑即覆盖）。
 export async function saveProbe(
   key: string, claimed: number | null, v: ProbeVerdict,
@@ -197,6 +231,7 @@ export async function saveProbe(
       note: v.note, source: PROBE_SOURCE, testedAt: new Date(),
     },
   });
+  invalidateProbeList();
 }
 
 // listProbes 读全量探测结果（对齐 Go modelProbes 响应契约）。
@@ -207,7 +242,7 @@ export async function listProbes(): Promise<{
   }>;
   exists: boolean; updated_at: string | null;
 }> {
-  const rows = await prisma.modelProbe.findMany({ orderBy: { updatedAt: "desc" } });
+  const rows = await loadProbeRows();
   const probes: Record<string, {
     claimed: number | null; measured: number | null; verdict: string;
     note: string; tested_at: string; source: string;

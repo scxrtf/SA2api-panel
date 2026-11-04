@@ -3,6 +3,8 @@
 // 剔除该供应商，避免密钥残留指向已不存在供应商的幽灵授权（重新保存时 400）。
 import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
+import { invalidateKeyRing } from "@/lib/auth-guard";
+import { invalidateProviders } from "@/lib/provider";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +37,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (Object.keys(data).length === 0) return fail(400, "没有可更新的字段");
 
   await prisma.provider.update({ where: { name }, data });
+  invalidateProviders();
   return ok({ name });
 }
 
@@ -80,5 +83,8 @@ export async function DELETE(req: Request, ctx: Ctx) {
     await tx.provider.delete({ where: { name } });
     return scrubbed;
   });
+  // 事务内改写了 ApiKey.providers 并删除了 Provider 行，两个快照都要失效。
+  invalidateProviders();
+  invalidateKeyRing();
   return ok({ scrubbed_keys: result });
 }

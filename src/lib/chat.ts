@@ -44,7 +44,7 @@ import { tokensPerSecond } from "./upstream/usage";
 import { currentModelRate } from "./upstream/modelCatalog";
 import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
-import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import {   assistantMessageForLog,   errorText,   failureDetail,   parameterOverrides,   requestMessagesForLog,   responseMessageFromObject,   type AttemptDetail, } from "./request-log-detail";
+import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import {   assistantMessageForLog,   errorText,   failureDetail,   parameterOverrides,   requestMessagesForLog,   logDialogEnabled,   responseMessageFromObject,   type AttemptDetail, } from "./request-log-detail";
 
 import { sleepAbortable } from "./backoff";
 
@@ -243,7 +243,7 @@ async function recordRequestLog(r: {
 }, logRef = ""): Promise<boolean> {
   try {
     const row = await prisma.requestLog.create({
-      data: r as never,
+      data: (logDialogEnabled() ? r : { ...r, requestMessages: undefined, responseMessage: undefined }) as never,
       select: { id: true },
     });
     markRunlogPersisted(logRef, row.id);
@@ -333,7 +333,7 @@ export async function handleChat(opts: {
   const { body, clientIP, ua, path } = opts;
   const stream = body["stream"] === true;
   const rawModel = typeof body["model"] === "string" ? (body["model"] as string) : "";
-  const loggedRequestMessages = requestMessagesForLog(body["messages"]);
+  const dialogOn = logDialogEnabled(); const loggedRequestMessages = dialogOn ? requestMessagesForLog(body["messages"]) : null;
   const attemptDetails: AttemptDetail[] = [];
   let latestOutboundOverrides = parameterOverrides(body, body);
 

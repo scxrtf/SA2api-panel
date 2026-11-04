@@ -1,14 +1,15 @@
 // 上游 HTTP 客户端（移植 internal/upstream/client.go + headers.go）。
-// 端点/请求头/信封解析与 Go 版逐字对齐；网络层用全局 fetch（AbortSignal.timeout）。
+// 端点/请求头/信封解析与 Go 版逐字对齐；官方 RPC 链走原生 HTTP/1.1 出口。
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { type AppConfig } from "../config";
 import { classify, parseRetryAfter, UpstreamError } from "./errors";
 import { idleMonitorBody } from "./idle";
 import { prepareBodyOpt, ensureConsoleSystem, globalEffortMap, realmKey } from "./payload";
 import { effortsSnapshot as catalogEffortsSnapshot } from "./modelCatalog";
+import { officialEgress } from "./official-egress";
 
 // 端点常量（realm 感知）
-export const CHAT_BASE_CN = "https://copilot.tencent.com";
+export const CHAT_BASE_CN = "https://www.workbuddy.cn";
 export const BILLING_BASE_CN = "https://www.codebuddy.cn";
 export const GLOBAL_BASE = "https://www.workbuddy.ai";
 export const WEB_BASE_CN = "https://www.workbuddy.cn";
@@ -26,9 +27,9 @@ const METER_PATH_V2 = "/v2/billing/meter/get-user-resource";
 const CHECKIN_PATH = "/billing/meter/daily-checkin";
 const CHECKIN_PATH_V2 = "/v2/billing/meter/daily-checkin";
 
-const DEFAULT_CLIENT_VERSION_CN = "5.8.3";
-const DEFAULT_CLIENT_VERSION_GLOBAL = "5.8.4";
-const DEFAULT_CLI_VERSION = "2.161.0";
+const DEFAULT_CLIENT_VERSION_CN = "5.9.3";
+const DEFAULT_CLIENT_VERSION_GLOBAL = "5.9.4";
+const DEFAULT_CLI_VERSION = "2.165.0";
 const BILLING_USER_AGENT = "axios/1.16.1";
 
 // AuthShape 账号凭证快照（DB Account 行的最小投影）。
@@ -53,7 +54,7 @@ export function billingBase(a: AuthShape): string {
   return isGlobal(a) ? GLOBAL_BASE : BILLING_BASE_CN;
 }
 export function originReferer(a: AuthShape): string {
-  return isGlobal(a) ? "https://www.workbuddy.ai" : "https://www.codebuddy.cn";
+  return isGlobal(a) ? "https://www.workbuddy.ai" : "https://www.workbuddy.cn";
 }
 function acceptLanguage(a: AuthShape): string {
   return isGlobal(a) ? "en-US" : "zh-CN";
@@ -168,6 +169,13 @@ function injectAttribution(h: Record<string, string>, cfg: AppConfig, a: AuthSha
   h["X-IDE-Version"] = clientVersion(cfg, a);
 }
 
+export function rpcUserAgent(cfg: AppConfig, a: AuthShape): string {
+  if (cfg.user_agent) return cfg.user_agent;
+  const version = clientVersion(cfg, a);
+  const brand = isGlobal(a) ? "workbuddy-ai" : "WorkBuddy";
+  return `${brand}/${version} ${brand}/${version} CLI/${cliVersion(cfg)}`;
+}
+
 function resolveDeviceToken(cfg: AppConfig, a: AuthShape): string {
   return a.deviceToken || cfg.device_token || "";
 }
@@ -227,6 +235,7 @@ function injectConversationHeaders(h: Record<string, string>, uid: string, meta:
 function injectClientSDKHeaders(h: Record<string, string>): void {
   h["X-Agent-Type"] = "main";
   h["X-Agent-Intent"] = "craft";
+  h["X-Agent-Runtime"] = "local-agent";
   h["X-Stainless-Lang"] = "js";
   h["X-Stainless-Package-Version"] = "6.25.0";
   h["X-Stainless-OS"] = "Windows";
@@ -262,7 +271,7 @@ export function chatHeaders(
   delete h["X-Machine-ID"];
   delete h["X-Session-ID"];
   // Accept 与官方 chat 完全一致：只发 application/json（SSE 照常返回）。
-  // Accept-Encoding 刻意不设：显式设置会关闭 fetch 的透明解压，收到 br 时无解码器。
+  // Accept-Encoding 由 official-egress 按真机四段注入并负责透明解压。
   h["Accept"] = "application/json";
   if (a.accessToken) h["Authorization"] = "Bearer " + a.accessToken;
   else h["X-No-Authorization"] = "1";
@@ -270,15 +279,10 @@ export function chatHeaders(
   else h["X-No-User-Id"] = "1";
   // 企业/域头只发有值的：桌面端个人号实测两个方向都不发 X-No-* 哨兵头
   // （那是 CodeBuddy CLI 的约定，不是 WorkBuddy 桌面端形态）。
-  if (!isGlobal(a)) {
-    if (a.enterpriseId) h["X-Enterprise-Id"] = a.enterpriseId;
-    if (a.domain) h["X-Domain"] = a.domain;
-  } else {
-    // global 个人账号：只声明国际版域（官方个人号同样不发 X-No-Enterprise-Id）。
-    h["X-Domain"] = "www.workbuddy.ai";
-  }
+  if (!isGlobal(a) && a.enterpriseId) h["X-Enterprise-Id"] = a.enterpriseId;
+  h["X-Domain"] = new URL(chatBase(a)).host;
   injectAttribution(h, cfg, a);
-  h["X-Private-Data"] = "true";
+  h["X-Private-Data"] = a.enterpriseId || isGlobal(a) ? "true" : "false";
   injectIdentityHeaders(h, a);
   if (cfg.passthrough_ip && clientIP) {
     h["X-Forwarded-For"] = clientIP;
@@ -288,6 +292,7 @@ export function chatHeaders(
   const dt = resolveDeviceToken(cfg, a);
   if (dt) h["X-Device-Token"] = dt;
   injectConversationHeaders(h, a.uid, meta);
+  h["baggage"] = `buddyId=,buddyName=,codebuddy.session_id=${h["X-Conversation-ID"]},codebuddy.conversation_request_id=${h["X-Conversation-Request-ID"]}`;
   // SDK / agent 段指纹头（x-stainless-* / x-agent-type / x-agent-intent），仅 chat 路径。
   injectClientSDKHeaders(h);
   return h;
@@ -316,6 +321,20 @@ export function billingHeaders(cfg: AppConfig, a: AuthShape): Record<string, str
 
 export function refreshHeaders(cfg: AppConfig, a: AuthShape): Record<string, string> {
   const h = commonHeaders(cfg, a);
+  h["Accept"] = "application/json, text/plain, */*";
+  h["User-Agent"] = rpcUserAgent(cfg, a);
+  h["X-Domain"] = new URL(chatBase(a)).host;
+  h["X-Request-ID"] = newMessageID();
+  h["X-Product"] = "SaaS";
+  if (a.accessToken) h["Authorization"] = "Bearer " + a.accessToken;
+  if (a.uid) h["X-User-Id"] = a.uid;
+  delete h["Origin"];
+  delete h["Referer"];
+  delete h["Accept-Language"];
+  delete h["X-Requested-With"];
+  delete h["X-CodeBuddy-Request"];
+  delete h["X-Machine-ID"];
+  delete h["X-Session-ID"];
   h["X-Refresh-Token"] = a.refreshToken;
   if (a.enterpriseId) h["X-Enterprise-Id"] = a.enterpriseId;
   h["X-Auth-Refresh-Source"] = "plugin";
@@ -332,8 +351,10 @@ async function doJSON(req: {
   headers: Record<string, string>;
   body?: string;
   timeoutMs?: number;
+  official?: boolean;
 }): Promise<unknown> {
-  const resp = await fetch(req.url, {
+  const transport = req.official ? officialEgress : fetch;
+  const resp = await transport(req.url, {
     method: req.method,
     headers: req.headers,
     body: req.body,
@@ -373,7 +394,9 @@ export async function refreshToken(
     url: chatBase(a) + REFRESH_PATH,
     method: "POST",
     headers: refreshHeaders(cfg, a),
+    body: "{}",
     timeoutMs: REFRESH_IO_TIMEOUT_MS,
+    official: true,
   })) as { accessToken?: string; refreshToken?: string; expiresIn?: number; domain?: string } | null;
   if (!data?.accessToken) {
     throw new Error("refresh_failed: no accessToken in response — re-login required");
@@ -550,7 +573,7 @@ export async function chatStream(
   if (extraHeaders) Object.assign(headers, extraHeaders);
   let resp: Response;
   try {
-    resp = await fetch(chatBase(a) + CHAT_PATH, {
+    resp = await officialEgress(chatBase(a) + CHAT_PATH, {
       method: "POST",
       headers,
       body: prepared,

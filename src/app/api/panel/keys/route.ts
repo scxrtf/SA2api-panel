@@ -1,7 +1,7 @@
 // GET/POST /api/panel/keys — 网关密钥环管理（列表只回掩码；POST 新建返回原文一次）。
 import { randomBytes } from "crypto";
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
-import { mask, parseProviderAccess } from "@/lib/auth-guard";
+import { invalidateKeyRing, mask, parseProviderAccess } from "@/lib/auth-guard";
 import { prisma } from "@/lib/db";
 import { getOrCreateMachineId, machineKeyAuthorized } from "@/lib/machine-key";
 
@@ -11,7 +11,10 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
-  const rows = await prisma.apiKey.findMany({ orderBy: { createdAt: "asc" } });
+  const rows = await prisma.apiKey.findMany({
+    orderBy: { createdAt: "asc" },
+    select: { name: true, key: true, providers: true, createdAt: true },
+  });
   return ok({
     keys: rows.map((r) => ({
       name: r.name,
@@ -43,6 +46,7 @@ export async function POST(req: Request) {
   // 新建密钥默认无任何供应商授权（providers = ""）：需在面板显式勾选后才能调用
   // 聚合供应商通道；池通道（模型名无供应商前缀）不受供应商授权限制。
   await prisma.apiKey.create({ data: { name, key, providers: "" } });
+  invalidateKeyRing();
   // 原文仅在此响应出现一次，前端需提示用户保存。
   return ok({ name, key, providers: [] });
 }

@@ -2,6 +2,7 @@
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
 import { mask } from "@/lib/auth-guard";
 import { prisma } from "@/lib/db";
+import { invalidateProviders } from "@/lib/provider";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,5 +47,6 @@ export async function POST(req: Request) {
   const exists = await prisma.provider.findUnique({ where: { name } });
   if (exists) return fail(409, "同名供应商已存在");
   await prisma.provider.create({ data: { name, baseUrl, apiKey: key, models } });
+  invalidateProviders();
   return ok({ name });
 }

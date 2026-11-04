@@ -65,7 +65,16 @@ export async function GET(req: Request) {
 
   // 池通道：CN / global 各取一个可用账号探测（某域无账号则整域跳过）。
   // realm 判定与 /v1/models 同口径：global 精确匹配，其余（""/"cn"）归 cn。
-  const accounts = await prisma.account.findMany({ include: { state: true } });
+  // 只取探测所需的登录四件套 + realm + 启停标记；避免把整行 Account
+  // （含全部 token 历史字段）读进内存再序列化。
+  const accounts = await prisma.account.findMany({
+    select: {
+      uid: true, nickname: true, realm: true,
+      accessToken: true, refreshToken: true, expiresAt: true,
+      domain: true, enterpriseId: true, deviceToken: true,
+      state: { select: { disabled: true, paused: true } },
+    },
+  });
   const usable = accounts.filter(
     (a) => !(a.state?.disabled ?? false) && !(a.state?.paused ?? false) && a.accessToken !== "",
   );

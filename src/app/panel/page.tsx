@@ -2,7 +2,7 @@
 // 管理面板入口（CloseRouter 大改版）：只负责鉴权态 / 视图调度 / overview 轮询，
 // 外壳（机柜+侧边栏+页头）在 components/shell.tsx，登录页在 components/login.tsx。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, useAutoRefresh, emitPanelRefresh } from "./lib";
+import { req, useAutoRefresh, emitPanelRefresh, PanelActivityProvider } from "./lib";
 import type { Overview } from "./components/ui";
 import { Shell } from "./components/shell";
 import { LoginScreen } from "./components/login";
@@ -57,8 +57,8 @@ export default function PanelPage() {
     }
   }, [flash]);
 
-  useEffect(() => { loadOverview(); }, [loadOverview]);
-  useAutoRefresh(() => { void loadOverview(); }, 15_000, authed === true);
+  useEffect(() => { const t = setTimeout(() => { void loadOverview(); }, 0); return () => clearTimeout(t); }, [loadOverview]);
+  useAutoRefresh(() => { void loadOverview(); }, 120_000, authed === true);
 
   // 顶栏刷新：先刷 overview（侧边栏统计），再广播事件让当前视图刷自己的数据。
   // 返回 Promise 供按钮进入加载态：转圈持续到 overview 落定，
@@ -101,7 +101,7 @@ export default function PanelPage() {
 function ViewPane({ active, children }: { active: boolean; children: React.ReactNode }) {
   return (
     <div className={"view-pane" + (active ? " view-anim" : "")} hidden={!active} aria-hidden={!active}>
-      {children}
+      <PanelActivityProvider active={active}>{children}</PanelActivityProvider>
     </div>
   );
 }

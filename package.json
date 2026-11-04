@@ -10,7 +10,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:keepalive": "tsx --test src/lib/cron.keepalive.test.ts"
+    "test:keepalive": "tsx --test src/lib/cron.keepalive.test.ts",
+    "test:official-egress": "tsx --test scripts/official-egress.test.mts scripts/official-client-hello.test.mts",
+    "build:official-tls": "go -C native/official-tls build -trimpath -o bin/ .",
+    "test:usage": "tsx --test scripts/usage-aggregation.test.mts",
+    "verify:usage": "tsx scripts/verify-usage-parity.mts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^6.0.0",
