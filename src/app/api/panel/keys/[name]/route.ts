@@ -79,6 +79,16 @@ export async function DELETE(req: Request, ctx: Ctx) {
   const { name } = await ctx.params;
   const existing = await prisma.apiKey.findUnique({ where: { name } });
   if (!existing) return fail(404, "未找到密钥：" + name);
+  // 删除密钥为权限级操作：与调整授权同口径，超级密码二次确认。
+  let body: { super_password?: unknown } = {};
+  try {
+    body = (await req.json()) as { super_password?: unknown };
+  } catch {
+    return fail(400, "invalid json body");
+  }
+  if (!verifySuperPassword(body.super_password)) {
+    return fail(403, "超级密码错误");
+  }
   await prisma.apiKey.delete({ where: { name } });
   return ok();
 }

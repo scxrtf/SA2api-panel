@@ -126,9 +126,17 @@ export function AccountsView({ ov, flash, onRefresh }: {
 
   const op = useCallback(async (uid: string, action: string, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
+    // 移除账号为权限级操作：超级密码二次确认（服务端校验）。
+    let body: Record<string, unknown> | undefined;
+    if (action === "remove") {
+      const password = window.prompt("移除账号 " + uid + " 需输入超级密码：");
+      if (password === null) return;
+      if (!password) { flash("err", "超级密码不能为空"); return; }
+      body = { super_password: password };
+    }
     setBusy(true);
     try {
-      await req("accounts/" + encodeURIComponent(uid) + "/" + action, { method: "POST" });
+      await req("accounts/" + encodeURIComponent(uid) + "/" + action, { method: "POST", body });
       flash("ok", "操作完成：" + action);
       await onRefresh();
     } catch (e) {

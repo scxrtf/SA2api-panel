@@ -123,6 +123,10 @@ export function ConfigView({ flash }: { flash: Flash }) {
   };
 
   const save = async () => {
+    // 配置保存为权限级操作：超级密码二次确认（服务端校验，字段不写入 Setting 表）。
+    const password = window.prompt("保存配置需输入超级密码：");
+    if (password === null) return;
+    if (!password) { flash("err", "超级密码不能为空"); return; }
     try {
       const modelFallback: Record<string, string> = {};
       for (const row of fallbackRows) {
@@ -139,7 +143,7 @@ export function ConfigView({ flash }: { flash: Flash }) {
         modelFallback[from] = to;
       }
       const r = await req<{ config: Config }>("config", {
-        method: "POST", body: { ...cfg, model_fallback: modelFallback },
+        method: "POST", body: { ...cfg, model_fallback: modelFallback, super_password: password },
       });
       loadConfig(r.config);
       flash("ok", "配置已保存并立即生效（调度时点已重排）");

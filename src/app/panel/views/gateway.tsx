@@ -96,7 +96,11 @@ function KeysBox({ flash }: { flash: Flash }) {
   };
   const remove = async (n: string) => {
     if (!window.confirm("确认删除密钥 " + n + "？")) return;
-    try { await req("keys/" + encodeURIComponent(n), { method: "DELETE" }); load(); flash("ok", "密钥已吊销"); }
+    // 删除密钥为权限级操作：超级密码二次确认（服务端校验）。
+    const password = window.prompt("删除密钥 " + n + " 需输入超级密码：");
+    if (password === null) return;
+    if (!password) { flash("err", "超级密码不能为空"); return; }
+    try { await req("keys/" + encodeURIComponent(n), { method: "DELETE", body: { super_password: password } }); load(); flash("ok", "密钥已吊销"); }
     catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   };
   const openAuth = (k: KeyRow) => {
