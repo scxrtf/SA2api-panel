@@ -67,12 +67,15 @@ npm run dev                 # http://localhost:3000/panel
 
 ### 磁盘 / 保留策略（Supabase 免费档必看）
 
-`RequestLog` 每行带请求对话与回复 JSON（TOAST），是最容易吃满磁盘的表。Supabase 磁盘超限时会把
-数据库切成只读（`default_transaction_read_only=on`），表现为整站写入失败。
+`RequestLog` 永不保存请求对话与助手回复，仅保留用量统计、失败诊断、参数覆盖和尝试明细；应用写入与
+数据库触发器都会剥离正文，旧 `REQUEST_LOG_DIALOG` 环境变量不再生效。Supabase 磁盘超限时会把数据库切成
+只读（`default_transaction_read_only=on`），表现为整站写入失败。
 
 - 保留参数（环境变量）：`REQUEST_LOG_RETENTION_DAYS`（默认 7）、`REQUEST_LOG_DETAIL_HOURS`（默认 24，
-  超过就清空 4 个 JSON 字段但保留统计列）、`MODEL_HEALTH_RETENTION_DAYS`（默认 3）。
+  超过就清空参数覆盖、尝试明细与错误详情但保留统计列）、`MODEL_HEALTH_RETENTION_DAYS`（默认 3）。
 - 定时打 `/api/cron/retention`（每 6~12 小时）即可自动维持；临时收紧可带 `?days=3&detailHours=12`。
+- 面板「Supabase 监控」实时显示数据库与表占用，提供历史对话清理和保留策略按钮；Egress、Log Ingestion、
+  Log Query 使用可编辑的控制台快照与额度进度条。快照仅保存在当前浏览器，数据库统计每 60 秒缓存刷新。
 - 紧急救火（平台已只读、连清理都跑不动时）：`node scripts/db-truncate.mjs --yes` 直接 `TRUNCATE`
   归还物理空间并附带 `ALTER DATABASE ... SET default_transaction_read_only = off` 解除只读；
   需要立即把回收的空间还给文件系统时跑 `node scripts/db-vacuum-full.mjs ModelHealthCheck`。

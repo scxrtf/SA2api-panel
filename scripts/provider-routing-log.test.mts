@@ -11,11 +11,15 @@ let keyProviders = "测试商";
 let reply: (signal?: AbortSignal | null) => Promise<Response> = async () => Response.json({ choices: [], usage: { prompt_tokens: 8, completion_tokens: 2 } });
 const oldFetch = globalThis.fetch;
 const oldKey = process.env.WB2A_API_KEY;
+process.env.REQUEST_LOG_DIALOG = "1";
 delete process.env.WB2A_API_KEY;
 (globalThis as any).prisma = {
   setting: { findUnique: async () => ({ value: JSON.stringify({ stream_idle_ms: 40, header_timeout_ms: 100 }) }) },
   apiKey: { findMany: async () => [{ name: "SA", key: "fake-client", providers: keyProviders }] },
-  provider: { findUnique: async ({ where }: any) => where.name === provider.name ? provider : null },
+  provider: {
+    findUnique: async ({ where }: any) => where.name === provider.name ? provider : null,
+    findMany: async () => [provider],
+  },
   account: { findMany: async () => { poolReads++; throw new Error("provider must not use account pool"); } },
   requestLog: {
     create: async ({ data }: any) => { requests.push(data); return data; },
@@ -33,6 +37,7 @@ globalThis.fetch = async (url, init) => {
   return reply(init?.signal);
 };
 const { handleChat, resolveModel } = await import("../src/lib/chat.ts");
+const { invalidateKeyRing } = await import("../src/lib/auth-guard.ts");
 const { ProviderObservation, observeProviderStream } = await import("../src/lib/provider-observation.ts");
 const { streamPassthrough } = await import("../src/lib/upstream/sse.ts");
 const enc = new TextEncoder();
@@ -71,17 +76,20 @@ try {
 
   const count = calls;
   keyProviders = "*";
+  invalidateKeyRing();
   response = await chat("missing:glm-5.3");
   assert.equal(response.status, 400);
   assert.equal(last().errKind, "provider_not_found");
   assert.equal(last().attempts, 0);
   assert.equal(calls, count);
   keyProviders = "other";
+  invalidateKeyRing();
   response = await chat();
   assert.equal(response.status, 403);
   assert.equal(last().errKind, "provider_not_authorized");
   assert.equal(calls, count);
   keyProviders = "测试商";
+  invalidateKeyRing();
   provider.models = "other-model";
   assert.equal((await chat()).status, 400);
   assert.equal(last().errKind, "model_not_allowed");
@@ -105,9 +113,8 @@ try {
   assert.ok(last().ttfbMs >= 25, "TTFB includes fetch/header delay");
   assert.ok(last().durationMs >= last().ttfbMs);
   assert.equal(last().errKind, "");
-  assert.deepEqual(last().requestMessages, [{ role: "developer", content: "keep unchanged" }]);
-  assert.equal(last().responseMessage?.role, "assistant");
-  assert.equal(last().responseMessage?.content, "你好");
+  assert.equal(last().requestMessages, undefined);
+  assert.equal(last().responseMessage, undefined);
   assert.equal(last().attempts, 1);
   assert.equal(last().attemptDetails?.length, 1);
   assert.equal(last().attemptDetails?.[0]?.ok, true);
@@ -222,7 +229,8 @@ try {
   const queries: any[] = [];
   db.requestLog.findMany = async (q: any) => { queries.push(q); return []; };
   await getLogs(new Request("https://gateway.invalid/api/panel/request_logs?outcome=ok"));
-  assert.deepEqual(queries.at(-1).where, { status: { lt: 400 }, errKind: "" });
+  assert.equal(queries.at(-1).where.status.lt, 400);
+  assert.equal(queries.at(-1).where.errKind, "");
   const listSelect = queries.at(-1).select;
   for (const field of [
     "requestMessages", "responseMessage", "errorDetail", "parameterOverrides", "attemptDetails",
@@ -241,8 +249,12 @@ try {
     parameterOverrides: [{ path: "$.model", before: "a", after: "b" }],
     attemptDetails: [{ attempt: 1, status: 200, ok: true, errKind: "", durationMs: 12 }],
   };
-  db.requestLog.findUnique = async ({ where }: any) =>
-    where.id === detailEntry.id ? detailEntry : null;
+  db.requestLog.findUnique = async ({ where, select }: any) => {
+    if (where.id !== detailEntry.id) return null;
+    assert.equal(select.requestMessages, undefined);
+    assert.equal(select.responseMessage, undefined);
+    return Object.fromEntries(Object.keys(select).map((key) => [key, (detailEntry as any)[key]]));
+  };
   const { GET: getLogDetail } = await import(
     "../src/app/api/panel/request_logs/[id]/route.ts"
   );
@@ -253,7 +265,8 @@ try {
   assert.equal(detailResp.status, 200);
   const detailBody = await detailResp.json() as any;
   assert.equal(detailBody.ok, true);
-  assert.deepEqual(detailBody.entry.requestMessages, detailEntry.requestMessages);
+  assert.equal(detailBody.entry.requestMessages, undefined);
+  assert.equal(detailBody.entry.responseMessage, undefined);
   assert.deepEqual(detailBody.entry.parameterOverrides, detailEntry.parameterOverrides);
   assert.deepEqual(detailBody.entry.attemptDetails, detailEntry.attemptDetails);
   detailResp = await getLogDetail(

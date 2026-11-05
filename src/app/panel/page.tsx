@@ -18,6 +18,7 @@ import { AiCheckerView } from "./views/aichecker";
 import { GatewayView } from "./views/gateway";
 import { ConnectView } from "./views/connect";
 import { ConfigView } from "./views/config";
+import { SupabaseView } from "./views/supabase";
 import { LogsView } from "./views/logs";
 
 export default function PanelPage() {
@@ -92,6 +93,7 @@ export default function PanelPage() {
       {visited.has("gateway") && <ViewPane active={view === "gateway"}><GatewayView flash={flash} /></ViewPane>}
       {visited.has("connect") && <ViewPane active={view === "connect"}><ConnectView /></ViewPane>}
       {visited.has("config") && <ViewPane active={view === "config"}><ConfigView flash={flash} /></ViewPane>}
+      {visited.has("supabase") && <ViewPane active={view === "supabase"}><SupabaseView flash={flash} /></ViewPane>}
       {visited.has("logs") && <ViewPane active={view === "logs"}><LogsView flash={flash} /></ViewPane>}
     </Shell>
   );

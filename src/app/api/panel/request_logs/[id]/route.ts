@@ -1,4 +1,4 @@
-// GET /api/panel/request_logs/[id] — 按需读取单条请求日志的大字段详情。
+// GET /api/panel/request_logs/[id] — 按需读取诊断详情，不读取对话正文。
 import { fail, ok, panelAuth } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 
@@ -41,14 +41,13 @@ const DETAIL_SELECT = {
   slot: true,
   machineId: true,
   path: true,
-  requestMessages: true,
-  responseMessage: true,
   errorDetail: true,
   parameterOverrides: true,
   attemptDetails: true,
 } as const;
 
 function clipText(value: string, max: number): string {
+  if (!value) return value;
   if (value.length <= max) return value;
   return `${value.slice(0, max)}…[truncated ${value.length - max} chars]`;
 }
@@ -104,8 +103,6 @@ export async function GET(
       ...entry,
       errMsg: clipText(entry.errMsg, MAX_TEXT),
       errorDetail: clipText(entry.errorDetail, MAX_ERROR_DETAIL),
-      requestMessages: clipJson(entry.requestMessages),
-      responseMessage: clipJson(entry.responseMessage),
       parameterOverrides: clipJson(entry.parameterOverrides),
       attemptDetails: clipAttempts(entry.attemptDetails),
     },

@@ -24,8 +24,6 @@ interface ReqLog {
   errMsg?: string;
 }
 interface ReqLogDetail extends ReqLog {
-  requestMessages?: unknown;
-  responseMessage?: unknown;
   errorDetail?: string;
   parameterOverrides?: unknown;
   attemptDetails?: unknown;
@@ -101,11 +99,6 @@ function mergeRequests(prev: ReqLog[], next: ReqLog[]): ReqLog[] {
   return out.slice(0, REQUEST_PAGE);
 }
 
-function recordValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown> : null;
-}
-
 function recordList(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is Record<string, unknown> =>
@@ -122,37 +115,6 @@ function valueText(value: unknown): string {
   }
 }
 
-function roleOf(value: unknown): string {
-  const role = recordValue(value)?.role;
-  return typeof role === "string" && role ? role : "unknown";
-}
-
-function roleLabel(role: string): string {
-  const labels: Record<string, string> = {
-    system: "系统", developer: "开发者", user: "用户", assistant: "助手", tool: "工具",
-  };
-  return labels[role] ?? role;
-}
-
-function roleClass(role: string): string {
-  return ["system", "developer", "user", "assistant", "tool"].includes(role)
-    ? role : "other";
-}
-
-function messageExtras(message: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...message };
-  delete out.role;
-  delete out.content;
-  return out;
-}
-
-function responseExtras(message: Record<string, unknown>): Record<string, unknown> {
-  const out = messageExtras(message);
-  delete out.reasoning_content;
-  delete out.tool_calls;
-  return out;
-}
-
 function LogSection({ title, empty, children }: {
   title: string;
   empty?: boolean;
@@ -166,23 +128,6 @@ function LogSection({ title, empty, children }: {
   );
 }
 
-function MessageBody({ message }: { message: Record<string, unknown> }) {
-  const content = message["content"];
-  const extras = messageExtras(message);
-  const hasExtras = Object.keys(extras).length > 0;
-  return (
-    <>
-      <pre className="log-message-body">{valueText(content)}</pre>
-      {hasExtras && (
-        <details className="log-message-extra">
-          <summary>附加字段</summary>
-          <pre>{valueText(extras)}</pre>
-        </details>
-      )}
-    </>
-  );
-}
-
 function RequestLogDetailView({ entry, loading, error }: {
   entry?: ReqLogDetail;
   loading: boolean;
@@ -192,68 +137,11 @@ function RequestLogDetailView({ entry, loading, error }: {
   if (error) return <div className="log-detail-state err">{error}</div>;
   if (!entry) return <div className="log-detail-state">暂无详情</div>;
 
-  const messages = recordList(entry.requestMessages);
-  const response = recordValue(entry.responseMessage);
   const overrides = recordList(entry.parameterOverrides);
   const attempts = recordList(entry.attemptDetails);
-  const responseTools = response && Array.isArray(response["tool_calls"])
-    ? response["tool_calls"] : [];
-  const responseExtra = response ? responseExtras(response) : {};
 
   return (
     <div className="log-detail">
-      <LogSection title={`请求对话${messages.length ? `（${messages.length} 条）` : ""}`}
-        empty={!Array.isArray(entry.requestMessages)}>
-        {messages.length === 0 ? <div className="log-detail-empty">无对话消息</div> : (
-          <div className="log-message-list">
-            {messages.map((message, index) => {
-              const role = roleOf(message);
-              return (
-                <div className="log-message" key={index}>
-                  <div className="log-message-head">
-                    <span className={"tag log-role " + roleClass(role)}>{roleLabel(role)}</span>
-                    <span className="dim mono">#{index + 1}</span>
-                  </div>
-                  <MessageBody message={message} />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </LogSection>
-
-      <LogSection title="助手回复" empty={!response}>
-        {response && (
-          <div className="log-message response">
-            <div className="log-message-head">
-              <span className={"tag log-role " + roleClass(roleOf(response))}>
-                {roleLabel(roleOf(response))}
-              </span>
-            </div>
-            <pre className="log-message-body">{valueText(response["content"])}</pre>
-            {typeof response["reasoning_content"] === "string"
-              && response["reasoning_content"] !== "" && (
-                <div className="log-subsection">
-                  <div className="log-subtitle">推理内容</div>
-                  <pre className="log-message-body">{response["reasoning_content"]}</pre>
-                </div>
-              )}
-            {responseTools.length > 0 && (
-              <div className="log-subsection">
-                <div className="log-subtitle">工具调用</div>
-                <pre className="log-message-body">{valueText(responseTools)}</pre>
-              </div>
-            )}
-            {Object.keys(responseExtra).length > 0 && (
-              <details className="log-message-extra">
-                <summary>附加字段</summary>
-                <pre>{valueText(responseExtra)}</pre>
-              </details>
-            )}
-          </div>
-        )}
-      </LogSection>
-
       <LogSection title="失败详情" empty={!entry.errorDetail}>
         {entry.errorDetail && <pre className="log-error-detail">{entry.errorDetail}</pre>}
       </LogSection>

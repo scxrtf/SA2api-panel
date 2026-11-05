@@ -1,10 +1,10 @@
 // 数据库保留策略（retention）。
 //
-// 背景：RequestLog 每行会带 requestMessages/responseMessage/attemptDetails/
-// parameterOverrides 四个 JSON 大字段（单行上限约数百 KB），TOAST 增长远快于堆，
+// 背景：RequestLog 每行会带 attemptDetails/parameterOverrides 两个 JSON
+// 大字段（单行上限约数百 KB），TOAST 增长远快于堆，
 // 免费档 Supabase 磁盘很容易被吃满并触发平台级只读（default_transaction_read_only=on）。
 // 因此分两步收口：
-//   1) 超过 detail 窗口的老行，清空 4 个 JSON 字段与 errorDetail（保留统计列，面板仍可看用量）；
+//   1) 超过 detail 窗口的老行，清空参数覆盖、尝试明细与 errorDetail（保留统计列，面板仍可看用量）；
 //   2) 超过 retention 天的行整行删除。
 // 两者都按批处理（原生 SQL + LIMIT），避免长事务与一次性 TOAST 抖动。
 // 之后由 autovacuum 回收；如需立即还盘，手工执行 VACUUM (FULL)。
@@ -34,6 +34,32 @@ export interface RetentionResult {
   rowsDeleted: number;
   healthDeleted: number;
   durationMs: number;
+}
+
+// 清空任意历史遗留对话。新写入由应用与数据库触发器双重剥离。
+export async function clearRequestLogDialog(
+  batch = BATCH,
+  maxRounds = 200,
+): Promise<number> {
+  let cleared = 0;
+  try {
+    for (let round = 0; round < maxRounds; round++) {
+      const n = await prisma.$executeRaw`
+        update "RequestLog"
+           set "requestMessages" = null, "responseMessage" = null
+         where ctid in (
+           select ctid from "RequestLog"
+            where "requestMessages" is not null or "responseMessage" is not null
+            limit ${batch}::int
+         )`;
+      cleared += n;
+      if (n < batch) break;
+    }
+    if (cleared > 0) runlog("retention: 清空 " + cleared + " 条历史对话正文");
+  } catch (e) {
+    runlog("retention clearDialog failed: " + (e instanceof Error ? e.message : String(e)));
+  }
+  return cleared;
 }
 
 // 清空老行的详情大字段。返回处理行数。
@@ -121,12 +147,13 @@ export async function pruneModelHealth(
 export async function runRetention(): Promise<RetentionResult> {
   const started = Date.now();
   const cfg = retentionConfig();
+  const dialogCleared = await clearRequestLogDialog();
   const detailCleared = await clearRequestLogDetails(cfg.detailHours);
   const rowsDeleted = await pruneRequestLogs(cfg.days);
   const healthDeleted = await pruneModelHealth();
   const result = { detailCleared, rowsDeleted, healthDeleted, durationMs: Date.now() - started };
   runlog(
-    "retention 完成: 清详情 " + detailCleared + " · 删日志 " + rowsDeleted +
+    "retention 完成: 清对话 " + dialogCleared + " · 清详情 " + detailCleared + " · 删日志 " + rowsDeleted +
     " · 删健康检查 " + healthDeleted + " · " + result.durationMs + "ms",
   );
   return result;

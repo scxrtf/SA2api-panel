@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import React from "react";
 
-export type View = "accounts" | "usage" | "analytics" | "packages" | "balhist" | "taskscenter" | "models" | "aichecker" | "gateway" | "connect" | "config" | "logs";
+export type View = "accounts" | "usage" | "analytics" | "packages" | "balhist" | "taskscenter" | "models" | "aichecker" | "gateway" | "connect" | "config" | "supabase" | "logs";
 
 export interface NavItem {
   id: View;
@@ -43,6 +43,8 @@ export const NAV: NavItem[] = [
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M6.5 9.5 9.5 6.5" }), React.createElement("path", { d: "M3 10.5c.8.8 2 .8 2.8 0L7 9.3M13 5.5c-.8-.8-2-.8-2.8 0L9 6.7" }), React.createElement("circle", { cx: 3.5, cy: 10.5, r: 1.2 }), React.createElement("circle", { cx: 12.5, cy: 5.5, r: 1.2 })) },
   { id: "config", label: "配置", code: "CFG", title: "配置", sub: "运行与调度参数，保存即热生效",
     icon: React.createElement("svg", svgProps, React.createElement("circle", { cx: 8, cy: 8, r: 2.2 }), React.createElement("path", { d: "M8 1.6v1.9M8 12.5v1.9M1.6 8h1.9M12.5 8h1.9M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3" })) },
+  { id: "supabase", label: "Supabase 监控", code: "DB", title: "Supabase 监控", sub: "服务额度、数据库容量与日志保留",
+    icon: React.createElement("svg", svgProps, React.createElement("ellipse", { cx: 8, cy: 4, rx: 5.5, ry: 2 }), React.createElement("path", { d: "M2.5 4v4c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V4M2.5 8v4c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V8" })) },
   { id: "logs", label: "运行日志", code: "LOG", title: "运行日志", sub: "请求日志与运行日志",
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M2.5 3.5h11M2.5 8h11M2.5 12.5h7" })) },
 ];

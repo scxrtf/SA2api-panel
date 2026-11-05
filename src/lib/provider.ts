@@ -7,7 +7,7 @@ import { idleMonitorBody } from "./upstream/idle";
 import { maybeProbeAfterModelCall } from "./model-health-trigger";
 import { providerEndpoint } from "./provider-endpoint";
 import { ProviderObservation, observeProviderStream } from "./provider-observation";
-import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import {   assistantMessageForLog,   failureDetail,   parameterOverrides,   logDialogEnabled,   requestMessagesForLog,   type AttemptDetail, } from "./request-log-detail";
+import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import { failureDetail, parameterOverrides, type AttemptDetail } from "./request-log-detail";
 
 // 供应商表进程内快照。原先每次 providerChat 都 findUnique 一次、每次
 // providerModels / modelhealth 目录刷新都 findMany 一次，是 egress 的固定开销。
@@ -61,16 +61,6 @@ export async function providerChat(
   const started = context?.started ?? Date.now();
   const logModel = requestedModel || `${name}:${bareModel}`;
   const stats = new ProviderObservation(started);
-  // 对话正文默认不落库（REQUEST_LOG_DIALOG=1 才记录），省掉清洗开销与 TOAST 写入。
-  const dialogOn = logDialogEnabled();
-  const requestMessages = dialogOn ? requestMessagesForLog((() => {
-    try {
-      const parsed = JSON.parse(body) as Record<string, unknown>;
-      return parsed.messages;
-    } catch {
-      return [];
-    }
-  })()) : undefined;
   let outboundOverrides: ReturnType<typeof parameterOverrides> = [];
   let attempts = 0;
   let recorded = false;
@@ -86,14 +76,6 @@ export async function providerChat(
     const durationMs = Math.max(1, Date.now() - started);
     const ok = status < 400 && !stats.errKind;
     const code = failureCode || stats.errKind || (ok ? "" : "provider_error");
-    const response = assistantMessageForLog({
-      role: stats.responseRole,
-      content: stats.responseContent,
-      reasoningContent: stats.responseReasoning,
-      toolCalls: stats.responseToolCalls,
-    }) ?? (!stream && ok && stats.rawBody
-      ? assistantMessageForLog({ content: stats.rawBody })
-      : null);
     const detail = ok ? "" : failureDetail({
       status,
       code,
@@ -127,10 +109,6 @@ export async function providerChat(
       status, stream, durationMs, attempts, ttfbMs: stream ? stats.ttfbMs : 0,
       clientIp: context?.clientIP ?? "", ua: context?.ua ?? "",
       path: context?.path ?? "/v1/chat/completions",
-      ...(dialogOn ? {
-        requestMessages: requestMessages as Prisma.InputJsonValue,
-        responseMessage: (response ?? undefined) as Prisma.InputJsonValue | undefined,
-      } : {}),
       errorDetail: detail,
       parameterOverrides: outboundOverrides.length
         ? outboundOverrides as unknown as Prisma.InputJsonValue : undefined,

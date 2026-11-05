@@ -1,4 +1,4 @@
-// RequestLog 对话字段的库级兜底开关。
+// RequestLog 对话字段的永久库级剥离。
 //
 // 作用：即使线上还跑着旧版本（仍带 REQUEST_LOG_DIALOG=1），写入时也会把
 // requestMessages / responseMessage 置空，避免持续产生 80-145 KB/行的大字段。
@@ -30,7 +30,7 @@ const MIGRATION = path.join(
   "..",
   "prisma",
   "migrations",
-  "20261104130000_strip_request_log_dialog",
+  "20261105120000_disable_request_log_dialog",
   "migration.sql",
 );
 

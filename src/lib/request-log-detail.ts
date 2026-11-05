@@ -11,12 +11,9 @@ const MAX_OVERRIDE_ITEMS = 200;
 const MAX_OVERRIDE_VALUE_CHARS = 4_000;
 const MAX_DEPTH = 12;
 
-// 对话正文（requestMessages / responseMessage）默认不落库：这两列是 JSONB TOAST，
-// 单行可达数百 KB，既放大 Supabase 出网（面板列表/详情读取）也放大磁盘与备份流量。
-// 默认只保留统计列与失败详情；需要排查具体请求时临时置 REQUEST_LOG_DIALOG=1。
+// 对话正文永不落库，只保留统计列与失败详情。保留旧函数用于兼容旧调用方。
 export function logDialogEnabled(): boolean {
-  const raw = (process.env.REQUEST_LOG_DIALOG ?? "").trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+  return false;
 }
 
 export interface ParameterOverride {
