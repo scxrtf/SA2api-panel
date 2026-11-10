@@ -27,6 +27,8 @@ interface ReqLogDetail extends ReqLog {
   errorDetail?: string;
   parameterOverrides?: unknown;
   attemptDetails?: unknown;
+  requestMessages?: unknown;
+  responseMessage?: unknown;
 }
 
 // fmtTok token 缩写（Go app.js fmtTok 同口径）：1000+ 用 k 缩写避免表列撑宽。
@@ -115,16 +117,29 @@ function valueText(value: unknown): string {
   }
 }
 
-function LogSection({ title, empty, children }: {
+function LogSection({ title, empty, emptyText, children }: {
   title: string;
   empty?: boolean;
+  emptyText?: string;
   children: React.ReactNode;
 }) {
   return (
     <section className="log-detail-section">
       <div className="log-detail-title">{title}</div>
-      {empty ? <div className="log-detail-empty">旧日志未记录此项</div> : children}
+      {empty ? <div className="log-detail-empty">{emptyText ?? "旧日志未记录此项"}</div> : children}
     </section>
+  );
+}
+
+// 把一条对话消息渲染成紧凑块：角色标签 + 正文（多模态/工具调用折叠为 JSON）。
+function DialogMessage({ msg }: { msg: Record<string, unknown> }) {
+  const role = typeof msg["role"] === "string" ? (msg["role"] as string) : "message";
+  const content = msg["content"];
+  return (
+    <div className={"log-dialog-msg role-" + role}>
+      <span className="log-dialog-role">{role}</span>
+      <pre className="log-dialog-body">{valueText(content)}</pre>
+    </div>
   );
 }
 
@@ -142,6 +157,17 @@ function RequestLogDetailView({ entry, loading, error }: {
 
   return (
     <div className="log-detail">
+      <LogSection title="对话记录"
+        empty={!Array.isArray(entry.requestMessages) && entry.responseMessage == null}
+        emptyText="未记录（旧日志或已按保留策略清理）">
+        <div className="log-dialog">
+          {recordList(entry.requestMessages).map((m, i) => <DialogMessage key={"q" + i} msg={m} />)}
+          {entry.responseMessage && typeof entry.responseMessage === "object" && !Array.isArray(entry.responseMessage)
+            ? <DialogMessage msg={{ role: "assistant", content: (entry.responseMessage as Record<string, unknown>)["content"] ?? entry.responseMessage }} />
+            : null}
+        </div>
+      </LogSection>
+
       <LogSection title="失败详情" empty={!entry.errorDetail}>
         {entry.errorDetail && <pre className="log-error-detail">{entry.errorDetail}</pre>}
       </LogSection>

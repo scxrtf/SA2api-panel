@@ -48,29 +48,40 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
   };
   const db = stats?.database;
   const isCb = stats?.mode === "cloudbase";
+  const totalRows = stats?.tables.reduce((s, t) => s + t.rows, 0) ?? 0;
+  const pct = db?.percent ?? 0;
+  const barCls = pct >= 90 ? "crit" : pct >= 70 ? "warn" : "";
   return <div style={{ display: "grid", gap: 16 }}>
-    <Box title="CloudBase 概览" hint={db ? `${db.host} · ${db.version}` : "读取中…"}
+    <Box title="CloudBase 监控" hint={db ? `${db.host} · ${db.version}` : "读取中…"}
       extra={<button className="btn xs" disabled={loading} onClick={() => void load(true)}>{loading ? "读取中…" : "刷新"}</button>} pad>
-      <div className="kv-grid">
-        <span className="dim">环境 ID</span><span className="mono">{db?.name ?? "…"}</span>
-        <span className="dim">PostgREST</span><span className="mono" style={{ wordBreak: "break-all" }}>{db?.host ?? "…"}</span>
-        <span className="dim">容量</span>
-        <span className="mono">{db
-          ? db.sizeGb > 0
-            ? `${db.sizeGb.toFixed(3)} / ${db.limitGb} GB (${db.percent.toFixed(1)}%)${isCb ? " · 行数近似" : ""}`
-            : "CloudBase 通道不提供容量指标"
-          : "…"}</span>
-        {!isCb && <>
-          <span className="dim">活动连接</span><span className="mono">{db?.activeConnections ?? "—"} / {db?.maxConnections ?? "—"}</span>
-        </>}
-        <span className="dim">采集时间</span><span>{stats ? new Date(stats.measuredAt).toLocaleString("zh-CN", { hour12: false }) : "…"}</span>
+      <div className="cb-kpi-grid">
+        <div className="cb-kpi">
+          <span className="k">容量{isCb ? "（行数近似）" : ""}</span>
+          <span className="v">{db && db.sizeGb > 0 ? db.sizeGb.toFixed(3) + " GB" : "—"}</span>
+          <span className="s">{db ? `上限 ${db.limitGb} GB · ${pct.toFixed(1)}%` : "…"}</span>
+          <div className="cb-bar"><i className={barCls} style={{ width: Math.min(100, Math.max(pct, 0.5)) + "%" }} /></div>
+        </div>
+        <div className="cb-kpi">
+          <span className="k">数据表 / 总行数</span>
+          <span className="v">{stats ? fmtNum(totalRows) : "…"}</span>
+          <span className="s">{stats?.tables.length ?? "…"} 张表 · 缓存 {stats?.cacheSeconds ?? 60}s</span>
+        </div>
+        <div className="cb-kpi">
+          <span className="k">请求日志</span>
+          <span className="v">{fmtNum(db?.requestLogs)}</span>
+          <span className="s">含历史对话 {fmtNum(db?.dialogRows)} 行</span>
+        </div>
+        {!isCb && <div className="cb-kpi">
+          <span className="k">活动连接</span>
+          <span className="v">{db?.activeConnections ?? "—"}</span>
+          <span className="s">上限 {db?.maxConnections ?? "—"}</span>
+        </div>}
+        <div className="cb-kpi">
+          <span className="k">{isCb ? "环境 / PostgREST" : "数据库"}</span>
+          <span className="v small mono">{db?.name ?? "…"}</span>
+          <span className="s">采集于 {stats ? new Date(stats.measuredAt).toLocaleString("zh-CN", { hour12: false }) : "…"}</span>
+        </div>
       </div>
-      <p className="dim" style={{ fontSize: 12, marginBottom: 0 }}>
-        {isCb
-          ? "CloudBase PostgREST 无 pg_catalog 权限：容量按行数近似，连接数/版本不可用。查询缓存 "
-          : "数据库查询缓存 "}
-        {stats?.cacheSeconds ?? 60} 秒。
-      </p>
     </Box>
     <Box title="请求日志存储" hint={`整行保留 ${stats?.retention.days ?? 7} 天 · 诊断详情 ${stats?.retention.detailHours ?? 24} 小时`} pad>
       <div className="kv-grid">
