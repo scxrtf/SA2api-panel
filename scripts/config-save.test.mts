@@ -1,3 +1,5 @@
+// 强制走 Prisma 直连（测试 mock globalThis.prisma，不走 DAL）
+process.env.USE_CLOUDBASE_REST = "0";
 // 配置保存类型回归（离线，无网络）。
 import assert from "node:assert/strict";
 import { saveConfig } from "../src/lib/config.ts";

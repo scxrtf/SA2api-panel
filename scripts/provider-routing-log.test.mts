@@ -1,3 +1,5 @@
+// 强制走 Prisma 直连（测试 mock globalThis.prisma，不走 DAL）
+process.env.USE_CLOUDBASE_REST = "0";
 // Offline integration: real chat/provider code, fake DB/fetch. Never uses local secrets.
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";

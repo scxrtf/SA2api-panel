@@ -1,3 +1,5 @@
+// 强制走 Prisma 直连（测试 mock globalThis.prisma，不走 DAL）
+process.env.USE_CLOUDBASE_REST = "0";
 // 离线验证容量等待、6020 短冷却恢复、客户端中止与限流并发收缩；不访问真实上游。
 import assert from "node:assert/strict";
 import { DEFAULT_CONFIG, type AppConfig } from "../src/lib/config.ts";

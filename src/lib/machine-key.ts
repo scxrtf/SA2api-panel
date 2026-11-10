@@ -32,9 +32,14 @@ export async function getOrCreateMachineId(): Promise<{ id: string; isNew: boole
 export async function machineKeyAuthorized(machineId: string): Promise<boolean> {
   const row = await prisma.machineKeyAuthorization.findUnique({
     where: { machineId },
-    select: { method: true, uid: true, account: { select: { uid: true } } },
+    select: { method: true, uid: true },
   });
-  return row?.method === "password" || (row?.method === "account" && !!row.account);
+  if (row?.method === "password") return true;
+  if (row?.method === "account" && row.uid) {
+    const acc = await prisma.account.findUnique({ where: { uid: row.uid }, select: { uid: true } });
+    return !!acc;
+  }
+  return false;
 }
 
 export async function authorizeMachineForAccount(machineId: string, uid: string): Promise<void> {
@@ -52,6 +57,6 @@ export async function authorizeMachineByPassword(machineId: string): Promise<voi
   await prisma.machineKeyAuthorization.upsert({
     where: { machineId },
     create: { machineId, method: "password" },
-    update: { method: "password", account: { disconnect: true } },
+    update: { method: "password", uid: null },
   });
 }

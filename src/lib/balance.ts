@@ -125,12 +125,15 @@ export async function rollupBalanceSamples(now = Date.now()): Promise<void> {
 
 // snapshot 返回 sinceMs 之后各账号的余额序列（含按日聚合），供「余额趋势」视图。
 // names/realms 为展示元数据（uid → 昵称/域），不入库，由调用方从账号池实时注入。
+// rowsOverride 允许调用方注入非 Prisma 数据源（CloudBase PostgREST），
+// 形态与 prisma.balanceSample.findMany 一致；缺省时走默认 Prisma 通道。
 export async function snapshotBalance(
   sinceMs: number,
   names: Record<string, string>,
   realms: Record<string, string>,
+  rowsOverride?: { uid: string; at: Date; credits: bigint; day: string | null; first: bigint | null; consumed: bigint | null; gained: bigint | null }[],
 ): Promise<BalanceSeries[]> {
-  const rows = await prisma.balanceSample.findMany({
+  const rows = rowsOverride ?? await prisma.balanceSample.findMany({
     where: { at: { gte: new Date(sinceMs) } },
     orderBy: { at: "asc" },
   });

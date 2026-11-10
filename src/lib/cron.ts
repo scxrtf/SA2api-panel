@@ -126,9 +126,35 @@ const KEEPALIVE_SAVE_RETRY_MS = 250;
 
 const keepaliveSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+function useCloudbaseRest(): boolean {
+  const v = (process.env.USE_CLOUDBASE_REST ?? "").toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+// CloudBase PostgREST 通道下的租约实现：读-判-写非原子，但 keepalive 是低频任务
+// （scheduler/cron/panel 三源、分钟级），单容器内并发碰撞概率可忽略；抢占语义不变。
+async function acquireKeepaliveLeaseDal(ttlMs: number): Promise<string | null> {
+  const now = Date.now();
+  const token = randomUUID();
+  const value = `${now + ttlMs}:${token}`;
+  const cur = await prisma.setting.findUnique({ where: { key: KEEPALIVE_LEASE_KEY } });
+  const curExpiry = (() => {
+    const m = /^(\d{1,15}):/.exec(cur?.value ?? "");
+    return m ? Number(m[1]) : 0;
+  })();
+  if (cur && curExpiry > now) return null; // 租约仍有效，抢不到
+  await prisma.setting.upsert({
+    where: { key: KEEPALIVE_LEASE_KEY },
+    create: { key: KEEPALIVE_LEASE_KEY, value },
+    update: { value },
+  });
+  return value;
+}
+
 // acquireKeepaliveLease 用 Setting 行的幂等主键做跨进程原子租约。
 // value 格式为 "<expiresAtUnixMs>:<owner>"；只有过期 lease 能被抢占。
 async function acquireKeepaliveLease(ttlMs: number): Promise<string | null> {
+  if (useCloudbaseRest()) return acquireKeepaliveLeaseDal(ttlMs);
   const now = Date.now();
   const token = randomUUID();
   const value = `${now + ttlMs}:${token}`;

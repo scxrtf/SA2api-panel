@@ -11,6 +11,11 @@
 import { prisma } from "./db";
 import { runlog } from "./runlog";
 
+function useCloudbaseRest(): boolean {
+  const v = (process.env.USE_CLOUDBASE_REST ?? "").toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 const DEFAULT_RETENTION_DAYS = 7;
 const DEFAULT_DETAIL_HOURS = 24;
 const BATCH = 500;
@@ -41,6 +46,28 @@ export async function clearRequestLogDialog(
   batch = BATCH,
   maxRounds = 200,
 ): Promise<number> {
+  if (useCloudbaseRest()) {
+    // PostgREST 无 ctid 批量子查询；拉 id 分页后逐批 PATCH。行数窗口小（≤3k），可接受。
+    // 走 DAL 通道：prisma 代理转发到 dal.ts，PostgREST JSON null 用 "null" 字符串过滤语义。
+    const NIL: never = null as never; // Prisma Json 列类型收窄；运行时经 dal 直传 null
+    let cleared = 0;
+    for (let round = 0; round < maxRounds; round++) {
+      const rows = await prisma.requestLog.findMany({
+        where: { OR: [{ requestMessages: { not: NIL } }, { responseMessage: { not: NIL } }] },
+        select: { id: true },
+        take: batch,
+      }) as unknown as { id: string }[];
+      if (!rows.length) break;
+      await prisma.requestLog.updateMany({
+        where: { id: { in: rows.map((r) => r.id) } },
+        data: { requestMessages: NIL, responseMessage: NIL },
+      });
+      cleared += rows.length;
+      if (rows.length < batch) break;
+    }
+    if (cleared > 0) runlog("retention: 清空 " + cleared + " 条历史对话正文");
+    return cleared;
+  }
   let cleared = 0;
   try {
     for (let round = 0; round < maxRounds; round++) {
@@ -69,6 +96,39 @@ export async function clearRequestLogDetails(
   maxRounds = 200,
 ): Promise<number> {
   if (olderThanHours <= 0) return 0;
+  if (useCloudbaseRest()) {
+    const cutoff = new Date(Date.now() - olderThanHours * 3600_000);
+    const NIL: never = null as never;
+    let cleared = 0;
+    for (let round = 0; round < maxRounds; round++) {
+      const rows = await prisma.requestLog.findMany({
+        where: {
+          at: { lt: cutoff },
+          OR: [
+            { requestMessages: { not: NIL } },
+            { responseMessage: { not: NIL } },
+            { attemptDetails: { not: NIL } },
+            { parameterOverrides: { not: NIL } },
+            { errorDetail: { not: "" } },
+          ],
+        },
+        select: { id: true },
+        take: batch,
+      }) as unknown as { id: string }[];
+      if (!rows.length) break;
+      await prisma.requestLog.updateMany({
+        where: { id: { in: rows.map((r) => r.id) } },
+        data: {
+          requestMessages: NIL, responseMessage: NIL,
+          attemptDetails: NIL, parameterOverrides: NIL, errorDetail: "",
+        },
+      });
+      cleared += rows.length;
+      if (rows.length < batch) break;
+    }
+    if (cleared > 0) runlog("retention: 清空 " + cleared + " 条老日志详情");
+    return cleared;
+  }
   let cleared = 0;
   try {
     for (let round = 0; round < maxRounds; round++) {
@@ -107,6 +167,23 @@ export async function pruneRequestLogs(
   batch = 2000,
   maxRounds = 200,
 ): Promise<number> {
+  if (useCloudbaseRest()) {
+    const cutoff = new Date(Date.now() - days * 24 * 3600_000);
+    let deleted = 0;
+    for (let round = 0; round < maxRounds; round++) {
+      const rows = await prisma.requestLog.findMany({
+        where: { at: { lt: cutoff } },
+        select: { id: true },
+        take: batch,
+      }) as unknown as { id: string }[];
+      if (!rows.length) break;
+      await prisma.requestLog.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+      deleted += rows.length;
+      if (rows.length < batch) break;
+    }
+    if (deleted > 0) runlog("retention: 删除 " + deleted + " 条过期日志（>" + days + " 天）");
+    return deleted;
+  }
   let deleted = 0;
   try {
     for (let round = 0; round < maxRounds; round++) {

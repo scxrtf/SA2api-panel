@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.cloudbase.net/schema/cloudbaserc.json",
+  "version": "2.0",
+  "envId": "democratic-aphid-d2ekz7739861827",
+  "region": "ap-shanghai",
+  "framework": {
+    "name": "wb2api-next",
+    "plugins": {}
+  }
+}

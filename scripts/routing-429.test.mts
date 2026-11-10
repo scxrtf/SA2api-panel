@@ -1,3 +1,5 @@
+// 强制走 Prisma 直连（测试 mock globalThis.prisma，不走 DAL）
+process.env.USE_CLOUDBASE_REST = "0";
 // 离线验证普通 429 的快速切换与全池冷却的快速失败；不访问真实上游。
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

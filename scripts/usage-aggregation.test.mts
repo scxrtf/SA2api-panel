@@ -5,6 +5,9 @@ import { cachedUsageQuery } from "../src/lib/usage-cache.ts";
 import { queryUsageAggregate } from "../src/lib/usage-query.ts";
 
 process.env.WB2API_MODEL_JSON_DISABLE = "1";
+// 本测试对拍的是 SQL 分支；.env 里 USE_CLOUDBASE_REST=1 会让 queryUsageAggregate
+// 走 DAL 应用层聚合（无 db.$queryRaw 调用），这里显式关掉。
+process.env.USE_CLOUDBASE_REST = "0";
 
 const zero = {
   errors: 0n, credit: 0, creditSamples: 0n, creditTokens: 0n,

@@ -17,6 +17,7 @@
     "verify:usage": "tsx scripts/verify-usage-parity.mts"
   },
   "dependencies": {
+    "@cloudbase/js-sdk": "^3.11.0",
     "@prisma/adapter-pg": "^6.0.0",
     "@prisma/client": "^6.0.0",
     "next": "16.4.2",

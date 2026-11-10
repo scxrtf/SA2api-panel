@@ -1,3 +1,5 @@
+// 强制走 Prisma 直连（测试 mock globalThis.prisma，不走 DAL）
+process.env.USE_CLOUDBASE_REST = "0";
 // rotation-budget.test.mts — 轮转预算必须覆盖可用账号（离线，无网络）。
 // 复现现场：号池账号数 > max_rotate，前 max_rotate 个账号返回账号级 429
 // （6020 排队 / 普通 429），其余账号仍可用。修复前循环按 max_rotate 截止，

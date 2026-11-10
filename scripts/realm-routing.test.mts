@@ -1,3 +1,5 @@
+// 强制走 Prisma 直连（测试 mock globalThis.prisma，不走 DAL）
+process.env.USE_CLOUDBASE_REST = "0";
 /* eslint-disable @typescript-eslint/no-explicit-any -- fake Prisma surface for offline routing tests */
 import assert from "node:assert/strict";
 

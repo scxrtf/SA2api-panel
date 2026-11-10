@@ -1,7 +1,7 @@
-# Railway 部署配置（Next.js 全栈 + 外部 Supabase Postgres）。
-# 变量（都需在 Railway 服务 Variables 里手动设置，Supabase 不会自动注入）：
-#   DATABASE_URL  — Supabase transaction pooler 连接串（6543，带 pgbouncer=true）
-#   DIRECT_URL    — Supabase session pooler 连接串（5432，迁移用）
+# Railway 部署配置（Next.js 全栈 + Prisma Postgres db.prisma.io）。
+# 变量（需在 Railway 服务 Variables 里手动设置）：
+#   DATABASE_URL  — Prisma Postgres 直连串（db.prisma.io:5432，sslmode=require）
+#   DIRECT_URL    — 同 DATABASE_URL（迁移与查询共用一条直连）
 #   WB2A_API_KEY  — 面板主密钥（公网必须设置；面板 / /api/v1/* / cron 都靠它鉴权）
 
 [build]
@@ -12,8 +12,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# 启动前先幂等执行迁移（走 DIRECT_URL session pooler；pgbouncer 事务模式不支持
-# migrate 的会话级特性，由 schema.prisma 的 directUrl 分流保证）。
+# 启动前先幂等执行迁移（走 DIRECT_URL；Prisma Postgres 直连，无 pooler 分流需求）。
 startCommand = "npx prisma migrate deploy && npm run start"
 healthcheckPath = "/api/livez"
 healthcheckTimeout = 30
