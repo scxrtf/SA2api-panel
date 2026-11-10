@@ -46,7 +46,7 @@ function buildUrl(table: string, opts: QueryOpts = {}): string {
 }
 
 async function req<T>(table: string, opts: QueryOpts = {}): Promise<T> {
-  if (useCloudbaseSdk()) return reqViaSdk<T>(table, opts);
+  if (isCloudbaseSdkEnabled()) return reqViaSdk<T>(table, opts);
   const url = buildUrl(table, opts);
   const r = await fetch(url, {
     method: "GET",
@@ -62,6 +62,12 @@ async function req<T>(table: string, opts: QueryOpts = {}): Promise<T> {
     throw new Error(`cloudbase-rest ${table} ${r.status}: ${body.slice(0, 300)}`);
   }
   return (await r.json()) as T;
+}
+
+// 通用读取入口（监控/运维脚本用）：行大小采样、时间跨度、增量窗口等
+// 不适合走 dal 的 Prisma 语义，直接暴露 PostgREST 查询原语。
+export async function cbSelect<T>(table: string, opts: QueryOpts = {}): Promise<T> {
+  return req<T>(table, opts);
 }
 
 // ─── 写操作（fetch 通道）────────────────────────────────────────────────
@@ -191,7 +197,7 @@ async function reqViaSdk<T>(table: string, opts: QueryOpts = {}): Promise<T> {
   return data as T;
 }
 
-export function useCloudbaseSdk(): boolean {
+export function isCloudbaseSdkEnabled(): boolean {
   const v = (process.env.CLOUDBASE_SDK ?? "").toLowerCase();
   return v === "1" || v === "true" || v === "yes";
 }

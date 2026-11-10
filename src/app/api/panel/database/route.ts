@@ -1,7 +1,9 @@
-// 数据库监控：只查询系统目录与累计值，不读取业务表内容。
+// 数据库监控：直连模式查询系统目录；CloudBase 模式只读少量采样行与主键。
 import { fail, ok, panelAuth } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { dal } from "@/lib/dal";
+import { cbSelect } from "@/lib/cloudbase-rest";
+import { getCloudbasePlatformStats } from "@/lib/cloudbase-monitor";
 import { clearRequestLogDialog, retentionConfig, runRetention } from "@/lib/retention";
 
 export const runtime = "nodejs";
@@ -23,17 +25,47 @@ interface StatsRow {
   tables: { name: string; rows: number; totalBytes: number; dataBytes: number; indexBytes: number }[];
 }
 
-function useCloudbaseRest(): boolean {
+function cloudbaseRestEnabled(): boolean {
   const v = (process.env.USE_CLOUDBASE_REST ?? "").toLowerCase();
   return v === "1" || v === "true" || v === "yes";
 }
 
+// 行大小采样：按主键倒序取最近 50 行，序列化字节数均值作为行长估计。
+// 比固定 1KB/行 假设精确（RequestLog 带大 JSON 字段，行长可能是 UsageEvent 的数倍）。
+async function sampleRowBytes(table: string, pk = "id"): Promise<number> {
+  try {
+    const rows = await cbSelect<Record<string, unknown>[]>(table, { select: "*", order: [{ col: pk, desc: true }], limit: 50 });
+    if (!rows.length) return 0;
+    const total = rows.reduce((s, r) => s + Buffer.byteLength(JSON.stringify(r), "utf8"), 0);
+    return Math.round(total / rows.length);
+  } catch { return 0; }
+}
+
+// 表增长速率：按时间索引分页拉时间列自数；网关的 HEAD/count=exact 实测不可用。
+async function growth24h(table: string, timeCol: string): Promise<number | null> {
+  try {
+    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+    let offset = 0;
+    for (;;) {
+      const rows = await cbSelect<unknown[]>(table, {
+        select: timeCol,
+        filters: [{ col: timeCol, op: "gte", val: since }],
+        limit: 1000,
+        offset,
+      });
+      if (rows.length < 1000) return offset + rows.length;
+      offset += 1000;
+    }
+  } catch { return null; }
+}
+
 // CloudBase PostgREST 没有 pg_catalog 访问权限：库大小/连接数/版本拿不到，
-// 业务行数走各表 count（Content-Range 精确口径），其余字段以 null 占位，面板照常渲染。
+// 业务行数走 DAL 主键分页计数；容量保留采样估算，平台 QPS 走 CAM 接口。
 async function readStatsDal(): Promise<Record<string, unknown>> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.data;
   const TABLES: { name: string; model: keyof typeof dal }[] = [
     { name: "Account", model: "account" },
+    { name: "AccountState", model: "accountState" },
     { name: "ApiKey", model: "apiKey" },
     { name: "Provider", model: "provider" },
     { name: "UsageEvent", model: "usageEvent" },
@@ -42,45 +74,72 @@ async function readStatsDal(): Promise<Record<string, unknown>> {
     { name: "Setting", model: "setting" },
     { name: "TaskQueueItem", model: "taskQueueItem" },
     { name: "ModelCooldown", model: "modelCooldown" },
+    { name: "ModelCost", model: "modelCost" },
+    { name: "ModelProbe", model: "modelProbe" },
     { name: "ModelHealthCheck", model: "modelHealthCheck" },
     { name: "LoginSession", model: "loginSession" },
     { name: "StickySession", model: "stickySession" },
+    { name: "MachineKeyAuthorization", model: "machineKeyAuthorization" },
   ];
   const counts = await Promise.all(TABLES.map(async (t) => ({ name: t.name, rows: await dal[t.model].count() })));
   counts.sort((a, b) => b.rows - a.rows);
-  // PostgREST 拿不到 pg_total_relation_size，用 1KB/行 做粗略近似，让容量条有意义。
-  const approxBytes = (rows: number) => rows * 1024;
+
+  // 行大小采样（并行，失败回退 1KB 假设）
+  const SAMPLE_PK: Record<string, string> = { Account: "uid", AccountState: "uid", Setting: "key", StickySession: "key", ModelProbe: "key", MachineKeyAuthorization: "machineId" };
+  const samples = await Promise.all(counts.map(async (c) => ({
+    name: c.name,
+    avgBytes: c.rows > 0 ? await sampleRowBytes(c.name, SAMPLE_PK[c.name] ?? "id") : 0,
+  })));
+  const sampleMap = new Map(samples.map((s) => [s.name, s.avgBytes]));
+
+  // 增长速率（四张时间序列表）
+  const GROWTH: [string, string][] = [["UsageEvent", "at"], ["RequestLog", "at"], ["BalanceSample", "at"], ["ModelHealthCheck", "checkedAt"]];
+  const growthEntries = await Promise.all(GROWTH.map(async ([name, col]) => {
+    return [name, await growth24h(name, col)] as const;
+  }));
+  const growthMap = new Map<string, number | null>(growthEntries);
+
+  // JSON 字节采样比堆行多记字段名/JSON 语法；1.25 仅作索引与页开销的保守系数。
+  const OVERHEAD = 1.25;
+  const approxBytes = (name: string, rows: number) => Math.round(rows * (sampleMap.get(name) || 1024) * OVERHEAD);
   const tables = counts.map((c) => ({
     ...c,
-    totalBytes: approxBytes(c.rows),
-    dataBytes: Math.round(approxBytes(c.rows) * 0.7),
-    indexBytes: Math.round(approxBytes(c.rows) * 0.3),
+    avgRowBytes: sampleMap.get(c.name) ?? 0,
+    added24h: growthMap.get(c.name) ?? null,
+    totalBytes: approxBytes(c.name, c.rows),
+    dataBytes: Math.round(approxBytes(c.name, c.rows) * 0.7),
+    indexBytes: Math.round(approxBytes(c.name, c.rows) * 0.3),
   }));
   const dialogRows = await dal.requestLog.count({
     where: { OR: [{ requestMessages: { not: null } }, { responseMessage: { not: null } }] },
   }).catch(() => 0);
   const requestLogs = tables.find((t) => t.name === "RequestLog")?.rows ?? 0;
-  const totalRows = counts.reduce((s, c) => s + c.rows, 0);
+  const totalBytes = tables.reduce((s, t) => s + t.totalBytes, 0);
+  const platform = await getCloudbasePlatformStats();
   let host = "";
   try { host = new URL(process.env.CLOUDBASE_POSTGREST_URL || "").hostname; } catch { /* ignore */ }
   const data = {
     measuredAt: new Date().toISOString(),
     cacheSeconds: CACHE_MS / 1000,
     mode: "cloudbase",
+    sizing: "sampled", // sampled = 行大小采样校准；fallback 固定假设见单表 avgRowBytes=0
     database: {
       name: process.env.CLOUDBASE_ENV_ID ?? "cloudbase",
       host,
       version: "cloudbase-postgrest",
-      bytes: approxBytes(totalRows),
-      sizeGb: approxBytes(totalRows) / 1024 ** 3,
+      bytes: totalBytes,
+      sizeGb: totalBytes / 1024 ** 3,
       limitGb: LIMIT_GB,
-      percent: approxBytes(totalRows) / (LIMIT_GB * 1024 ** 3) * 100,
+      percent: totalBytes / (LIMIT_GB * 1024 ** 3) * 100,
       requestLogs,
       dialogRows,
       activeConnections: 0,
       maxConnections: 0,
     },
     tables,
+    platform,
+    growth: Object.fromEntries(growthEntries),
+    growthBasis: "24h",
     retention: retentionConfig(),
   };
   cache = { at: Date.now(), data };
@@ -88,7 +147,7 @@ async function readStatsDal(): Promise<Record<string, unknown>> {
 }
 
 async function readStats(): Promise<Record<string, unknown>> {
-  if (useCloudbaseRest()) return readStatsDal();
+  if (cloudbaseRestEnabled()) return readStatsDal();
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.data;
   const rows = await prisma.$queryRaw<StatsRow[]>`
     with table_stats as (
