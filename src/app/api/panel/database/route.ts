@@ -1,10 +1,10 @@
 // 数据库监控：直连模式查询系统目录；CloudBase 模式只读少量采样行与主键。
-import { fail, ok, panelAuth } from "@/lib/panel-auth";
+import { fail, ok, panelAuth, verifySuperPassword } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { dal } from "@/lib/dal";
 import { cbSelect } from "@/lib/cloudbase-rest";
 import { getCloudbasePlatformStats } from "@/lib/cloudbase-monitor";
-import { clearRequestLogDialog, retentionConfig, runRetention } from "@/lib/retention";
+import { clearRequestLogDetails, clearRequestLogDialog, pruneModelHealth, pruneRequestLogs, retentionConfig, runRetention } from "@/lib/retention";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -221,7 +221,8 @@ export async function POST(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   try {
-    const body = await req.json() as { action?: string };
+    const body = await req.json() as { action?: string; super_password?: unknown; olderThanHours?: unknown; days?: unknown; healthDays?: unknown };
+    if (!verifySuperPassword(body.super_password)) return fail(403, "超级密码错误");
     if (body.action === "clear_dialog") {
       const cleared = await clearRequestLogDialog();
       cache = null;
@@ -229,6 +230,25 @@ export async function POST(req: Request) {
     }
     if (body.action === "run_retention") {
       const result = await runRetention();
+      cache = null;
+      return ok({ action: body.action, result, stats: await readStats() });
+    }
+    if (body.action === "clear_details") {
+      const hours = body.olderThanHours === undefined ? retentionConfig().detailHours : Number(body.olderThanHours);
+      if (!Number.isInteger(hours) || hours < 0 || hours > 24 * 365) return fail(400, "详情时间范围须为 0～8760 之间的整数小时");
+      const cleared = await clearRequestLogDetails(hours);
+      cache = null;
+      return ok({ action: body.action, cleared, stats: await readStats() });
+    }
+    if (body.action === "clear_expired_logs") {
+      const days = body.days === undefined ? retentionConfig().days : Number(body.days);
+      if (!Number.isInteger(days) || days < 1 || days > 365) return fail(400, "日志保留天数须为 1～365 之间的整数");
+      const healthDays = body.healthDays === undefined ? 3 : Number(body.healthDays);
+      if (!Number.isInteger(healthDays) || healthDays < 1 || healthDays > 365) return fail(400, "健康检查保留天数须为 1～365 之间的整数");
+      const result = {
+        rowsDeleted: await pruneRequestLogs(days),
+        healthDeleted: await pruneModelHealth(healthDays),
+      };
       cache = null;
       return ok({ action: body.action, result, stats: await readStats() });
     }

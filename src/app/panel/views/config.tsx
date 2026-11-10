@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { req } from "../lib";
 import { Box, type Flash } from "../components/ui";
+import { SuperPasswordModal } from "../components/superPassword";
 
 type Config = Record<string, string | number | boolean | number[] | Record<string, string>>;
 type FallbackRow = { id: number; from: string; to: string };
@@ -95,6 +96,9 @@ const MS_FIELDS = new Set([
 export function ConfigView({ flash }: { flash: Flash }) {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [fallbackRows, setFallbackRows] = useState<FallbackRow[]>([]);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const loadConfig = (config: Config) => {
     setCfg(config);
@@ -122,34 +126,27 @@ export function ConfigView({ flash }: { flash: Flash }) {
     ]);
   };
 
-  const save = async () => {
-    // 配置保存为权限级操作：超级密码二次确认（服务端校验，字段不写入 Setting 表）。
-    const password = window.prompt("保存配置需输入超级密码：");
-    if (password === null) return;
-    if (!password) { flash("err", "超级密码不能为空"); return; }
+  const save = () => {
+    for (const row of fallbackRows) {
+      if (!row.from.trim() || !row.to.trim()) { flash("err", "保存失败：模型降级路由表不能包含空模型名"); return; }
+    }
+    const from = fallbackRows.map((row) => row.from.trim());
+    if (new Set(from).size !== from.length) { flash("err", "保存失败：模型降级路由表存在重复原模型"); return; }
+    setSaveError(""); setSaveOpen(true);
+  };
+  const saveAuthorized = async (password: string) => {
+    setSaving(true); setSaveError("");
     try {
-      const modelFallback: Record<string, string> = {};
-      for (const row of fallbackRows) {
-        const from = row.from.trim();
-        const to = row.to.trim();
-        if (!from || !to) {
-          flash("err", "保存失败：模型降级路由表不能包含空模型名");
-          return;
-        }
-        if (Object.hasOwn(modelFallback, from)) {
-          flash("err", `保存失败：原模型“${from}”重复，请合并或删除重复行`);
-          return;
-        }
-        modelFallback[from] = to;
-      }
+      const modelFallback = Object.fromEntries(fallbackRows.map((row) => [row.from.trim(), row.to.trim()]));
       const r = await req<{ config: Config }>("config", {
         method: "POST", body: { ...cfg, model_fallback: modelFallback, super_password: password },
       });
       loadConfig(r.config);
+      setSaveOpen(false);
       flash("ok", "配置已保存并立即生效（调度时点已重排）");
     } catch (e) {
-      flash("err", "保存失败：" + (e instanceof Error ? e.message : String(e)));
-    }
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally { setSaving(false); }
   };
 
   const renderField = (f: Field) => {
@@ -243,6 +240,9 @@ export function ConfigView({ flash }: { flash: Flash }) {
         <button className="btn" onClick={() => req<{ config: Config }>("config").then((r) => loadConfig(r.config)).catch(() => null)}>放弃修改</button>
         <button className="btn primary" onClick={save}>保存配置</button>
       </div>
+      {saveOpen && <SuperPasswordModal title="保存运行配置" confirmText="验证并保存" busy={saving} error={saveError}
+        description="配置保存后立即生效，定时任务与运行参数将按新配置重排。"
+        onCancel={() => { if (!saving) setSaveOpen(false); }} onConfirm={saveAuthorized} />}
     </>
   );
 }

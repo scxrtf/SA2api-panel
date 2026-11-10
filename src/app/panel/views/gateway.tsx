@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { req, useAutoRefresh, usePanelRefresh, emitPanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { AddAccountModal } from "../components/addAccount";
+import { SuperPasswordModal } from "../components/superPassword";
 
 interface KeyRow { name: string; key_mask: string; providers: string[]; created_at: string }
 interface ProviderRow { name: string; base_url: string; key_mask: string; models: string; created_at: string }
@@ -34,8 +35,12 @@ function KeysBox({ flash }: { flash: Flash }) {
   const [providers, setProviders] = useState<string[]>([]);
   // 授权编辑器：all = 全部供应商；picked = 勾选的白名单；password = 超级密码。
   const [authEditor, setAuthEditor] = useState<{
-    name: string; all: boolean; picked: string[]; password: string;
+    name: string; all: boolean; picked: string[];
   } | null>(null);
+  const [removeName, setRemoveName] = useState<string | null>(null);
+  const [authConfirm, setAuthConfirm] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
 
   const load = useCallback(() => {
     req<{ keys: KeyRow[] }>("keys").then((r) => setKeys(r.keys))
@@ -94,14 +99,15 @@ function KeysBox({ flash }: { flash: Flash }) {
     } catch (e) { setMachineError(e instanceof Error ? e.message : String(e)); }
     finally { setMachineBusy(false); }
   };
-  const remove = async (n: string) => {
-    if (!window.confirm("确认删除密钥 " + n + "？")) return;
-    // 删除密钥为权限级操作：超级密码二次确认（服务端校验）。
-    const password = window.prompt("删除密钥 " + n + " 需输入超级密码：");
-    if (password === null) return;
-    if (!password) { flash("err", "超级密码不能为空"); return; }
-    try { await req("keys/" + encodeURIComponent(n), { method: "DELETE", body: { super_password: password } }); load(); flash("ok", "密钥已吊销"); }
-    catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+  const remove = (n: string) => { setAuthError(""); setRemoveName(n); };
+  const removeAuthorized = async (password: string) => {
+    if (!removeName) return;
+    setAuthBusy(true); setAuthError("");
+    try {
+      await req("keys/" + encodeURIComponent(removeName), { method: "DELETE", body: { super_password: password } });
+      setRemoveName(null); load(); flash("ok", "密钥已吊销");
+    } catch (e) { setAuthError(e instanceof Error ? e.message : String(e)); }
+    finally { setAuthBusy(false); }
   };
   const openAuth = (k: KeyRow) => {
     setAuthEditor({
@@ -110,7 +116,6 @@ function KeysBox({ flash }: { flash: Flash }) {
       // 直接保存仍是空授权（不授权任何供应商），不会被改写为 "*"。
       all: k.providers.includes("*"),
       picked: k.providers.filter((p) => p !== "*"),
-      password: "",
     });
   };
   const toggleAuthProvider = (n: string) => {
@@ -122,20 +127,23 @@ function KeysBox({ flash }: { flash: Flash }) {
       return { ...cur, picked };
     });
   };
-  const saveAuth = async () => {
+  const saveAuth = () => { if (authEditor) { setAuthError(""); setAuthConfirm(true); } };
+  const saveAuthAuthorized = async (password: string) => {
     if (!authEditor) return;
+    setAuthBusy(true); setAuthError("");
     try {
       await req("keys/" + encodeURIComponent(authEditor.name), {
         method: "PATCH",
         body: {
-          super_password: authEditor.password,
+          super_password: password,
           providers: authEditor.all ? ["*"] : authEditor.picked,
         },
       });
-      setAuthEditor(null);
+      setAuthEditor(null); setAuthConfirm(false);
       load();
       flash("ok", "供应商授权已更新");
-    } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setAuthError(e instanceof Error ? e.message : String(e)); }
+    finally { setAuthBusy(false); }
   };
   const authLabel = (k: KeyRow) =>
     k.providers.includes("*")
@@ -205,14 +213,17 @@ function KeysBox({ flash }: { flash: Flash }) {
               </div>
             )}
             <div className="btn-row" style={{ marginTop: 10 }}>
-              <input className="input" type="password" style={{ width: 200 }} placeholder="超级密码"
-                value={authEditor.password}
-                onChange={(e) => setAuthEditor({ ...authEditor, password: e.target.value })} />
-              <button className="btn primary" onClick={saveAuth} disabled={!authEditor.password}>保存授权</button>
+              <button className="btn primary" onClick={saveAuth}>保存授权</button>
               <button className="btn" onClick={() => setAuthEditor(null)}>取消</button>
             </div>
           </div>
         )}
+        {removeName && <SuperPasswordModal title="删除网关密钥" confirmText="验证并删除" busy={authBusy} error={authError}
+          description={<>即将永久吊销密钥 <b>{removeName}</b>，使用此密钥的调用将立即失效。</>}
+          onCancel={() => { if (!authBusy) setRemoveName(null); }} onConfirm={removeAuthorized} />}
+        {authConfirm && authEditor && <SuperPasswordModal title="更新供应商授权" confirmText="验证并保存" busy={authBusy} error={authError}
+          description={<>密钥 <b>{authEditor.name}</b> 将{authEditor.all ? "获得全部供应商权限" : `获得 ${authEditor.picked.length} 个供应商权限`}。</>}
+          onCancel={() => { if (!authBusy) setAuthConfirm(false); }} onConfirm={saveAuthAuthorized} />}
         {machineOpen && (
           <div className="modal-mask">
             <div className="modal machine-modal" role="dialog" aria-modal="true" aria-labelledby="machine-auth-title" aria-busy={machineChecking || machineBusy || creating}>
@@ -312,6 +323,9 @@ function ProvidersBox({ flash }: { flash: Flash }) {
   const [probe, setProbe] = useState("");
   const [probeErr, setProbeErr] = useState(false);
   const [probeModels, setProbeModels] = useState<string[]>([]);
+  const [removeName, setRemoveName] = useState<string | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeError, setRemoveError] = useState("");
 
   const load = useCallback(() => {
     req<{ providers: ProviderRow[] }>("providers").then((r) => setRows(r.providers))
@@ -330,18 +344,18 @@ function ProvidersBox({ flash }: { flash: Flash }) {
       flash("ok", "供应商已添加");
     } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
   };
-  const remove = async (n: string) => {
-    // 删除供应商为权限级操作：与密钥授权同口径，超级密码二次确认。
-    // 服务端会同事务从所有密钥授权里剔除该供应商名，避免幽灵授权。
-    const password = window.prompt("删除供应商 " + n + " 需输入超级密码：");
-    if (password === null) return;
-    if (!password) { flash("err", "超级密码不能为空"); return; }
+  const remove = (n: string) => { setRemoveError(""); setRemoveName(n); };
+  const removeAuthorized = async (password: string) => {
+    if (!removeName) return;
+    setRemoveBusy(true); setRemoveError("");
     try {
-      await req("providers/" + encodeURIComponent(n), { method: "DELETE", body: { super_password: password } });
+      await req("providers/" + encodeURIComponent(removeName), { method: "DELETE", body: { super_password: password } });
+      setRemoveName(null);
       emitPanelRefresh();
       flash("ok", "供应商已删除");
     }
-    catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    catch (e) { setRemoveError(e instanceof Error ? e.message : String(e)); }
+    finally { setRemoveBusy(false); }
   };
   const [probing, setProbing] = useState(false);
   const probeNow = async () => {
@@ -512,6 +526,9 @@ function ProvidersBox({ flash }: { flash: Flash }) {
           </div>
         )}
       </div>
+      {removeName && <SuperPasswordModal title="删除聚合供应商" confirmText="验证并删除" busy={removeBusy} error={removeError}
+        description={<>即将删除供应商 <b>{removeName}</b>，所有密钥中对该供应商的授权也会同步移除。</>}
+        onCancel={() => { if (!removeBusy) setRemoveName(null); }} onConfirm={removeAuthorized} />}
     </Box>
   );
 }

@@ -11,7 +11,7 @@
 import { prisma } from "./db";
 import { runlog } from "./runlog";
 
-function useCloudbaseRest(): boolean {
+function cloudbaseRestEnabled(): boolean {
   const v = (process.env.USE_CLOUDBASE_REST ?? "").toLowerCase();
   return v === "1" || v === "true" || v === "yes";
 }
@@ -35,6 +35,7 @@ export function retentionConfig() {
 }
 
 export interface RetentionResult {
+  dialogCleared: number;
   detailCleared: number;
   rowsDeleted: number;
   healthDeleted: number;
@@ -46,7 +47,7 @@ export async function clearRequestLogDialog(
   batch = BATCH,
   maxRounds = 200,
 ): Promise<number> {
-  if (useCloudbaseRest()) {
+  if (cloudbaseRestEnabled()) {
     // PostgREST 无 ctid 批量子查询；拉 id 分页后逐批 PATCH。行数窗口小（≤3k），可接受。
     // 走 DAL 通道：prisma 代理转发到 dal.ts，PostgREST JSON null 用 "null" 字符串过滤语义。
     const NIL: never = null as never; // Prisma Json 列类型收窄；运行时经 dal 直传 null
@@ -95,8 +96,7 @@ export async function clearRequestLogDetails(
   batch = BATCH,
   maxRounds = 200,
 ): Promise<number> {
-  if (olderThanHours <= 0) return 0;
-  if (useCloudbaseRest()) {
+  if (cloudbaseRestEnabled()) {
     const cutoff = new Date(Date.now() - olderThanHours * 3600_000);
     const NIL: never = null as never;
     let cleared = 0;
@@ -167,7 +167,7 @@ export async function pruneRequestLogs(
   batch = 2000,
   maxRounds = 200,
 ): Promise<number> {
-  if (useCloudbaseRest()) {
+  if (cloudbaseRestEnabled()) {
     const cutoff = new Date(Date.now() - days * 24 * 3600_000);
     let deleted = 0;
     for (let round = 0; round < maxRounds; round++) {
@@ -228,7 +228,7 @@ export async function runRetention(): Promise<RetentionResult> {
   const detailCleared = await clearRequestLogDetails(cfg.detailHours);
   const rowsDeleted = await pruneRequestLogs(cfg.days);
   const healthDeleted = await pruneModelHealth();
-  const result = { detailCleared, rowsDeleted, healthDeleted, durationMs: Date.now() - started };
+  const result = { dialogCleared, detailCleared, rowsDeleted, healthDeleted, durationMs: Date.now() - started };
   runlog(
     "retention 完成: 清对话 " + dialogCleared + " · 清详情 " + detailCleared + " · 删日志 " + rowsDeleted +
     " · 删健康检查 " + healthDeleted + " · " + result.durationMs + "ms",

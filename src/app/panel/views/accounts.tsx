@@ -5,6 +5,7 @@ import { req, fmtNum, fmtTime, fmtDur } from "../lib";
 import { Box, type StatusRow, type Overview, type Flash } from "../components/ui";
 import { CtrlMetric, CtrlAction, CtrlCard, CtrlHint } from "../components/ctrl";
 import { AddAccountModal } from "../components/addAccount";
+import { SuperPasswordModal } from "../components/superPassword";
 import { ModelScanPanel, useModelScan } from "../components/modelscan";
 
 // fmtAgo 相对时间（Go app.js ago 同口径）：42s / 5m / 3h / 2d。
@@ -104,6 +105,8 @@ export function AccountsView({ ov, flash, onRefresh }: {
   const now = useNow();
   const scan = useModelScan(flash, onRefresh);
   const [addOpen, setAddOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState("");
   // 账号池区块折叠：默认展开；收起后隐藏筛选条与账号表，只留标题栏和计数，
   // 状态持久化到 localStorage（惰性初始化，避免 effect 内 setState）。
   const [poolOpen, setPoolOpen] = useState(() => {
@@ -126,23 +129,27 @@ export function AccountsView({ ov, flash, onRefresh }: {
 
   const op = useCallback(async (uid: string, action: string, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
-    // 移除账号为权限级操作：超级密码二次确认（服务端校验）。
-    let body: Record<string, unknown> | undefined;
-    if (action === "remove") {
-      const password = window.prompt("移除账号 " + uid + " 需输入超级密码：");
-      if (password === null) return;
-      if (!password) { flash("err", "超级密码不能为空"); return; }
-      body = { super_password: password };
-    }
+    if (action === "remove") { setRemoveError(""); setRemoveTarget(uid); return; }
     setBusy(true);
     try {
-      await req("accounts/" + encodeURIComponent(uid) + "/" + action, { method: "POST", body });
+      await req("accounts/" + encodeURIComponent(uid) + "/" + action, { method: "POST" });
       flash("ok", "操作完成：" + action);
       await onRefresh();
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   }, [flash, onRefresh]);
+  const removeAccount = async (password: string) => {
+    if (!removeTarget) return;
+    setBusy(true); setRemoveError("");
+    try {
+      await req("accounts/" + encodeURIComponent(removeTarget) + "/remove", {
+        method: "POST", body: { super_password: password },
+      });
+      flash("ok", "账号已移除"); setRemoveTarget(null); await onRefresh();
+    } catch (e) { setRemoveError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
 
   // batch 返回 Promise 供 CtrlAction 进入「发起中…」加载态，空窗期按钮即反馈。
   const batch = useCallback(async (path: string, label: string): Promise<void> => {
@@ -394,6 +401,9 @@ export function AccountsView({ ov, flash, onRefresh }: {
 
       {addOpen && <AddAccountModal onClose={() => setAddOpen(false)}
         onDone={async () => { setAddOpen(false); await onRefresh(); }} />}
+      {removeTarget && <SuperPasswordModal title="移除账号" confirmText="验证并移除" busy={busy} error={removeError}
+        description={<>即将移除账号 <b className="mono">{removeTarget}</b>，账号凭证及其状态将一并删除。</>}
+        onCancel={() => { if (!busy) setRemoveTarget(null); }} onConfirm={removeAccount} />}
     </>
   );
 }

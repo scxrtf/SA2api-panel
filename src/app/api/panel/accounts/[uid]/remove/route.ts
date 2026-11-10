@@ -14,8 +14,6 @@ export async function POST(req: Request, ctx: Ctx) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const { uid } = await ctx.params;
-  const acct = await prisma.account.findUnique({ where: { uid } });
-  if (!acct) return fail(404, "account not found");
   let body: { super_password?: unknown } = {};
   try {
     body = (await req.json()) as { super_password?: unknown };
@@ -25,6 +23,8 @@ export async function POST(req: Request, ctx: Ctx) {
   if (!verifySuperPassword(body.super_password)) {
     return fail(403, "超级密码错误");
   }
+  const acct = await prisma.account.findUnique({ where: { uid } });
+  if (!acct) return fail(404, "account not found");
   // 删除后昵称不可再查，先记录再删行。
   runlogAccount("移除", label(acct.uid, acct.nickname) + " realm=" + acct.realm);
   await prisma.account.delete({ where: { uid } });

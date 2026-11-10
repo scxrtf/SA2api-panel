@@ -31,6 +31,7 @@ export interface CloudbasePlatformStats {
   packageName: string | null;
   postgresTenantType: string | null;
   error: string | null;
+  qpsSeries?: { at: string; value: number }[];
 }
 
 function sha256(value: string): string {
@@ -116,6 +117,11 @@ export async function getCloudbasePlatformStats(): Promise<CloudbasePlatformStat
       }),
     ]);
     const values = curve.NewValues ?? curve.Values ?? [];
+    result.qpsSeries = values.flatMap((value, i) => {
+      const at = curve.Time?.[i];
+      return typeof value === "number" && Number.isFinite(value) && typeof at === "number"
+        ? [{ at: new Date(at * 1000).toISOString(), value }] : [];
+    });
     const last = values.length ? values[values.length - 1] : null;
     result.qps = typeof last === "number" && Number.isFinite(last) ? last : null;
     result.qpsQuota = env.EnvInfo?.BillingInfo?.EnvQps?.QpsQuota ?? null;
