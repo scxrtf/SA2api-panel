@@ -46,28 +46,35 @@ async function readStatsDal(): Promise<Record<string, unknown>> {
     { name: "LoginSession", model: "loginSession" },
     { name: "StickySession", model: "stickySession" },
   ];
-  const tables = [] as { name: string; rows: number; totalBytes: number; dataBytes: number; indexBytes: number }[];
-  for (const t of TABLES) {
-    const rows = await dal[t.model].count();
-    tables.push({ name: t.name, rows, totalBytes: 0, dataBytes: 0, indexBytes: 0 });
-  }
+  const counts = await Promise.all(TABLES.map(async (t) => ({ name: t.name, rows: await dal[t.model].count() })));
+  counts.sort((a, b) => b.rows - a.rows);
+  // PostgREST 拿不到 pg_total_relation_size，用 1KB/行 做粗略近似，让容量条有意义。
+  const approxBytes = (rows: number) => rows * 1024;
+  const tables = counts.map((c) => ({
+    ...c,
+    totalBytes: approxBytes(c.rows),
+    dataBytes: Math.round(approxBytes(c.rows) * 0.7),
+    indexBytes: Math.round(approxBytes(c.rows) * 0.3),
+  }));
   const dialogRows = await dal.requestLog.count({
     where: { OR: [{ requestMessages: { not: null } }, { responseMessage: { not: null } }] },
   }).catch(() => 0);
   const requestLogs = tables.find((t) => t.name === "RequestLog")?.rows ?? 0;
+  const totalRows = counts.reduce((s, c) => s + c.rows, 0);
   let host = "";
   try { host = new URL(process.env.CLOUDBASE_POSTGREST_URL || "").hostname; } catch { /* ignore */ }
   const data = {
     measuredAt: new Date().toISOString(),
     cacheSeconds: CACHE_MS / 1000,
+    mode: "cloudbase",
     database: {
       name: process.env.CLOUDBASE_ENV_ID ?? "cloudbase",
       host,
       version: "cloudbase-postgrest",
-      bytes: 0,
-      sizeGb: 0,
+      bytes: approxBytes(totalRows),
+      sizeGb: approxBytes(totalRows) / 1024 ** 3,
       limitGb: LIMIT_GB,
-      percent: 0,
+      percent: approxBytes(totalRows) / (LIMIT_GB * 1024 ** 3) * 100,
       requestLogs,
       dialogRows,
       activeConnections: 0,
@@ -119,6 +126,7 @@ async function readStats(): Promise<Record<string, unknown>> {
   const data = {
     measuredAt: new Date().toISOString(),
     cacheSeconds: CACHE_MS / 1000,
+    mode: "direct",
     database: {
       name: row.database_name,
       host,
