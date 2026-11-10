@@ -1,5 +1,6 @@
 // 网关与面板共用的 Bearer 鉴权原语（移植 internal/httpauth）。
-// 口径与 Go 完全一致：SHA-256 摘要 + 常量时间比较，空 key = 不启用鉴权。
+// SHA-256 摘要 + 常量时间比较。生产环境空主密钥 fail closed；
+// 仅非生产本地开发保留空 key 放行，便于离线启动与测试。
 import { createHash, timingSafeEqual } from "crypto";
 import { prisma } from "./db";
 import { getConfig } from "./config";
@@ -51,9 +52,9 @@ export function extractToken(req: Request): string {
   return "";
 }
 
-// verifyBearer 校验主密钥。key 为空 = 未启用鉴权，恒 true。
+// verifyBearer 校验主密钥。生产环境空 key 一律拒绝。
 export function verifyBearer(req: Request, key: string): boolean {
-  if (!key) return true;
+  if (!key) return process.env.NODE_ENV !== "production";
   return constTimeEq(extractToken(req), key);
 }
 
@@ -100,7 +101,7 @@ export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | n
     dbOk = false;
   }
   // 未启用鉴权（主密钥为空且 key 环为空）：全部放行。
-  if (dbOk && !cfg.api_key && rows.length === 0) {
+  if (dbOk && !cfg.api_key && rows.length === 0 && process.env.NODE_ENV !== "production") {
     return { name: "", providers: "*", unrestricted: true };
   }
   if (!tok) return null;
@@ -146,7 +147,7 @@ export async function verifyAny(req: Request): Promise<boolean> {
   } catch {
     // DB 不可用时仅按主密钥判定。
   }
-  if (keys.length === 0) return true;
+  if (keys.length === 0) return process.env.NODE_ENV !== "production";
   const tok = extractToken(req);
   let matched = false;
   for (const k of keys) {

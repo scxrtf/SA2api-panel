@@ -13,7 +13,7 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 # 启动前先幂等执行迁移（走 DIRECT_URL；Prisma Postgres 直连，无 pooler 分流需求）。
-startCommand = "npx prisma migrate deploy && npm run start"
+startCommand = "if [ \"$USE_CLOUDBASE_REST\" != \"1\" ]; then npx prisma migrate deploy || exit 1; fi; exec npm run start"
 healthcheckPath = "/api/livez"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"

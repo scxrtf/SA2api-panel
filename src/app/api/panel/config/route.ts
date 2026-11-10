@@ -29,7 +29,8 @@ export async function POST(req: Request) {
   }
   // 从待保存体中剔除超级密码字段，避免被写入 Setting 表。
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    const { super_password: _omit, ...rest } = raw as Record<string, unknown>;
+    const rest = { ...(raw as Record<string, unknown>) };
+    delete rest.super_password;
     raw = rest;
   }
   try {

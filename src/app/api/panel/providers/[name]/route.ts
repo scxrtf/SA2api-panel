@@ -3,6 +3,7 @@
 // 剔除该供应商，避免密钥残留指向已不存在供应商的幽灵授权（重新保存时 400）。
 import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
+import { isCloudbaseRestEnabled } from "@/lib/cloudbase-rest";
 import { invalidateKeyRing } from "@/lib/auth-guard";
 import { invalidateProviders } from "@/lib/provider";
 
@@ -66,11 +67,9 @@ export async function DELETE(req: Request, ctx: Ctx) {
   const existing = await prisma.provider.findUnique({ where: { name } });
   if (!existing) return fail(404, "未找到供应商：" + name);
 
-  const result = await prisma.$transaction(async (tx) => {
-    // 先清理引用：所有授权串里含该供应商名的 key 都重写（剔除该名）。
+  const scrubKeys = async (tx: Pick<typeof prisma, "apiKey">): Promise<number> => {
     const keys = await tx.apiKey.findMany({
-      where: { providers: { contains: name } },
-      select: { name: true, providers: true },
+      where: { providers: { contains: name } }, select: { name: true, providers: true },
     });
     let scrubbed = 0;
     for (const k of keys) {
@@ -80,9 +79,39 @@ export async function DELETE(req: Request, ctx: Ctx) {
         scrubbed++;
       }
     }
-    await tx.provider.delete({ where: { name } });
     return scrubbed;
-  });
+  };
+
+  let result: number;
+  if (isCloudbaseRestEnabled()) {
+    const keys = await prisma.apiKey.findMany({
+      where: { providers: { contains: name } }, select: { name: true, providers: true },
+    });
+    const changed: { name: string; providers: string }[] = [];
+    try {
+      for (const k of keys) {
+        const next = stripProvider(k.providers, name);
+        if (next !== k.providers) {
+          await prisma.apiKey.update({ where: { name: k.name }, data: { providers: next } });
+          changed.push(k);
+        }
+      }
+      await prisma.provider.delete({ where: { name } });
+      result = changed.length;
+    } catch (error) {
+      // REST 无跨表事务：删除/改写失败时按原值补偿已修改的授权串。
+      for (const k of changed) {
+        await prisma.apiKey.update({ where: { name: k.name }, data: { providers: k.providers } }).catch(() => undefined);
+      }
+      throw error;
+    }
+  } else {
+    result = await prisma.$transaction(async (tx) => {
+      const scrubbed = await scrubKeys(tx);
+      await tx.provider.delete({ where: { name } });
+      return scrubbed;
+    });
+  }
   // 事务内改写了 ApiKey.providers 并删除了 Provider 行，两个快照都要失效。
   invalidateProviders();
   invalidateKeyRing();

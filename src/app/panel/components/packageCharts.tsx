@@ -115,8 +115,7 @@ function accountSegments(a: PkgAccount, now: number): Seg[] {
 }
 
 // ExpiryDistribution 按剩余天数聚合的全池到期分布（对齐 Go renderExpiryDistribution）。
-export function ExpiryDistribution({ accounts }: { accounts: PkgAccount[] }) {
-  const now = Date.now();
+export function ExpiryDistribution({ accounts, now }: { accounts: PkgAccount[]; now: number }) {
   const ok = accounts.filter((a) => !a.error && Number.isFinite(a.remain));
   const uids = ok.map((a) => a.uid).sort();
   const colorMap = new Map(uids.map((uid, i) => [uid, PK_ACCOUNT_COLORS[i % PK_ACCOUNT_COLORS.length]]));

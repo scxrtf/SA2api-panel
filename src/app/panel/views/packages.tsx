@@ -34,6 +34,7 @@ const tagOf = (a: PkgAccount) => reasonTag[a.reason ?? ""] ?? reasonTag.upstream
 
 export function PackagesView({ flash }: { flash: Flash }) {
   const [rows, setRows] = useState<PkgAccount[] | null>(null);
+  const [loadedAt, setLoadedAt] = useState(0);
   const [detailLimit, setDetailLimit] = useState(5);
   const [expandAll, setExpandAll] = useState(false);
 
@@ -41,6 +42,7 @@ export function PackagesView({ flash }: { flash: Flash }) {
     req<{ accounts: PkgAccount[]; detail_limit?: number }>("packages")
       .then((r) => {
         setRows(r.accounts);
+        setLoadedAt(new Date().getTime());
         const n = Number(r.detail_limit);
         setDetailLimit(Number.isFinite(n) && n > 0 ? Math.floor(n) : 5);
       })
@@ -97,7 +99,7 @@ export function PackagesView({ flash }: { flash: Flash }) {
               </span>
             )}
           </div>
-          <ExpiryDistribution accounts={rows} />
+          <ExpiryDistribution accounts={rows} now={loadedAt} />
         </div>
         {rows.map((a) => {
           const failed = a.ok === false;

@@ -31,7 +31,7 @@ function newCuid(): string {
 // createdAt/updatedAt/at 库内有 DEFAULT now()，但 PostgREST 不显式传则库端生效——
 // 与 Prisma 行为一致（Prisma 也不传，靠库默认），故不强制注入；只补 cuid 主键。
 const CUID_PK_TABLES = new Set([
-  "ModelCooldown", "ModelCost", "ApiKey", "MachineKeyAuthorization",
+  "ModelCooldown", "ModelCost", "ApiKey", "MachineKeyAuthorization", "Provider",
   "UsageEvent", "RequestLog", "TaskQueueItem", "ModelHealthCheck", "BalanceSample",
 ]);
 
@@ -76,6 +76,12 @@ function withUpdateDefaults(table: string, data: Record<string, unknown>): Recor
 // 不依赖 schema 反射（17 张表、列名稳定）。
 
 const DATE_COLS = new Set(["createdAt", "updatedAt", "at", "testedAt", "checkedAt"]);
+const BIGINT_COLS = new Set([
+  "expiresAt", "credits", "creditsTotal", "total", "expiring", "earliestAt",
+  "earliestRemain", "disabledAt", "degradeUntil", "cooldownUntil", "breakerUntil",
+  "lastUsed", "usedSeq", "balanceAt", "lastKeepaliveAt", "until", "observedAt",
+  "first", "consumed", "gained",
+]);
 
 function decodeRow(row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -95,7 +101,7 @@ function decodeRow(row: Record<string, unknown>): Record<string, unknown> {
       // 在安全范围内返回 number（非字符串），两种形态都要转 BigInt。
       // 已知 BigInt 列名走精确匹配，避免把普通文本/数值误转。
       (typeof v === "number" && Number.isInteger(v) || typeof v === "string" && /^-?\d+$/.test(v)) &&
-      ["credits", "total", "expiring", "expiresAt", "creditsTotal", "first", "consumed", "gained"].includes(k)
+      BIGINT_COLS.has(k)
     ) {
       out[k] = BigInt(v as string | number);
     } else {
@@ -143,76 +149,120 @@ async function http<T>(method: string, url: string, body?: unknown, extraHeaders
 // ─── where → PostgREST 过滤串 ───────────────────────────────────────────
 
 type Where = Record<string, unknown>;
+type Cond = { col?: string; op: string; value?: unknown; children?: Cond[]; logical?: "and" | "or" };
 
-function pushCond(parts: string[], col: string, cond: Record<string, unknown>): void {
-  for (const [op, val] of Object.entries(cond)) {
-    if (val instanceof Date) {
-      parts.push(`${col}=${op}.${val.toISOString()}`);
-    } else if (Array.isArray(val)) {
-      // in: [a,b,c] → col=in.(a,b,c)
-      const list = val.map((x) => (x instanceof Date ? x.toISOString() : typeof x === "bigint" ? x.toString() : String(x))).join(",");
-      parts.push(`${col}=${op}.(${list})`);
-    } else if (typeof val === "string" && op === "not" && val === "") {
-      // { not: "" } → col=neq.  （Prisma 的 not:"" 等价 PostgREST neq.""）
-      parts.push(`${col}=neq.`);
-    } else if (op === "not") {
-      if (val === null) {
-        // Prisma { not: null } → PostgREST not.is.null
-        parts.push(`${col}=not.is.null`);
-        continue;
-      }
-      // not 也可能是嵌套对象 { not: { lt: x } } 或标量
-      if (val && typeof val === "object" && !(val instanceof Date)) {
-        for (const [innerOp, innerVal] of Object.entries(val as Record<string, unknown>)) {
-          const v = innerVal instanceof Date ? innerVal.toISOString() : String(innerVal);
-          parts.push(`${col}=not.${innerOp}.${v}`);
+// PostgREST 的过滤值不是 URL 参数值：括号、逗号和引号属于逻辑树语法，反斜杠
+// 用于字符串转义。先在逻辑树层构造，再一次性编码，杜绝 split("&") 破坏值。
+function scalar(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "bigint") return value.toString();
+  if (value === null) return "null";
+  return String(value);
+}
+
+function quoteValue(value: unknown): string {
+  return `"${scalar(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function likePattern(value: unknown, op: string): string {
+  const raw = scalar(value).replace(/([\\%*])/g, "\\$1");
+  if (op === "startsWith") return raw + "*";
+  if (op === "endsWith") return "*" + raw;
+  return "*" + raw + "*";
+}
+
+function expandWhere(where: Where | undefined): Where {
+  if (!where) return {};
+  const out: Where = {};
+  for (const [key, value] of Object.entries(where)) {
+    if (key === "uid_model" && value && typeof value === "object" && !(value instanceof Date)) {
+      const compound = value as Record<string, unknown>;
+      out.uid = compound.uid;
+      out.model = compound.model;
+    } else if (key === "AND" || key === "OR") {
+      out[key] = Array.isArray(value) ? value.map((v) => expandWhere(v as Where)) : expandWhere(value as Where);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function fieldConds(col: string, input: unknown): Cond[] {
+  if (!input || typeof input !== "object" || input instanceof Date || Array.isArray(input)) {
+    return [{ col, op: "eq", value: input }];
+  }
+  const out: Cond[] = [];
+  for (const [rawOp, rawValue] of Object.entries(input as Record<string, unknown>)) {
+    if (rawOp === "mode") continue; // Prisma 的辅助修饰符，不是数据库字段或查询参数。
+    if (rawOp === "not") {
+      if (rawValue === null) {
+        out.push({ col, op: "not.is", value: null });
+      } else if (rawValue && typeof rawValue === "object" && !(rawValue instanceof Date) && !Array.isArray(rawValue)) {
+        const insensitive = (rawValue as Record<string, unknown>).mode === "insensitive";
+        for (const [innerOp, innerValue] of Object.entries(rawValue as Record<string, unknown>)) {
+          if (innerOp === "mode") continue;
+          if (["startsWith", "contains", "endsWith"].includes(innerOp)) {
+            out.push({ col, op: `not.${insensitive ? "ilike" : "like"}`, value: likePattern(innerValue, innerOp) });
+          } else {
+            out.push({ col, op: `not.${innerOp}`, value: innerValue });
+          }
         }
       } else {
-        parts.push(`${col}=neq.${val instanceof Date ? val.toISOString() : String(val)}`);
+        out.push({ col, op: "not.eq", value: rawValue });
       }
+      continue;
+    }
+    if (["startsWith", "contains", "endsWith"].includes(rawOp)) {
+      const insensitive = (input as Record<string, unknown>).mode === "insensitive";
+      out.push({ col, op: insensitive ? "ilike" : "like", value: likePattern(rawValue, rawOp) });
+    } else if (rawOp === "in" || rawOp === "notIn") {
+      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+      out.push({ col, op: rawOp === "in" ? "in" : "not.in", value: values });
     } else {
-      parts.push(`${col}=${op}.${val instanceof Date ? val.toISOString() : typeof val === "bigint" ? val.toString() : String(val)}`);
+      out.push({ col, op: rawOp, value: rawValue });
     }
   }
+  return out;
 }
 
-function whereToQuery(where: Where | undefined): string {
-  if (!where || Object.keys(where).length === 0) return "";
-  const parts: string[] = [];
-  for (const [col, cond] of Object.entries(where)) {
-    if (col === "AND" && Array.isArray(cond)) {
-      for (const sub of cond) {
-        const s = whereToQuery(sub as Where);
-        if (s) parts.push(s);
-      }
-    } else if (col === "OR" && Array.isArray(cond)) {
-      // PostgREST: or=(col.op.val,col.op.val)；子条件本身是 col=op.val 形态，
-      // 直接把 = 换成 . 是不行的（逻辑树语法不同）。这里把每个子 where 的
-      // "col=op.val" 转成 "col.op.val"，多条件子句用 and(...) 包裹。
-      const subs = (cond as Where[]).map((sub) => {
-        const s = whereToQuery(sub);
-        const parts = s.split("&").filter(Boolean).map((p) => {
-          // "col=op.val" → "col.op.val"；已是 or=/and( 形式则原样保留
-          if (p.includes("(")) return p;
-          const i = p.indexOf("=");
-          return i < 0 ? p : `${p.slice(0, i)}.${p.slice(i + 1)}`;
-        });
-        return parts.length > 1 ? `and(${parts.join(",")})` : parts[0];
-      });
-      parts.push(`or=(${subs.join(",")})`);
-    } else if (cond && typeof cond === "object" && !(cond instanceof Date)) {
-      pushCond(parts, col, cond as Record<string, unknown>);
+function whereTree(where: Where | undefined): Cond[] {
+  const out: Cond[] = [];
+  for (const [key, value] of Object.entries(expandWhere(where))) {
+    if (key === "AND" || key === "OR") {
+      const branches = (Array.isArray(value) ? value : [value]).map((v) => whereTree(v as Where));
+      const children = key === "OR"
+        ? branches.map((branch) => branch.length > 1
+          ? { op: "and", logical: "and" as const, children: branch }
+          : branch[0]).filter((branch): branch is Cond => !!branch)
+        : branches.flat();
+      if (children.length) out.push({ op: key === "AND" ? "and" : "or", logical: key === "AND" ? "and" : "or", children });
     } else {
-      // 标量等值
-      parts.push(`${col}=eq.${cond instanceof Date ? cond.toISOString() : typeof cond === "bigint" ? cond.toString() : String(cond)}`);
+      out.push(...fieldConds(key, value));
     }
   }
-  return parts.join("&");
+  return out;
 }
 
-function buildSelect(select: Record<string, boolean> | undefined): string | null {
-  if (!select) return null;
-  return Object.keys(select).filter((k) => select[k]).join(",");
+function renderCond(cond: Cond): string {
+  if (cond.children) {
+    return `${cond.logical}(${cond.children.map(renderCond).join(",")})`;
+  }
+  const col = cond.col!;
+  if (cond.op.endsWith(".in")) {
+    return `${col}.${cond.op}.(${(cond.value as unknown[]).map(quoteValue).join(",")})`;
+  }
+  // null 只属于 is / not.is；比较操作符保留 PostgREST 原生 null 语义。
+  return `${col}.${cond.op}.${cond.value === null ? "null" : quoteValue(cond.value)}`;
+}
+
+function whereParams(where: Where | undefined): [string, string][] {
+  return whereTree(where).map((cond) => {
+    if (cond.children) return [cond.logical!, renderCond(cond)];
+    const rendered = renderCond(cond);
+    const split = rendered.indexOf(".");
+    return [rendered.slice(0, split), rendered.slice(split + 1)];
+  });
 }
 
 function buildOrder(orderBy: Record<string, "asc" | "desc"> | Record<string, "asc" | "desc">[] | undefined): string | null {
@@ -279,7 +329,6 @@ async function fetchUidSet(
 async function resolveRelFilters(
   table: string,
   where: Where | undefined,
-  postFilterUids: Set<string>[],
 ): Promise<{ where: Where | undefined; shortCircuit: boolean }> {
   const defs = REL_FILTER[table];
   if (!where || !defs) return { where, shortCircuit: false };
@@ -287,26 +336,37 @@ async function resolveRelFilters(
   let shortCircuit = false;
   for (const [col, cond] of Object.entries(where)) {
     const def = defs[col];
-    const inner = cond && typeof cond === "object" && !(cond instanceof Date)
-      ? (cond as Record<string, unknown>).is ?? (cond as Record<string, unknown>).isNot
-      : undefined;
+    const wrapper = cond && typeof cond === "object" && !(cond instanceof Date)
+      ? cond as Record<string, unknown> : undefined;
+    const negated = wrapper?.isNot !== undefined;
+    const inner = wrapper?.is ?? wrapper?.isNot;
     if (!def || inner === undefined || inner === null || typeof inner !== "object") {
       out[col] = cond;
       continue;
     }
     const { uids } = await fetchUidSet(def.table, inner as Record<string, unknown>);
-    if (!uids || uids.size === 0) { shortCircuit = true; continue; }
-    postFilterUids.push(uids);
+    const matched = uids ?? new Set<string>();
     const existing = out[def.selfKey];
-    if (existing && typeof existing === "object" && !(existing instanceof Date) &&
-        Array.isArray((existing as Record<string, unknown>).in)) {
-      const prev = (existing as { in: unknown[] }).in;
-      (existing as { in: unknown[] }).in = prev.filter((x) => uids.has(String(x)));
-      if ((existing as { in: unknown[] }).in.length === 0) shortCircuit = true;
-    } else if (typeof existing === "string") {
-      if (!uids.has(existing)) shortCircuit = true;
+    const current = existing && typeof existing === "object" && !(existing instanceof Date) &&
+      Array.isArray((existing as Record<string, unknown>).in)
+      ? (existing as { in: unknown[] }).in.map(String)
+      : typeof existing === "string" ? [existing] : null;
+
+    if (negated) {
+      // isNot：保留关系不满足子条件的父行；空匹配集不排除任何父行。
+      // 已有 in 白名单时先移除匹配 uid，否则用 not.in 让数据库排除。
+      if (current) {
+        const kept = current.filter((uid) => !matched.has(uid));
+        if (!kept.length) shortCircuit = true;
+        out[def.selfKey] = { in: kept };
+      } else if (matched.size) {
+        out[def.selfKey] = { notIn: [...matched] };
+      }
     } else {
-      out[def.selfKey] = { in: [...uids] };
+      if (!matched.size) { shortCircuit = true; continue; }
+      const kept = current ? current.filter((uid) => matched.has(uid)) : [...matched];
+      if (!kept.length) shortCircuit = true;
+      out[def.selfKey] = { in: kept };
     }
   }
   return { where: out, shortCircuit };
@@ -352,57 +412,47 @@ function buildSelectWithInclude(
 }
 
 function buildFindUrl(table: string, args: FindArgs = {}): string {
-  const q: string[] = [];
+  const search = new URLSearchParams();
   const sel = buildSelectWithInclude(args.select, args.include);
-  if (sel) q.push(`select=${sel}`);
-  const w = whereToQuery(args.where);
-  if (w) q.push(w);
+  if (sel) search.set("select", sel);
+  for (const [key, value] of whereParams(args.where)) search.append(key, value);
   const ord = buildOrder(args.orderBy);
-  if (ord) q.push(`order=${ord}`);
-  if (typeof args.take === "number") q.push(`limit=${args.take}`);
-  if (typeof args.skip === "number") q.push(`offset=${args.skip}`);
-  return `${BASE_URL}/${encodeURIComponent(table)}${q.length ? "?" + q.join("&") : ""}`;
+  if (ord) search.set("order", ord);
+  if (typeof args.take === "number") search.set("limit", String(args.take));
+  if (typeof args.skip === "number") search.set("offset", String(args.skip));
+  const query = search.toString();
+  return `${BASE_URL}/${encodeURIComponent(table)}${query ? "?" + query : ""}`;
 }
+
+const PAGE_SIZE = 1000;
 
 async function dalFindMany<T>(table: string, args: FindArgs = {}): Promise<T[]> {
   assertSupported(table, args.select, args.include);
-  const postFilterUids: Set<string>[] = [];
-  const { where, shortCircuit } = await resolveRelFilters(table, args.where, postFilterUids);
+  const { where, shortCircuit } = await resolveRelFilters(table, args.where);
   if (shortCircuit) return [];
-  const rows = await http<Record<string, unknown>[]>("GET", buildFindUrl(table, { ...args, where }));
-  let out = (rows ?? []).map((r) => decodeRow(r)) as T[];
-  if (postFilterUids.length && !hasEmbed(table, args)) {
-    const key = PK_COL[table] ?? "id";
-    for (const set of postFilterUids) {
-      out = out.filter((r) => set.has(String((r as Record<string, unknown>)[key])));
-    }
+  const take = args.take;
+  const skip = Math.max(0, args.skip ?? 0);
+  const bounded = typeof take === "number";
+  const wanted = bounded ? Math.max(0, take) : Number.POSITIVE_INFINITY;
+  if (wanted === 0) return [];
+  const out: T[] = [];
+  let offset = skip;
+  // 未显式分页时读完整结果，避免聚合/统计静默只算前 1000 行。
+  // 显式 take/skip 仍保持 Prisma 的截断语义，仅按网关页大小内部翻页。
+  for (;;) {
+    const limit = Math.min(PAGE_SIZE, wanted - out.length);
+    const rows = await http<Record<string, unknown>[]>("GET", buildFindUrl(table, {
+      ...args, where, take: limit, skip: offset,
+    }));
+    const page = (rows ?? []).map((row) => decodeRow(row) as T);
+    out.push(...page);
+    if (page.length < limit || out.length >= wanted) break;
+    offset += page.length;
   }
   return out;
 }
 
-function hasEmbed(table: string, args: FindArgs): boolean {
-  // select/include 显式嵌入了被过滤关系时，PostgREST 返回的父行已按
-  // 子表存在性裁剪（inner join 语义由 embed 决定），不再做 uid 就地过滤；
-  // 但当前调用点均未嵌入，故默认走过滤。此处只判 include，简单可靠。
-  const defs = REL_FILTER[table];
-  if (!defs) return false;
-  for (const rel of Object.keys(defs)) {
-    if (args.include?.[rel]) return true;
-    const sel = args.select?.[rel];
-    if (sel && typeof sel === "object") return true;
-  }
-  return false;
-}
-
 async function dalFindFirst<T>(table: string, args: FindArgs = {}): Promise<T | null> {
-  // 关系过滤 + take:1 时不能先截断再过滤（可能过滤掉唯一匹配行）：
-  // 有过滤谓词时退化为拉全量再取首行（Account 表 3k 行内，成本可接受）。
-  const hasRel = !!args.where && !!REL_FILTER[table] &&
-    Object.keys(args.where).some((k) => REL_FILTER[table]?.[k]);
-  if (hasRel) {
-    const rows = await dalFindMany<T>(table, { ...args, take: undefined });
-    return rows[0] ?? null;
-  }
   const rows = await dalFindMany<T>(table, { ...args, take: 1 });
   return rows[0] ?? null;
 }
@@ -411,8 +461,16 @@ async function dalFindUnique<T>(table: string, args: { where: Where; select?: Re
   return dalFindFirst<T>(table, args);
 }
 
+function writeUrl(table: string, where?: Where, select?: Record<string, boolean>): string {
+  const search = new URLSearchParams(whereParams(where));
+  const projection = buildSelectWithInclude(select, undefined);
+  if (projection) search.set("select", projection);
+  const query = search.toString();
+  return `${BASE_URL}/${encodeURIComponent(table)}${query ? "?" + query : ""}`;
+}
+
 async function dalCreate<T>(table: string, args: { data: Record<string, unknown>; select?: Record<string, boolean> }): Promise<T> {
-  const rows = await http<Record<string, unknown>[]>("POST", `${BASE_URL}/${encodeURIComponent(table)}`,
+  const rows = await http<Record<string, unknown>[]>("POST", writeUrl(table, undefined, args.select),
     [encodeRow(withDefaults(table, args.data))], { Prefer: "return=representation" });
   return decodeRow(rows[0]) as T;
 }
@@ -424,29 +482,27 @@ async function dalCreateMany(table: string, args: { data: Record<string, unknown
 }
 
 async function dalUpdate<T>(table: string, args: { where: Where; data: Record<string, unknown>; select?: Record<string, boolean> }): Promise<T> {
-  const url = `${BASE_URL}/${encodeURIComponent(table)}?${whereToQuery(args.where)}`;
+  const url = writeUrl(table, args.where, args.select);
   const rows = await http<Record<string, unknown>[]>("PATCH", url, encodeRow(withUpdateDefaults(table, args.data)), { Prefer: "return=representation" });
   if (!rows.length) throw new Error(`dal update ${table}: 0 rows affected`);
   return decodeRow(rows[0]) as T;
 }
 
 async function dalUpdateMany(table: string, args: { where?: Where; data: Record<string, unknown> }): Promise<{ count: number }> {
-  const w = whereToQuery(args.where);
-  const url = `${BASE_URL}/${encodeURIComponent(table)}${w ? "?" + w : ""}`;
+  const url = writeUrl(table, args.where);
   const rows = await http<Record<string, unknown>[]>("PATCH", url, encodeRow(withUpdateDefaults(table, args.data)), { Prefer: "return=representation" });
   return { count: rows.length };
 }
 
 async function dalDelete<T>(table: string, args: { where: Where; select?: Record<string, boolean> }): Promise<T> {
-  const url = `${BASE_URL}/${encodeURIComponent(table)}?${whereToQuery(args.where)}`;
+  const url = writeUrl(table, args.where, args.select);
   const rows = await http<Record<string, unknown>[]>("DELETE", url, undefined, { Prefer: "return=representation" });
   if (!rows.length) throw new Error(`dal delete ${table}: 0 rows affected`);
   return decodeRow(rows[0]) as T;
 }
 
 async function dalDeleteMany(table: string, args: { where?: Where } = {}): Promise<{ count: number }> {
-  const w = whereToQuery(args.where);
-  const url = `${BASE_URL}/${encodeURIComponent(table)}${w ? "?" + w : ""}`;
+  const url = writeUrl(table, args.where);
   const rows = await http<Record<string, unknown>[]>("DELETE", url, undefined, { Prefer: "return=representation" });
   return { count: rows.length };
 }
@@ -457,26 +513,29 @@ async function dalUpsert<T>(table: string, args: {
   update: Record<string, unknown>;
   select?: Record<string, boolean>;
 }): Promise<T> {
-  // 先探测冲突列：where 里第一个标量等值键。
-  const conflictCol = Object.keys(args.where)[0];
-  const row = { ...encodeRow(withDefaults(table, args.create)), ...encodeRow(args.where as Record<string, unknown>) };
-  const url = `${BASE_URL}/${encodeURIComponent(table)}?on_conflict=${encodeURIComponent(conflictCol)}`;
-  const rows = await http<Record<string, unknown>[]>("POST", url, [row],
-    { Prefer: "resolution=merge-duplicates,return=representation" });
-  return decodeRow(rows[0]) as T;
+  // 保留 Prisma create/update 分离语义，不能把 update 字段误用于首次插入。
+  const existing = await dalFindFirst<T>(table, { where: args.where, select: args.select });
+  if (existing) return dalUpdate<T>(table, { where: args.where, data: args.update, select: args.select });
+  try {
+    return await dalCreate<T>(table, { data: args.create, select: args.select });
+  } catch (error) {
+    // 并发插入唯一键冲突后，胜出的行已经存在；转走 update 分支。
+    if (!/\b409\b|P0001|23505|duplicate key/i.test(error instanceof Error ? error.message : String(error))) throw error;
+    const raced = await dalFindFirst<T>(table, { where: args.where, select: args.select });
+    if (!raced) throw error;
+    return dalUpdate<T>(table, { where: args.where, data: args.update, select: args.select });
+  }
 }
 
 async function dalCount(table: string, args: { where?: Where } = {}): Promise<number> {
-  const w = whereToQuery(args.where);
   const pk = PK_COL[table] ?? "id";
   // 网关对 HEAD / count=exact 都返回 400，且单页上限 1000 行；
   // 分页拉主键列自数（实测全量 UsageEvent 28k 行 ≈ 29 次往返，秒级）。
-  const qs = w ? `&${w}` : "";
   let offset = 0, total = 0;
-  const PAGE = 1000;
+  const PAGE = PAGE_SIZE;
   for (;;) {
-    const rows = await http<Record<string, unknown>[]>("GET",
-      `${BASE_URL}/${encodeURIComponent(table)}?select=${pk}&limit=${PAGE}&offset=${offset}${qs}`);
+    const url = buildFindUrl(table, { where: args.where, select: { [pk]: true }, take: PAGE, skip: offset });
+    const rows = await http<Record<string, unknown>[]>("GET", url);
     total += rows?.length ?? 0;
     if (!rows || rows.length < PAGE) break;
     offset += PAGE;

@@ -48,4 +48,4 @@ RUN chown -R node:node /app
 USER node
 
 EXPOSE 3000
-CMD ["sh", "-c", "if [ -n \"$DIRECT_URL\" ]; then npx prisma migrate deploy; fi; exec npm run start"]
+CMD ["sh", "-c", "if [ \"$USE_CLOUDBASE_REST\" != \"1\" ]; then npx prisma migrate deploy || exit 1; fi; exec npm run start"]

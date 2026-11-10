@@ -2,6 +2,7 @@
 // 外部调度（cron-job.org / Railway Cron 插件）打 HTTP 触发；Bearer 校验在路由层。
 import { randomUUID } from "crypto";
 import { prisma } from "./db";
+import { isCloudbaseRestEnabled } from "./cloudbase-rest";
 import type { AppConfig } from "./config";
 import { getConfig } from "./config";
 import * as pool from "./pool";
@@ -126,11 +127,6 @@ const KEEPALIVE_SAVE_RETRY_MS = 250;
 
 const keepaliveSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function useCloudbaseRest(): boolean {
-  const v = (process.env.USE_CLOUDBASE_REST ?? "").toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
-}
-
 // CloudBase PostgREST 通道下的租约实现：读-判-写非原子，但 keepalive 是低频任务
 // （scheduler/cron/panel 三源、分钟级），单容器内并发碰撞概率可忽略；抢占语义不变。
 async function acquireKeepaliveLeaseDal(ttlMs: number): Promise<string | null> {
@@ -154,7 +150,7 @@ async function acquireKeepaliveLeaseDal(ttlMs: number): Promise<string | null> {
 // acquireKeepaliveLease 用 Setting 行的幂等主键做跨进程原子租约。
 // value 格式为 "<expiresAtUnixMs>:<owner>"；只有过期 lease 能被抢占。
 async function acquireKeepaliveLease(ttlMs: number): Promise<string | null> {
-  if (useCloudbaseRest()) return acquireKeepaliveLeaseDal(ttlMs);
+  if (isCloudbaseRestEnabled()) return acquireKeepaliveLeaseDal(ttlMs);
   const now = Date.now();
   const token = randomUUID();
   const value = `${now + ttlMs}:${token}`;
@@ -259,31 +255,45 @@ async function refreshKeepaliveAccount(
     : a.expiresAt;
   for (let attempt = 1; attempt <= KEEPALIVE_SAVE_ATTEMPTS; attempt++) {
     try {
-      await prisma.$transaction([
-        prisma.account.update({
-          where: { uid: a.uid },
-          data: {
-            accessToken: patch.accessToken ?? a.accessToken,
-            refreshToken: patch.refreshToken ?? a.refreshToken,
-            expiresAt: nextExpiresAt,
-            domain: patch.domain ?? a.domain,
-          },
-        }),
-        prisma.accountState.upsert({
-          where: { uid: a.uid },
-          create: {
-            uid: a.uid,
-            lastKeepaliveAt: BigInt(savedAt),
-            sessionStrikes: 0,
-            sessionDead: false,
-          },
-          update: {
-            lastKeepaliveAt: BigInt(savedAt),
-            sessionStrikes: 0,
-            sessionDead: false,
-          },
-        }),
-      ]);
+      const accountData = {
+        accessToken: patch.accessToken ?? a.accessToken,
+        refreshToken: patch.refreshToken ?? a.refreshToken,
+        expiresAt: nextExpiresAt,
+        domain: patch.domain ?? a.domain,
+      };
+      const stateData = {
+        lastKeepaliveAt: BigInt(savedAt),
+        sessionStrikes: 0,
+        sessionDead: false,
+      };
+      if (isCloudbaseRestEnabled()) {
+        // PostgREST 单次 HTTP 调用没有跨表事务。顺序完成后做补偿，避免状态写入
+        // 失败留下“新 token 已保存、保活时间未更新”的半完成记录。
+        await prisma.account.update({ where: { uid: a.uid }, data: accountData });
+        try {
+          await prisma.accountState.upsert({
+            where: { uid: a.uid },
+            create: { uid: a.uid, ...stateData },
+            update: stateData,
+          });
+        } catch (error) {
+          await prisma.account.update({
+            where: { uid: a.uid },
+            data: {
+              accessToken: a.accessToken, refreshToken: a.refreshToken,
+              expiresAt: a.expiresAt, domain: a.domain,
+            },
+          }).catch(() => undefined);
+          throw error;
+        }
+      } else {
+        await prisma.$transaction([
+          prisma.account.update({ where: { uid: a.uid }, data: accountData }),
+          prisma.accountState.upsert({
+            where: { uid: a.uid }, create: { uid: a.uid, ...stateData }, update: stateData,
+          }),
+        ]);
+      }
       return { ok: true };
     } catch (e) {
       lastErr = e;

@@ -8,9 +8,9 @@
 // 置 CLOUDBASE_SDK=1 时切换到 @cloudbase/js-sdk v3 的 rdb() 通道
 // （官方 SDK，自动处理鉴权刷新与关联查询语法糖）。两者返回同样的行数组。
 //
-// 边界：本模块只做"读"路径的高频表（Account / ApiKey / BalanceSample）。
-// 写路径、复杂事务、调度核心（pool.ts）仍走 Prisma 直连源库（db.prisma.io），
-// 由 USE_CLOUDBASE_REST 环境变量灰度切换，保留快速回滚能力。
+// 边界：本模块保留少量专用的 REST 读写与监控原语；Prisma 形态的通用 CRUD
+// 统一由 dal.ts 提供。USE_CLOUDBASE_REST=1 时读写均走 CloudBase，原生 SQL
+// 与事务调用点必须有各自的 CloudBase 实现，不再隐式依赖 Prisma 写源。
 
 const BASE_URL = process.env.CLOUDBASE_POSTGREST_URL ?? "";
 const API_KEY = process.env.CLOUDBASE_API_KEY ?? "";
@@ -259,11 +259,14 @@ export async function cbApiKeyByName(name: string): Promise<CbApiKey | null> {
 
 // ─── BalanceSample ────────────────────────────────────────────────────────
 export type CbBalanceSample = {
-  id: number;
+  id: string;
   uid: string;
   at: string;             // timestamptz ISO
-  credits: string;        // numeric / bigint
-  creditsTotal: string;
+  credits: string | number;
+  day: string;
+  first: string | number;
+  consumed: string | number;
+  gained: string | number;
 };
 
 export async function cbBalanceSamples(opts: {
@@ -286,7 +289,7 @@ export async function cbBalanceSamples(opts: {
 
 // ─── 灰度开关 ────────────────────────────────────────────────────────────
 // true 时调用方应优先走本模块；false 时回退到 prisma。
-export function useCloudbaseRest(): boolean {
+export function isCloudbaseRestEnabled(): boolean {
   const v = (process.env.USE_CLOUDBASE_REST ?? "").toLowerCase();
   return v === "1" || v === "true" || v === "yes";
 }

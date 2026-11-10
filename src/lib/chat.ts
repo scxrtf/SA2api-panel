@@ -510,9 +510,12 @@ export async function handleChat(opts: {
   let budgetExtendedModel = "";
   const extendRotationBudget = async (kind: ErrKind) => {
     if (budgetExtendedModel === curModel) return;
-    budgetExtendedModel = curModel;
+    budgetExtendedModel = curModel + "#" + queueRetryRounds;
     const candidates = await pool.availableCountForModel(curModel, realm);
-    const capped = Math.min(attemptCount + candidates, Math.max(ROTATION_HARD_CAP, cfg.max_rotate));
+    // 最后一个账号刚进入冷却时 candidates=0，也必须留一次进入容量等待的
+    // 循环机会；短 6020 随后由 queueRetryRounds 独立限次，不扩大普通错误预算。
+    const reserveCapacityTurn = kind === "soft_queue" ? 1 : 0;
+    const capped = Math.min(attemptCount + candidates + reserveCapacityTurn, Math.max(ROTATION_HARD_CAP, cfg.max_rotate));
     if (capped > rotationBudget) {
       runlog("rotation budget: " + rotationBudget + " -> " + capped +
         " (" + kind + ", candidates=" + candidates + ")");
@@ -844,6 +847,12 @@ export async function handleChat(opts: {
           await extendRotationBudget(kind);
           lastErr = { kind, status: 429, msg: respBody, retryAfterMs: retryMs };
           fail(acct.uid);
+          // 单账号短队列：预算已尽时先在这里等待并完整重扫，避免 for 的
+          // 条件在下一次选号前退出。多账号仍先自然覆盖其他健康候选。
+          if (attemptCount >= rotationBudget &&
+              await waitForCapacity(curModel, realm, tried)) {
+            await extendRotationBudget(kind);
+          }
           continue;
         }
 

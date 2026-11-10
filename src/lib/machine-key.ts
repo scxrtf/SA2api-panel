@@ -7,9 +7,10 @@ export const MACHINE_COOKIE = "wb2a_machine_id";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function verifyMachinePassword(input: unknown): boolean {
-  if (typeof input !== "string") return false;
+  const password = process.env.WB2A_MACHINE_PASSWORD;
+  if (typeof input !== "string" || input === "" || !password) return false;
   const actual = createHash("sha256").update(input, "utf8").digest();
-  const expected = createHash("sha256").update("123456asd", "utf8").digest();
+  const expected = createHash("sha256").update(password, "utf8").digest();
   return timingSafeEqual(actual, expected);
 }
 

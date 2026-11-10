@@ -19,3 +19,8 @@ README.md
 AGENTS.md
 scripts-*.js
 scripts-*.cjs
+.codex-backup
+.runtime
+*.log
+scripts/_probe-*
+scripts/_smoke-*

@@ -1,4 +1,4 @@
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { panelAuth, ok } from "@/lib/panel-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 

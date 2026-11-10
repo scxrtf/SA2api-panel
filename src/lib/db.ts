@@ -9,13 +9,9 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { dal } from "./dal";
+import { isCloudbaseRestEnabled } from "./cloudbase-rest";
 
 const globalForDb = globalThis as unknown as { prisma?: PrismaClient };
-
-function useCloudbaseRest(): boolean {
-  const v = (process.env.USE_CLOUDBASE_REST ?? "").toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
-}
 
 function createClient(): PrismaClient {
   const url = process.env.DATABASE_URL;
@@ -38,12 +34,12 @@ function getClient(): PrismaClient {
 // Proxy 转发所有属性访问到真实 client；build 期无人解引用则不触发建连。
 export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
   get(_target, prop, receiver) {
-    if (useCloudbaseRest()) {
+    if (isCloudbaseRestEnabled()) {
       const d = (dal as unknown as Record<PropertyKey, unknown>)[prop];
       if (d !== undefined) return d;
     }
     const client = getClient() as unknown as Record<PropertyKey, unknown>;
     const value = Reflect.get(client, prop, receiver);
-    return typeof value === "function" ? (value as Function).bind(client) : value;
+    return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(client) : value;
   },
 });

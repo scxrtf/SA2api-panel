@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { SeriesDim, UsageAggRow } from "./usage-aggregation";
 import { dal } from "./dal";
+import { isCloudbaseRestEnabled } from "./cloudbase-rest";
 
 export interface UsageQuery {
   since: Date | null;
@@ -11,11 +12,6 @@ export interface UsageQuery {
 
 interface QueryRunner {
   $queryRaw<T>(query: Prisma.Sql): Promise<T>;
-}
-
-function useCloudbaseRest(): boolean {
-  const v = (process.env.USE_CLOUDBASE_REST ?? "").toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
 }
 
 // ─── CloudBase 应用层聚合 ────────────────────────────────────────────────
@@ -80,7 +76,7 @@ async function queryUsageAggregateDal(q: UsageQuery): Promise<UsageAggRow[]> {
   }
   const rows = await dal.usageEvent.findMany({ where }) as unknown as RawUsageRow[];
   const out: UsageAggRow[] = [];
-  const grp = <T>(fn: (r: RawUsageRow) => string, filter: (r: RawUsageRow) => boolean, dimension: string, keyOf: (r: RawUsageRow) => [string, string, string], bucket = false) => {
+  const grp = (fn: (r: RawUsageRow) => string, filter: (r: RawUsageRow) => boolean, dimension: string, keyOf: (r: RawUsageRow) => [string, string, string], bucket = false) => {
     const m = new Map<string, Sums>();
     const meta = new Map<string, [string, string, string]>();
     for (const r of rows) {
@@ -158,7 +154,7 @@ export async function queryUsageAggregate(
   db: QueryRunner,
   q: UsageQuery,
 ): Promise<UsageAggRow[]> {
-  if (useCloudbaseRest()) return queryUsageAggregateDal(q);
+  if (isCloudbaseRestEnabled()) return queryUsageAggregateDal(q);
   // UsageEvent."at" 是 timestamp without time zone，Prisma 按 UTC 写入墙钟。
   // 先 AT TIME ZONE 'UTC' 还原成带时区时刻，再转 Asia/Shanghai，
   // 否则 to_char 会按会话时区（Supabase 默认 UTC）渲染，导致小时桶整体早 8 小时。

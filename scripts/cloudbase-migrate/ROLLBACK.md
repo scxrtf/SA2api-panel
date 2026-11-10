@@ -37,9 +37,8 @@ CloudBase 个人版共享 PG **不提供 TCP 直连**，所以现有 `@prisma/ad
 5. 行数对拍：`scripts/cloudbase-verify-counts.mjs` 14 表全量一致（51,422 行）。
 6. 写链路验证：`scripts/dal-write-test.mjs` create/createMany/update/count/deleteMany 全通。
 
-## 折中：保留 Prisma 写源、CloudBase 做查询只读副本
+## 当前运行模式
 
-短期最稳的方案：
-- `.env` 仍指向 `db.prisma.io`（已保持现状）；
-- 新增一个只读 route 用 PostgREST 拉数据，验证迁移正确性；
-- 后续要么等 CloudBase 出独享 PG，要么改应用层。
+- `USE_CLOUDBASE_REST=1`：CloudBase PostgREST 为唯一读写源，容器启动时跳过 Prisma migration。
+- 未启用 CloudBase REST：Prisma/PostgreSQL 为读写源，容器启动时执行 `prisma migrate deploy`。
+- 回滚时同步恢复环境变量并重启，避免应用读写源与启动迁移通道不一致。

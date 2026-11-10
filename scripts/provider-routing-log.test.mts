@@ -253,8 +253,8 @@ try {
   };
   db.requestLog.findUnique = async ({ where, select }: any) => {
     if (where.id !== detailEntry.id) return null;
-    assert.equal(select.requestMessages, undefined);
-    assert.equal(select.responseMessage, undefined);
+    assert.equal(select.requestMessages, true);
+    assert.equal(select.responseMessage, true);
     return Object.fromEntries(Object.keys(select).map((key) => [key, (detailEntry as any)[key]]));
   };
   const { GET: getLogDetail } = await import(
@@ -267,8 +267,8 @@ try {
   assert.equal(detailResp.status, 200);
   const detailBody = await detailResp.json() as any;
   assert.equal(detailBody.ok, true);
-  assert.equal(detailBody.entry.requestMessages, undefined);
-  assert.equal(detailBody.entry.responseMessage, undefined);
+  assert.deepEqual(detailBody.entry.requestMessages, detailEntry.requestMessages);
+  assert.deepEqual(detailBody.entry.responseMessage, detailEntry.responseMessage);
   assert.deepEqual(detailBody.entry.parameterOverrides, detailEntry.parameterOverrides);
   assert.deepEqual(detailBody.entry.attemptDetails, detailEntry.attemptDetails);
   detailResp = await getLogDetail(

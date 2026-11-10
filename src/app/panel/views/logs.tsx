@@ -245,58 +245,72 @@ export function LogsView({ flash }: { flash: Flash }) {
   const [details, setDetails] = useState<Record<string, ReqLogDetail>>({});
   const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState("");
   const logViewRef = useRef<HTMLDivElement>(null);
   const [followLogs, setFollowLogs] = useState(true);
   // 增量游标（ms）：轮询只取游标之后的新行；手动刷新 / 改过滤 / 切模式时归零全量重拉。
   const runtimeSinceRef = useRef(0);
   const reqSinceRef = useRef(0);
+  const requestSeqRef = useRef(0);
 
-  const load = useCallback((delta = false) => {
-    if (mode === "runtime") {
-      const since = delta ? runtimeSinceRef.current : 0;
-      req<{ entries: LogEntry[]; mode?: string }>("logs" + (since ? "?since=" + since : ""))
-        .then((r) => {
-          const incoming = r.entries.filter((e) => ch === "all" || e.ch === ch);
-          if (since && r.mode === "delta") setLogs((prev) => mergeRuntime(prev, incoming));
-          else setLogs(incoming);
-          const maxTs = r.entries.reduce((m, e) => (e.ts > m ? e.ts : m), 0);
-          if (maxTs > runtimeSinceRef.current) runtimeSinceRef.current = maxTs;
-        })
-        .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
-    } else {
-      const q = new URLSearchParams();
-      if (filter.account) q.set("account", filter.account);
-      if (filter.model) q.set("model", filter.model);
-      if (filter.outcome) q.set("outcome", filter.outcome);
-      if (filter.key) q.set("key", filter.key);
-      if (filter.err) q.set("err", filter.err);
-      if (ipFilter) q.set("client_ip", ipFilter);
-      // 只有无过滤且已有游标时才走增量：过滤条件变化必须全量重查，
-      // 否则会把「旧页里不满足新条件下拉」的行继续留在表上。
-      const filtered = !!(filter.account || filter.model || filter.outcome ||
-        filter.key || filter.err || ipFilter);
-      const useDelta = delta && !filtered && reqSinceRef.current > 0;
-      if (useDelta) q.set("since", String(reqSinceRef.current));
-      req<{ entries: ReqLog[]; mode?: string }>("request_logs?" + q.toString())
-        .then((r) => {
-          if (useDelta && r.mode === "delta") setReqs((prev) => mergeRequests(prev, r.entries));
-          else setReqs(r.entries);
-          const maxAt = r.entries.reduce((m, e) => {
-            const t = Date.parse(e.at);
-            return t > m ? t : m;
-          }, 0);
-          if (maxAt > reqSinceRef.current) reqSinceRef.current = maxAt;
-        })
-        .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+  const load = useCallback(async (delta = false) => {
+    const seq = ++requestSeqRef.current;
+    setLoading(true);
+    setLoadError("");
+    try {
+      if (mode === "runtime") {
+        const since = delta ? runtimeSinceRef.current : 0;
+        const r = await req<{ entries: LogEntry[]; mode?: string }>("logs" + (since ? "?since=" + since : ""));
+        if (seq !== requestSeqRef.current) return;
+        const incoming = r.entries.filter((e) => ch === "all" || e.ch === ch);
+        if (since && r.mode === "delta") setLogs((prev) => mergeRuntime(prev, incoming));
+        else setLogs(incoming);
+        const maxTs = r.entries.reduce((m, e) => (e.ts > m ? e.ts : m), 0);
+        if (maxTs > runtimeSinceRef.current) runtimeSinceRef.current = maxTs;
+      } else {
+        const q = new URLSearchParams();
+        if (filter.account) q.set("account", filter.account);
+        if (filter.model) q.set("model", filter.model);
+        if (filter.outcome) q.set("outcome", filter.outcome);
+        if (filter.key) q.set("key", filter.key);
+        if (filter.err) q.set("err", filter.err);
+        if (ipFilter) q.set("client_ip", ipFilter);
+        // 只有无过滤且已有游标时才走增量：过滤条件变化必须全量重查，
+        // 否则会把「旧页里不满足新条件下拉」的行继续留在表上。
+        const filtered = !!(filter.account || filter.model || filter.outcome ||
+          filter.key || filter.err || ipFilter);
+        const useDelta = delta && !filtered && reqSinceRef.current > 0;
+        if (useDelta) q.set("since", String(reqSinceRef.current));
+        const r = await req<{ entries: ReqLog[]; mode?: string }>("request_logs?" + q.toString());
+        if (seq !== requestSeqRef.current) return;
+        if (useDelta && r.mode === "delta") setReqs((prev) => mergeRequests(prev, r.entries));
+        else setReqs(r.entries);
+        const maxAt = r.entries.reduce((m, e) => {
+          const t = Date.parse(e.at);
+          return t > m ? t : m;
+        }, 0);
+        if (maxAt > reqSinceRef.current) reqSinceRef.current = maxAt;
+      }
+      setLastLoadedAt(Date.now());
+    } catch (e) {
+      if (seq !== requestSeqRef.current) return;
+      const msg = e instanceof Error ? e.message : String(e);
+      setLoadError(msg);
+      flash("err", msg);
+    } finally {
+      if (seq === requestSeqRef.current) setLoading(false);
     }
   }, [mode, filter, ch, ipFilter, flash]);
   useEffect(() => {
     runtimeSinceRef.current = 0;
     reqSinceRef.current = 0;
-    load(false);
+    const t = setTimeout(() => { void load(false); }, 0);
+    return () => clearTimeout(t);
   }, [load]);
-  useAutoRefresh(() => load(true), 30_000);
-  usePanelRefresh(() => load(false));
+  useAutoRefresh(() => { void load(true); }, 30_000);
+  usePanelRefresh(() => { void load(false); });
 
   useEffect(() => {
     const view = logViewRef.current;
@@ -352,7 +366,14 @@ export function LogsView({ flash }: { flash: Flash }) {
           title="按上游报错正文检索，如 12153 / rate limit / WAF"
           onChange={(e) => setFilter({ ...filter, err: e.target.value })} />
       </>}
-      <button className="btn xs" onClick={() => load(false)}>刷新</button>
+      <span className="dim" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+        {loading ? "正在刷新…" : loadError ? "刷新失败，请重试" : lastLoadedAt
+          ? `更新于 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour12: false })}`
+          : "等待加载"}
+      </span>
+      <button className="btn xs" disabled={loading} onClick={() => { void load(false); }}>
+        {loading ? "刷新中…" : "刷新"}
+      </button>
       {mode === "runtime" && <>
         <select className="select" style={{ width: 104 }} value={ch}
           onChange={(e) => setCh(e.target.value as typeof ch)}>

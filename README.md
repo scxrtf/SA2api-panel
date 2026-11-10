@@ -11,7 +11,7 @@
 | Anthropic 端点 | `/v1/messages`（翻译层） | `/api/v1/messages`（等价移植） |
 | 管理面板 | 内嵌 HTML | `/panel`（React SPA） |
 | 面板 API | `/panel/api/*` | `/api/panel/*` |
-| 状态存储 | auths/*.json + state.json | PostgreSQL（Prisma） |
+| 状态存储 | auths/*.json + state.json | CloudBase PostgREST 或 PostgreSQL（Prisma） |
 | 定时任务 | 进程内 ticker | 外部 cron 打 `/api/cron/*` |
 | 探活 | `/healthz` | `/api/livez`（存活）/ `/api/healthz`（池计数） |
 
@@ -23,35 +23,26 @@ Docker 构建会在独立阶段自动编译并带入运行镜像。
 ```bash
 npm ci
 npm run build:official-tls  # 生成 native/official-tls/bin/official-tls[.exe]
-cp .env.example .env        # 填 DATABASE_URL 与 WB2A_API_KEY
+cp .env.example .env        # 填数据库通道、WB2A_API_KEY 与两个面板密码
 npx prisma migrate dev      # 建表
 npm run dev                 # http://localhost:3000/panel
 ```
 
-## 数据库：Supabase Postgres
+## 数据库通道
 
-1. [supabase.com](https://supabase.com) 建项目，**Connect → ORM → Prisma**，复制两条连接串：
-   - **Transaction pooler**（6543 端口，带 `pgbouncer=true`）→ 填 `DATABASE_URL`
-   - **Session pooler**（5432 端口）→ 填 `DIRECT_URL`（迁移用，schema.prisma 的 directUrl 已配）
-   - 不要用 Direct connection（IPv6-only，Railway 出站可能不通）。
-2. 密码是建项目时设的数据库密码（忘了：Settings → Database → Reset）。
+默认使用 Prisma/PostgreSQL，设置 `DATABASE_URL` 与 `DIRECT_URL` 后运行迁移。
+使用 CloudBase 时设置 `USE_CLOUDBASE_REST=1`、`CLOUDBASE_POSTGREST_URL` 与
+`CLOUDBASE_API_KEY`；CloudBase 模式不执行 Prisma migration。
 
-## 本地开发
-
-```bash
-npm ci
-npm run build:official-tls
-cp .env.example .env        # 填 DATABASE_URL / DIRECT_URL / WB2A_API_KEY
-npx prisma migrate dev      # 建表（走 DIRECT_URL）
-npm run dev                 # http://localhost:3000/panel
-```
+`WB2A_SUPER_PASSWORD` 用于配置、密钥与账号权限操作的二次确认；
+`WB2A_MACHINE_PASSWORD` 用于当前机器的建 Key 授权。两项均无内置默认值。
 
 ## 部署到 Railway
 
 1. Railway 项目 → **+ New → GitHub Repo** 选本仓库（若嵌套在 Go 项目内，
    Settings → Root Directory 填 `wb2api-next`）。
-2. 服务 **Variables** 手动加三条：`DATABASE_URL` / `DIRECT_URL`（见上）/ `WB2A_API_KEY`。
-3. `railway.toml` 内置：build 时 generate + 编译；start 时 `prisma migrate deploy`（走 DIRECT_URL 建表，幂等）。
+2. 服务 **Variables** 设置数据库通道、`WB2A_API_KEY`、`WB2A_SUPER_PASSWORD` 与 `WB2A_MACHINE_PASSWORD`。
+3. 启动时 Prisma 模式执行 `prisma migrate deploy`；CloudBase REST 模式跳过迁移。
 4. **Settings → Networking → Generate Domain** 拿公网域名，访问 `https://域名/panel`。
 
 ### 定时任务（外部 cron）
@@ -65,16 +56,16 @@ npm run dev                 # http://localhost:3000/panel
 
 请求头：`Authorization: Bearer $WB2A_API_KEY`。主密钥为空时 cron 端点返回 503（拒绝未鉴权触发）。
 
-### 磁盘 / 保留策略（Supabase 免费档必看）
+### 磁盘 / 保留策略
 
 `RequestLog` 永不保存请求对话与助手回复，仅保留用量统计、失败诊断、参数覆盖和尝试明细；应用写入与
-数据库触发器都会剥离正文，旧 `REQUEST_LOG_DIALOG` 环境变量不再生效。Supabase 磁盘超限时会把数据库切成
+数据库触发器都会剥离正文，旧 `REQUEST_LOG_DIALOG` 环境变量不再生效。托管 PostgreSQL 磁盘超限时可能把数据库切成
 只读（`default_transaction_read_only=on`），表现为整站写入失败。
 
 - 保留参数（环境变量）：`REQUEST_LOG_RETENTION_DAYS`（默认 7）、`REQUEST_LOG_DETAIL_HOURS`（默认 24，
   超过就清空参数覆盖、尝试明细与错误详情但保留统计列）、`MODEL_HEALTH_RETENTION_DAYS`（默认 3）。
 - 定时打 `/api/cron/retention`（每 6~12 小时）即可自动维持；临时收紧可带 `?days=3&detailHours=12`。
-- 面板「Supabase 监控」实时显示数据库与表占用，提供历史对话清理和保留策略按钮；Egress、Log Ingestion、
+- 面板「CloudBase」显示数据库与表占用，提供历史对话清理和保留策略按钮；Egress、Log Ingestion、
   Log Query 使用可编辑的控制台快照与额度进度条。快照仅保存在当前浏览器，数据库统计每 60 秒缓存刷新。
 - 紧急救火（平台已只读、连清理都跑不动时）：`node scripts/db-truncate.mjs --yes` 直接 `TRUNCATE`
   归还物理空间并附带 `ALTER DATABASE ... SET default_transaction_read_only = off` 解除只读；

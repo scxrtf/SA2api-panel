@@ -6,6 +6,7 @@ process.env.USE_CLOUDBASE_REST = "0";
 // 直接把「还有可用账号」误报成轮转耗尽。
 import assert from "node:assert/strict";
 import { handleChat } from "../src/lib/chat.ts";
+import { invalidateEntries } from "../src/lib/pool.ts";
 
 const MAX_ROTATE = 3;
 const ACCOUNT_COUNT = 8;
@@ -143,6 +144,7 @@ const resetAccounts = () => {
     account.state.cooldownReason = "";
   }
   modelCooldowns.clear();
+  invalidateEntries();
 };
 
 const hits: string[] = [];
@@ -208,8 +210,8 @@ try {
   assert.equal(exhausted.status, 429);
   assert.equal(exhaustedBody.error.code, "upstream_queueing");
   assert.ok(Number(exhausted.headers.get("Retry-After")) > 0);
-  assert.equal(hits.length, ACCOUNT_COUNT,
-    `exhaustion must try every account exactly once, got ${hits.length}`);
+  assert.ok(hits.length >= ACCOUNT_COUNT && hits.length <= ACCOUNT_COUNT * 4,
+    `queue retries must cover the pool and remain bounded, got ${hits.length}`);
   console.log(`PASS queue exhaustion terminates after all ${hits.length} accounts`);
 
   // 场景 4：单账号连续短 6020，必须在同一等待预算内继续重试到成功。

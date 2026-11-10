@@ -14,6 +14,7 @@
     "test:official-egress": "tsx --test scripts/official-egress.test.mts scripts/official-client-hello.test.mts",
     "build:official-tls": "go -C native/official-tls build -trimpath -o bin/ .",
     "test:usage": "tsx --test scripts/usage-aggregation.test.mts",
+    "test:dal": "node --import tsx --test scripts/dal-rest.test.mts",
     "verify:usage": "tsx scripts/verify-usage-parity.mts"
   },
   "dependencies": {

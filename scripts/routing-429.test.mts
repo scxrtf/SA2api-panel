@@ -4,7 +4,7 @@ process.env.USE_CLOUDBASE_REST = "0";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { DEFAULT_CONFIG, getConfig } from "../src/lib/config.ts";
-import { modelBlocked, pick, retryStatus } from "../src/lib/pool.ts";
+import { invalidateEntries, modelBlocked, pick, retryStatus } from "../src/lib/pool.ts";
 import { handleChat } from "../src/lib/chat.ts";
 import { agentToolError, runAgentTool } from "../src/lib/agenttool-route.ts";
 import { UpstreamError } from "../src/lib/upstream/errors.ts";
@@ -234,6 +234,7 @@ try {
     state.set(uid, { ...state.get(uid)!, cooldownUntil: 0n, cooldownReason: "" });
   }
   modelCooldowns.clear();
+  invalidateEntries();
   hits.length = 0;
   const queueExhausted = await request("offline-queue-exhausted");
   assert.equal(queueExhausted.status, 429);
@@ -249,6 +250,7 @@ try {
   for (const uid of state.keys()) {
     state.set(uid, { ...state.get(uid)!, cooldownUntil: BigInt(Date.now() + 15_000) });
   }
+  invalidateEntries();
   const exhausted = await request();
   assert.equal(exhausted.status, 429);
   assert.ok(Number(exhausted.headers.get("Retry-After")) > 0);
@@ -266,9 +268,11 @@ try {
       cooldownReason: "soft_rate: 429",
     });
   }
+  invalidateEntries();
   // getConfig 有 5 秒缓存；独立进程避免本文件先前场景缓存默认值干扰测试。
   const exhaustedOutput = execFileSync(process.execPath, [
-    "--import", "tsx", "--eval", String.raw`
+    "--import", "tsx", "--require", process.env.TEMP + "\\wb2api-offline-register.cjs", "--eval", String.raw`
+      process.env.USE_CLOUDBASE_REST = "0";
       const { getConfig } = await import("./src/lib/config.ts");
       const { handleChat } = await import("./src/lib/chat.ts");
       const makeAccount = (uid) => ({
@@ -342,6 +346,7 @@ try {
   for (const uid of state.keys()) {
     state.set(uid, { ...state.get(uid)!, cooldownUntil: 0n });
   }
+  invalidateEntries();
   hits.length = 0;
   let agentCalls = 0;
   const agentOutcome = await runAgentTool("cn", async () => {
@@ -367,6 +372,7 @@ try {
   for (const uid of state.keys()) {
     state.set(uid, { ...state.get(uid)!, cooldownUntil: 0n });
   }
+  invalidateEntries();
   const queuedAgent = await runAgentTool("cn", async () => {
     throw new UpstreamError("soft_queue", 200,
       '{"code":6020,"msg":"queue.waiting.title"}', 750);

@@ -52,3 +52,7 @@ scripts-*.cjs
 /.runtime/
 /.codex-backup/
 /native/official-tls/bin/
+
+# 本地日志与改盘前备份
+*.log
+*.bak-*

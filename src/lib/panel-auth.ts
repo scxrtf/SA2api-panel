@@ -17,16 +17,15 @@ export function jsonify(v: unknown, status = 200): Response {
   );
 }
 
-// panelAuth 面板鉴权：主密钥为空 = 放行（与 Go 同语义）。非 null 即拒绝。
+// panelAuth 面板鉴权：生产环境主密钥为空时拒绝；仅非生产本地开发允许空密钥。
 export async function panelAuth(req: Request): Promise<Response | null> {
   const cfg = await getConfig();
   if (!verifyBearer(req, cfg.api_key)) return fail(401, "invalid_api_key");
   return null;
 }
 
-// 超级密码：调整 key 的供应商授权时必须二次校验。默认值可用环境变量覆盖，
+// 超级密码：调整 key 的供应商授权时必须二次校验；未配置环境变量时一律拒绝。
 // 比较走 SHA-256 摘要 + timingSafeEqual（与 Bearer 鉴权同口径）。
-const DEFAULT_SUPER_PASSWORD = "QWEZXC2004";
 
 function sha256(s: string): Buffer {
   return createHash("sha256").update(s, "utf8").digest();
@@ -34,6 +33,7 @@ function sha256(s: string): Buffer {
 
 export function verifySuperPassword(input: unknown): boolean {
   if (typeof input !== "string" || input === "") return false;
-  const expected = process.env.WB2A_SUPER_PASSWORD || DEFAULT_SUPER_PASSWORD;
+  const expected = process.env.WB2A_SUPER_PASSWORD;
+  if (!expected) return false;
   return timingSafeEqual(sha256(input), sha256(expected));
 }
