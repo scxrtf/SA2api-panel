@@ -35,7 +35,7 @@ npm run dev                 # http://localhost:3000/panel
 `CLOUDBASE_API_KEY`；CloudBase 模式不执行 Prisma migration。
 
 `WB2A_SUPER_PASSWORD` 用于配置、密钥与账号权限操作的二次确认；
-`WB2A_MACHINE_PASSWORD` 用于当前机器的建 Key 授权。两项均无内置默认值。
+`WB2A_MACHINE_PASSWORD` 用于当前机器的建 Key 授权。本项目两项均配置为 `QWEZXC2004`。
 
 ## 部署到 Railway
 
