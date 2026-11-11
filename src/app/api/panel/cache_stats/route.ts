@@ -27,9 +27,9 @@ export async function GET(req: Request) {
         size: panel.size,
         entries: panel.entries.map((e) => ({
           key: e.key,
-          ttlMs: Math.max(PANEL_TTL_MS - e.ageMs, 0),
+          ttlMs: Math.max(e.ttlMs - e.ageMs, 0),
         })),
-        note: "积分构成 / 余额趋势 / 模型与档位 / 模型鉴别四类视图共用，TTL 1 小时；"
+        note: "积分构成 / 模型与档位 / 模型鉴别缓存 1 小时，余额趋势缓存 60 秒；"
           + "手动刷新带 ?refresh=1 立即绕过，基准保存/删除/同步后自动失效对应条目。",
         visible: true,
       },

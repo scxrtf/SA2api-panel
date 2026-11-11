@@ -5,9 +5,10 @@
 // 消耗与到账为**下界估计**：采样间隔 30 分钟远粗于真实事件密度，同一窗口内的消耗与
 // 到账会被合并成净差（不完整日淡化显示）。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { reqCached, fmtNum, usePanelRefresh } from "../lib";
+import { reqCached, fmtNum, fmtClock, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { BalanceLineChart, BalanceDailyBars, type BalancePoint } from "../components/balanceChart";
+import { BALANCE_HISTORY_CACHE_MS } from "@/lib/balance-history-cache";
 
 interface DailyRow {
   day: string; first: number; last: number; change: number;
@@ -37,13 +38,15 @@ export function BalHistView({ flash }: { flash: Flash }) {
   const [realm, setRealm] = useState<"cn" | "global">("cn");
 
   const load = useCallback((force = false) => {
-    reqCached<HistResp>(`balance_history?days=${days}`, { force })
+    reqCached<HistResp>(`balance_history?days=${days}`, { force, ttlMs: BALANCE_HISTORY_CACHE_MS })
       .then(setData)
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [days, flash]);
   useEffect(() => { load(); }, [load]);
-  // 余额趋势按 30 分钟采样入库，分钟级轮询无意义：1 小时内走缓存，
-  // 手动刷新按钮 / 顶栏刷新走 force 立即拉新数据。
+  // 只刷新当前可见标签页；前后端各缓存 60 秒，最新采样至多约 1 分钟上图。
+  // 轮询只读已落库的采样点，不会额外请求上游余额接口。
+  useAutoRefresh(() => load(), BALANCE_HISTORY_CACHE_MS);
+  // 手动刷新按钮 / 顶栏刷新走 force 立即绕过前后端缓存。
   usePanelRefresh(() => load(true));
 
   const realms = useMemo(() => {
@@ -87,7 +90,7 @@ export function BalHistView({ flash }: { flash: Flash }) {
   }));
 
   return (
-    <Box title="余额趋势" hint="采样间隔 30 分钟 · 消耗/到账为下界估计"
+    <Box title="余额趋势" hint={`采样间隔 30 分钟 · 每分钟自动刷新 · 消耗/到账为下界估计${data ? " · 数据时间 " + fmtClock(data.now) : ""}`}
       extra={<>
         <select className="select" style={{ width: 120 }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
           <option value={1}>近 24 小时</option>

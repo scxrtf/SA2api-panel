@@ -82,9 +82,24 @@ export function fmtNum(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "-";
   return n.toLocaleString("en-US");
 }
+export const PANEL_TIME_ZONE = "Asia/Shanghai";
+const PANEL_TIME_OPTIONS = { timeZone: PANEL_TIME_ZONE, hour12: false } as const;
+
+// 面板时间统一锚定北京时间，不受浏览器、容器或宿主机本地时区影响。
+export function fmtDateTime(value: number | string | Date | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime()) || date.getTime() <= 0) return "-";
+  return date.toLocaleString("zh-CN", PANEL_TIME_OPTIONS);
+}
+export function fmtClock(value: number | string | Date | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime()) || date.getTime() <= 0) return "-";
+  return date.toLocaleTimeString("zh-CN", PANEL_TIME_OPTIONS);
+}
 export function fmtTime(ms: number | null | undefined): string {
-  if (!ms || ms <= 0) return "-";
-  return new Date(ms).toLocaleString("zh-CN", { hour12: false });
+  return fmtDateTime(ms);
 }
 export function fmtDur(sec: number): string {
   if (sec <= 0) return "0s";

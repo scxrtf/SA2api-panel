@@ -15,7 +15,7 @@ const MAX_DEPTH = 12;
 // 记录区块依赖这两列。单行体积已由 MAX_MESSAGE_CHARS（120K）+ 图片脱敏兜底，
 // 保留清理任务（retention）负责按保留期置空旧行控制磁盘。
 export function logDialogEnabled(): boolean {
-  return true;
+  return process.env.REQUEST_LOG_DIALOG !== "0";
 }
 
 export interface ParameterOverride {

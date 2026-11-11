@@ -24,7 +24,7 @@ delete process.env.WB2A_API_KEY;
   },
   account: { findMany: async () => { poolReads++; throw new Error("provider must not use account pool"); } },
   requestLog: {
-    create: async ({ data }: any) => { requests.push(data); return data; },
+    create: async ({ data }: any) => { requests.push(data); return { ...data, id: "test-log-" + requests.length }; },
     findUnique: async () => null,
   },
   usageEvent: { create: async ({ data }: any) => { usages.push(data); return data; } },
@@ -74,6 +74,7 @@ try {
   assert.equal(usages.at(-1)!.uid, "测试商");
   assert.equal(usages.at(-1)!.ok, true);
   assert.equal(last().credit, undefined, "must not invent pool credit");
+  assert.deepEqual(last().requestMessages, [{ role: "developer", content: "keep unchanged" }]);
   console.log("PASS JSON provider route, identity, request log and usage");
 
   const count = calls;
@@ -81,6 +82,7 @@ try {
   invalidateKeyRing();
   response = await chat("missing:glm-5.3");
   assert.equal(response.status, 400);
+  await delay(0);
   assert.equal(last().errKind, "provider_not_found");
   assert.equal(last().attempts, 0);
   assert.equal(calls, count);
@@ -115,8 +117,8 @@ try {
   assert.ok(last().ttfbMs >= 25, "TTFB includes fetch/header delay");
   assert.ok(last().durationMs >= last().ttfbMs);
   assert.equal(last().errKind, "");
-  assert.equal(last().requestMessages, undefined);
-  assert.equal(last().responseMessage, undefined);
+  assert.deepEqual(last().requestMessages, [{ role: "developer", content: "keep unchanged" }]);
+  assert.deepEqual(last().responseMessage, { role: "assistant", content: "你好" });
   assert.equal(last().attempts, 1);
   assert.equal(last().attemptDetails?.length, 1);
   assert.equal(last().attemptDetails?.[0]?.ok, true);

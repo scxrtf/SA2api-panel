@@ -1,7 +1,7 @@
 "use client";
 // 运行日志视图（对齐 Go view-logs）：请求日志 / 运行日志 / 缓存详细 三模式 + 过滤。
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { req, fmtNum, useAutoRefresh, usePanelRefresh } from "../lib";
+import { req, fmtNum, fmtClock, fmtDateTime, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { errKindLabel, knownText, uaDisplay } from "@/lib/logfmt";
 
@@ -104,7 +104,7 @@ function CachePanel({ stats, loading }: {
 }) {
   if (!stats && loading) return <div className="pad dim">读取缓存状态中…</div>;
   if (!stats) return <div className="pad dim">暂无数据</div>;
-  const at = new Date(stats.at).toLocaleTimeString("zh-CN", { hour12: false });
+  const at = fmtClock(stats.at);
   return (
     <div className="pad" style={{ display: "grid", gap: 16 }}>
       <div className="dim" style={{ fontSize: 12 }}>
@@ -470,7 +470,7 @@ export function LogsView({ flash }: { flash: Flash }) {
       </>}
       <span className="dim" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
         {loading ? "正在刷新…" : loadError ? "刷新失败，请重试" : lastLoadedAt
-          ? `更新于 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour12: false })}`
+          ? `更新于 ${fmtClock(lastLoadedAt)}`
           : "等待加载"}
       </span>
       <button className="btn xs" disabled={loading} onClick={() => { void load(false); }}>
@@ -500,7 +500,7 @@ export function LogsView({ flash }: { flash: Flash }) {
             {logs.length === 0 && <div style={{ color: "#64748b" }}>暂无运行日志</div>}
             {logs.map((l, i) => (
               <div key={l.id ?? i} className={"ln" + (/error|失败|错误/.test(l.text) ? " e" : /warn|冷却|熔断/.test(l.text) ? " w" : "")}>{
-                new Date(l.ts).toLocaleTimeString("zh-CN", { hour12: false })
+                fmtClock(l.ts)
               } <span className={"lch c-" + l.ch}>{
                 { task: "任务", chat: "对话", call: "调用", probe: "探测", sys: "系统" }[l.ch]
               }</span> {l.text}</div>
@@ -539,7 +539,7 @@ export function LogsView({ flash }: { flash: Flash }) {
                     <tr onClick={() => toggleDetail(r.id)}
                       aria-expanded={open}
                       style={{ cursor: "pointer", ...(open ? { background: "var(--bg-soft)" } : {}) }}>
-                      <td className="dim mono">{new Date(r.at).toLocaleTimeString("zh-CN", { hour12: false })}</td>
+                      <td className="dim mono">{fmtClock(r.at)}</td>
                       <td><span className={"tag " + (r.status < 400 && !kindLabel ? "ok" : "err")}
                         title={errText || undefined}>
                         {r.status}{kindLabel ? " " + kindLabel : r.status < 400 ? " 成功" : " 错误"}
@@ -574,7 +574,7 @@ export function LogsView({ flash }: { flash: Flash }) {
                         <td colSpan={15} style={{ background: "var(--bg-soft)", padding: "10px 16px" }}>
                           <div className="kv-grid">
                             <span className="dim">请求 ID</span><span className="mono">{r.id}</span>
-                            <span className="dim">时间</span><span>{new Date(r.at).toLocaleString("zh-CN", { hour12: false })}</span>
+                            <span className="dim">时间</span><span>{fmtDateTime(r.at)}</span>
                             <span className="dim">状态 / 结果</span><span>{r.status}{kindLabel ? " · " + kindLabel : r.status < 400 ? " · 成功" : " · 错误"}</span>
                             <span className="dim">流式</span><span>{r.stream ? "SSE" : "一次性"}</span>
                             <span className="dim">账号 UID</span><span className="mono">{uidText || "—"}</span>

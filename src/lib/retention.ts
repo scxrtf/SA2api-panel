@@ -42,7 +42,7 @@ export interface RetentionResult {
   durationMs: number;
 }
 
-// 清空任意历史遗留对话。新写入由应用与数据库触发器双重剥离。
+// 按管理员操作清理历史对话；新请求的正常对话记录不受影响。
 export async function clearRequestLogDialog(
   batch = BATCH,
   maxRounds = 200,

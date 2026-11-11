@@ -7,7 +7,7 @@ import { idleMonitorBody } from "./upstream/idle";
 import { maybeProbeAfterModelCall } from "./model-health-trigger";
 import { providerEndpoint } from "./provider-endpoint";
 import { ProviderObservation, observeProviderStream } from "./provider-observation";
-import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import { failureDetail, parameterOverrides, type AttemptDetail } from "./request-log-detail";
+import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import { assistantMessageForLog, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, type AttemptDetail } from "./request-log-detail";
 
 // 供应商表进程内快照。原先每次 providerChat 都 findUnique 一次、每次
 // providerModels / modelhealth 目录刷新都 findMany 一次，是 egress 的固定开销。
@@ -63,6 +63,7 @@ export async function providerChat(
   const stats = new ProviderObservation(started);
   let outboundOverrides: ReturnType<typeof parameterOverrides> = [];
   let attempts = 0;
+  let requestMessages: unknown = [];
   let recorded = false;
   // errMsg 为失败请求的报错内容（供应商回包正文，已 clip）；成功路径留空。
   let failureCode = "";
@@ -103,8 +104,16 @@ export async function providerChat(
     const logRef = runlog(       `[call] ${logModel} ${ok ? "成功" : "失败"} HTTP ${status} ` +       `provider=${name} ${durationMs}ms` +       (errText ? " err=" + clipLogText(errText, 180) : ""),     );
     // 单 key 供应商用名字标识槽位；不伪造池 UID/机器码/积分。
     // 两表独立写入：一表失败不能阻止另一表；只记录错误码，不泄露凭据。
+    const responseMessage = assistantMessageForLog({
+      role: stats.responseRole,
+      content: stats.responseContent,
+      reasoningContent: stats.responseReasoning,
+      toolCalls: stats.responseToolCalls,
+    });
     const requestLogTask = Promise.resolve().then(() => prisma.requestLog.create({ data: {
       ...common, uid: "", slot: attempts ? name : "", machineId: "",
+      requestMessages: logDialogEnabled() ? requestMessagesForLog(requestMessages) as Prisma.InputJsonValue : undefined,
+      responseMessage: logDialogEnabled() ? responseMessage as Prisma.InputJsonValue | undefined : undefined,
       errMsg: errText,
       status, stream, durationMs, attempts, ttfbMs: stream ? stats.ttfbMs : 0,
       clientIp: context?.clientIP ?? "", ua: context?.ua ?? "",
@@ -171,6 +180,7 @@ export async function providerChat(
   let out: string;
   try {
     source = JSON.parse(body) as Record<string, unknown>;
+    requestMessages = source.messages;
     const obj = { ...source };
     obj.model = bareModel;
     obj.stream = stream;
