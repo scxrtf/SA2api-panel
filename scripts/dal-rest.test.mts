@@ -26,6 +26,10 @@ const server = createServer(async (req, res) => {
     const row = requests.at(-1)?.body?.[0];
     return send([{ ...row, updatedAt: "2026-11-10T00:00:00.000Z" }]);
   }
+  if (table === "MachineKeyAuthorization" && req.method === "POST") {
+    const row = requests.at(-1)?.body?.[0];
+    return send([{ ...row, updatedAt: "2026-11-10T00:00:00.000Z" }]);
+  }
   if (table === "Provider") return send([{ id: requests.at(-1)?.body?.[0]?.id, name: "vendor" }]);
   if (table === "UsageEvent") {
     if (url.searchParams.has("group-test")) return send([]);
@@ -52,9 +56,19 @@ try {
 
   await dal.modelCooldown.findUnique({ where: { uid_model: { uid: "u1", model: "m1" } } });
   let url = requests.at(-1)!.url;
-  assert.equal(url.searchParams.get("uid"), 'eq."u1"');
-  assert.equal(url.searchParams.get("model"), 'eq."m1"');
+  assert.equal(url.searchParams.get("uid"), "eq.u1");
+  assert.equal(url.searchParams.get("model"), "eq.m1");
   assert.equal(url.searchParams.has("uid_model"), false);
+
+  await dal.account.findUnique({ where: { uid: "2a1de824-fa55-49ef-ae5e-efc532864b36" } });
+  url = requests.at(-1)!.url;
+  assert.equal(url.searchParams.get("uid"), "eq.2a1de824-fa55-49ef-ae5e-efc532864b36",
+    "CloudBase requires unquoted scalar equality values for UUID lookup");
+
+  await dal.account.findFirst({ where: { nickname: "a,b\"(x)\\" } });
+  url = requests.at(-1)!.url;
+  assert.equal(url.searchParams.get("nickname"), String.raw`eq."a,b\"(x)\\"`,
+    "reserved characters must remain escaped and quoted");
 
   await dal.accountState.findMany({ where: { disabled: false, paused: { not: true } } });
   url = requests.at(-1)!.url;
@@ -69,8 +83,8 @@ try {
     ],
   } });
   url = requests.at(-1)!.url;
-  assert.equal(url.searchParams.get("reason"), 'not.like."11102*"');
-  assert.equal(url.searchParams.get("or"), String.raw`or(and(uid.eq."u1",model.ilike."*a,b\"(x)\\%\\*\\\\*"),until.gte."12")`);
+  assert.equal(url.searchParams.get("reason"), "not.like.11102*");
+  assert.equal(url.searchParams.get("or"), String.raw`(and(uid.eq.u1,model.ilike."*a,b\"(x)\\%\\*\\\\*"),until.gte.12)`);
 
   await dal.provider.create({ data: { name: "vendor", baseUrl: "https://vendor.invalid" }, select: { id: true, name: true } });
   const captured = requests.at(-1)!;
@@ -107,6 +121,16 @@ try {
   assert.equal(upsert.url.searchParams.get("on_conflict"), "key");
   assert.equal(upsert.url.searchParams.get("select"), "key,value");
   assert.ok(upsert.body[0].updatedAt, "@updatedAt must be injected on upsert");
+
+  await dal.machineKeyAuthorization.upsert({
+    where: { machineId: "machine-password-test" },
+    create: { machineId: "machine-password-test", method: "password" },
+    update: { method: "password", uid: null },
+  });
+  const machineUpsert = requests.at(-1)!;
+  assert.equal(machineUpsert.url.searchParams.get("on_conflict"), "machineId");
+  assert.equal(machineUpsert.body[0].id, undefined,
+    "MachineKeyAuthorization uses machineId as its primary key and has no id column");
 
   await dal.modelCooldown.upsert({
     where: { uid_model: { uid: "u1", model: "m1" } },

@@ -31,7 +31,7 @@ function newCuid(): string {
 // createdAt/updatedAt/at 库内有 DEFAULT now()，但 PostgREST 不显式传则库端生效——
 // 与 Prisma 行为一致（Prisma 也不传，靠库默认），故不强制注入；只补 cuid 主键。
 const CUID_PK_TABLES = new Set([
-  "ModelCooldown", "ModelCost", "ApiKey", "MachineKeyAuthorization", "Provider",
+  "ModelCooldown", "ModelCost", "ApiKey", "Provider",
   "UsageEvent", "RequestLog", "TaskQueueItem", "ModelHealthCheck", "BalanceSample",
 ]);
 
@@ -164,6 +164,18 @@ function quoteValue(value: unknown): string {
   return `"${scalar(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+function filterValue(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean" || typeof value === "number" || typeof value === "bigint") {
+    return scalar(value);
+  }
+  const raw = scalar(value);
+  // CloudBase PostgREST 会把 eq."..." 的引号当作值的一部分，导致 UUID
+  // 等值查询查不到已有账号。普通标量保持裸值，仅对 PostgREST 逻辑树
+  // 的保留字符、空白和空字符串使用双引号。
+  return raw === "" || /[\s(),\"\\]/.test(raw) ? quoteValue(raw) : raw;
+}
+
 function likePattern(value: unknown, op: string): string {
   const raw = scalar(value).replace(/([\\%*])/g, "\\$1");
   if (op === "startsWith") return raw + "*";
@@ -257,11 +269,7 @@ function renderCond(cond: Cond): string {
   // 标量类型保持 PostgREST 字面量语义：布尔值必须是不带引号的 true/false，
   // 否则 Postgres 收到的是字符串 '"false"'，对 boolean 列报 22P02。
   // null 只属于 is / not.is；比较操作符保留 PostgREST 原生 null 语义。
-  const value = cond.value === null
-    ? "null"
-    : typeof cond.value === "boolean"
-      ? String(cond.value)
-      : quoteValue(cond.value);
+  const value = filterValue(cond.value);
   return `${col}.${cond.op}.${value}`;
 }
 
