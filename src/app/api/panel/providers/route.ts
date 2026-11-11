@@ -1,5 +1,5 @@
 // GET/POST /api/panel/providers — 聚合供应商管理（key 只回掩码；新建整体入库）。
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { mask } from "@/lib/auth-guard";
 import { prisma } from "@/lib/db";
 import { invalidateProviders } from "@/lib/provider";
@@ -25,12 +25,13 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
-  let body: { name?: string; base_url?: string; key?: string; models?: string };
+  let body: { name?: string; base_url?: string; key?: string; models?: string; super_password?: unknown };
   try {
     body = (await req.json()) as { name?: string; base_url?: string; key?: string };
   } catch {
     return fail(400, "invalid json body");
   }
+  if (!verifySuperPassword(body.super_password)) return fail(403, "超级密码错误");
   const name = (body.name ?? "").trim();
   const baseUrl = (body.base_url ?? "").trim().replace(/\/+$/, "");
   const key = (body.key ?? "").trim();

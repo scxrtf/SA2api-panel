@@ -3,7 +3,8 @@
 // 后台任务在服务端执行，切换页签或刷新面板都不会打断扫描本身。
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { req, fmtTime, fmtDur } from "../lib";
-import { Box, type Flash } from "./ui";
+import { Box, ButtonLoadingContent, type Flash } from "./ui";
+import { Spinner } from "@/components/ui/spinner";
 
 export interface ScanIssue {
   uid: string;
@@ -41,9 +42,13 @@ export interface ModelScanSnapshot {
 
 export function useModelScan(flash: Flash, onDone: () => Promise<void>) {
   const [scan, setScan] = useState<ModelScanSnapshot | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [starting, setStarting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const wasRunning = useRef(false);
 
   const load = useCallback(async () => {
+    try {
     const r = await req<{ scan: ModelScanSnapshot | null }>("accounts/scan_models");
     setScan(r.scan);
     if (wasRunning.current && r.scan && !r.scan.running) {
@@ -59,11 +64,11 @@ export function useModelScan(flash: Flash, onDone: () => Promise<void>) {
       }
     }
     wasRunning.current = !!r.scan?.running;
+    } finally { setInitialLoading(false); }
   }, [flash, onDone]);
 
   useEffect(() => {
     // 首次挂载拉取当前任务；load 内部只会在 await 之后 setState。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load().catch((e) => {
       if (e instanceof Error && e.message === "__AUTH__") return;
       flash("err", e instanceof Error ? e.message : String(e));
@@ -79,6 +84,8 @@ export function useModelScan(flash: Flash, onDone: () => Promise<void>) {
   }, [scan?.running, load]);
 
   const start = useCallback(async (): Promise<void> => {
+    if (starting) return;
+    setStarting(true);
     try {
       const r = await req<{ scan: ModelScanSnapshot }>("accounts/scan_models", { method: "POST" });
       setScan(r.scan);
@@ -86,19 +93,21 @@ export function useModelScan(flash: Flash, onDone: () => Promise<void>) {
       flash("ok", "模型扫描已开始，后台执行，可切换其他页签");
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
-    }
-  }, [flash]);
+    } finally { setStarting(false); }
+  }, [flash, starting]);
 
   const cancel = useCallback(async (): Promise<void> => {
+    if (cancelling) return;
+    setCancelling(true);
     try {
       await req("accounts/scan_models", { method: "DELETE" });
       await load();
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
-    }
-  }, [flash, load]);
+    } finally { setCancelling(false); }
+  }, [flash, load, cancelling]);
 
-  return { scan, start, cancel };
+  return { scan, start, cancel, initialLoading, starting, cancelling };
 }
 
 // useScanNow 扫描计时：只在扫描中每秒更新，避免渲染期取 Date.now。
@@ -114,9 +123,10 @@ function useScanNow(running: boolean): number {
   return now;
 }
 
-export function ModelScanPanel({ scan, onCancel }: {
+export function ModelScanPanel({ scan, onCancel, cancelling = false }: {
   scan: ModelScanSnapshot;
   onCancel: () => void | Promise<void>;
+  cancelling?: boolean;
 }) {
   const now = useScanNow(scan.running);
   const [filter, setFilter] = useState<"all" | "6004" | "429" | "11102" | "other">("all");
@@ -141,7 +151,7 @@ export function ModelScanPanel({ scan, onCancel }: {
   const endAt = scan.finished_at > 0 ? scan.finished_at : (now > 0 ? now : scan.updated_at);
   const elapsed = Math.max(0, Math.round((endAt - scan.started_at) / 1000));
   const statusTag = scan.running
-    ? <span className="tag info">扫描中</span>
+    ? <span className="tag info"><Spinner className="size-3" />扫描中</span>
     : scan.status === "done"
       ? <span className="tag ok">已完成</span>
       : scan.status === "cancelled"
@@ -149,12 +159,12 @@ export function ModelScanPanel({ scan, onCancel }: {
         : <span className="tag err">失败</span>;
 
   return (
-    <Box title="模型可用性扫描" hint="逐个账号真实探测；已锁定模型自动跳过"
+    <Box title="模型可用性扫描" busy={scan.running || cancelling} hint="逐个账号真实探测；已锁定模型自动跳过"
       extra={<div className="btn-row" style={{ gap: 6, alignItems: "center" }}>
         {statusTag}
         <span className="dim" style={{ fontSize: 12 }}>用时 {fmtDur(elapsed)}</span>
         {scan.running && (
-          <button className="btn xs danger" onClick={() => void onCancel()}>取消扫描</button>
+          <button className="btn xs danger" disabled={cancelling} aria-busy={cancelling} onClick={() => void onCancel()}><ButtonLoadingContent loading={cancelling} loadingChildren="取消中…">取消扫描</ButtonLoadingContent></button>
         )}
       </div>}>
       <div className="pad" style={{ paddingBottom: 10 }}>
@@ -168,7 +178,7 @@ export function ModelScanPanel({ scan, onCancel }: {
           <span className="scan-bad"><b>{scan.bad}</b> 异常</span>
           <span className="dim">跳过 {scan.skipped_accounts} 账号 / {scan.skipped} 模型</span>
           {scan.running && <span className="dim scan-current" title={scan.current}>
-            当前：{scan.current || "准备中…"}
+            <Spinner className="size-3" />当前：{scan.current || "准备中…"}
           </span>}
         </div>
         {scan.error && <div className="hint" style={{ color: "var(--err)" }}>{scan.error}</div>}

@@ -219,8 +219,14 @@ async function mainLoop(): Promise<void> {
 }
 
 // ─── 余额刷新独立循环 ────────────────────────────────────────────────────────
+// 初次启动立即执行；热配只按上次执行时间重算下一时点，不把已经等待的周期清零。
+export function balanceDueAt(lastRunAt: number | null, intervalMs: number, now = Date.now()): number {
+  return lastRunAt === null ? now : lastRunAt + intervalMs;
+}
+
 async function balanceLoop(): Promise<void> {
   let seenRearm = st.rearmSeq;
+  let lastRunAt: number | null = null;
   for (;;) {
     if (st.stop) return;
     const cfg = await getConfig();
@@ -235,19 +241,20 @@ async function balanceLoop(): Promise<void> {
       }
       continue;
     }
+    const dueAt = balanceDueAt(lastRunAt, intervalMs);
     // 每段睡眠间检查 rearm/stop，保证热配与停机响应性。
-    let waited = 0;
-    while (waited < intervalMs) {
+    let interrupted = false;
+    while (Date.now() < dueAt) {
       if (st.stop) return;
-      if (st.rearmSeq !== seenRearm) break;
-      const step = Math.min(intervalMs - waited, WALLCLOCK_CHECK_STEP_MS);
-      await sleep(step);
-      waited += step;
+      if (st.rearmSeq !== seenRearm) { interrupted = true; break; }
+      await sleep(Math.min(dueAt - Date.now(), WALLCLOCK_CHECK_STEP_MS));
     }
     if (st.stop) return;
-    if (waited < intervalMs) { seenRearm = st.rearmSeq; continue; } // 被 rearm 打断：重算间隔
+    if (interrupted) { seenRearm = st.rearmSeq; continue; } // 被 rearm 打断：保留上次执行时间，重算间隔
+    lastRunAt = Date.now();
     try {
-      await cron.runBalanceRefresh();
+      const r = await cron.runBalanceRefresh();
+      console.log("[scheduler] balance: updated=" + r.updated + " failed=" + r.failed);
     } catch (e) {
       console.log("[scheduler] balance error: " + (e instanceof Error ? e.message : String(e)));
     }

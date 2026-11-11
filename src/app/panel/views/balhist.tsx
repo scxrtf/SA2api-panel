@@ -6,7 +6,7 @@
 // 到账会被合并成净差（不完整日淡化显示）。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { reqCached, fmtNum, fmtClock, useAutoRefresh, usePanelRefresh } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
 import { BalanceLineChart, BalanceDailyBars, type BalancePoint } from "../components/balanceChart";
 import { BALANCE_HISTORY_CACHE_MS } from "@/lib/balance-history-cache";
 
@@ -36,13 +36,15 @@ export function BalHistView({ flash }: { flash: Flash }) {
   const [data, setData] = useState<HistResp | null>(null);
   const [days, setDays] = useState(30);
   const [realm, setRealm] = useState<"cn" | "global">("cn");
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback((force = false) => {
-    reqCached<HistResp>(`balance_history?days=${days}`, { force, ttlMs: BALANCE_HISTORY_CACHE_MS })
-      .then(setData)
-      .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+  const load = useCallback(async (force = false) => {
+    setLoading(true);
+    try { setData(await reqCached<HistResp>(`balance_history?days=${days}`, { force, ttlMs: BALANCE_HISTORY_CACHE_MS })); }
+    catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    finally { setLoading(false); }
   }, [days, flash]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
   // 只刷新当前可见标签页；前后端各缓存 60 秒，最新采样至多约 1 分钟上图。
   // 轮询只读已落库的采样点，不会额外请求上游余额接口。
   useAutoRefresh(() => load(), BALANCE_HISTORY_CACHE_MS);
@@ -90,15 +92,18 @@ export function BalHistView({ flash }: { flash: Flash }) {
   }));
 
   return (
-    <Box title="余额趋势" hint={`采样间隔 30 分钟 · 每分钟自动刷新 · 消耗/到账为下界估计${data ? " · 数据时间 " + fmtClock(data.now) : ""}`}
+    <Box title="余额趋势" busy={loading} hint={`采样间隔 30 分钟 · 每分钟自动刷新 · 消耗/到账为下界估计${data ? " · 数据时间 " + fmtClock(data.now) : ""}`}
       extra={<>
         <select className="select" style={{ width: 120 }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
           <option value={1}>近 24 小时</option>
           <option value={7}>近 7 天</option>
           <option value={30}>近 30 天</option>
         </select>
-        <button className="btn xs" onClick={() => load(true)}>刷新</button>
+        <button className="btn xs" disabled={loading} aria-busy={loading} onClick={() => void load(true)}>
+          <ButtonLoadingContent loading={loading} loadingChildren="刷新中…">刷新</ButtonLoadingContent>
+        </button>
       </>}>
+      {!data ? <LoadingIndicator label="正在加载余额趋势…" /> : <>
       <div className="pad">
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
           {(["cn", "global"] as const).filter((r) => realms.has(r)).map((r) => (
@@ -123,6 +128,7 @@ export function BalHistView({ flash }: { flash: Flash }) {
           <BalanceDailyBars series={barSeries} days={days} />
         </Box>
       </div>
+      </>}
       <div className="pad">
         <Box title="账号明细" hint="本月消耗/到账按自然月累计 · 下界估计" pad>
           <div className="tbl-wrap">

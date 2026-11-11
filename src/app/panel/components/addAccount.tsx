@@ -2,6 +2,7 @@
 // 添加账号弹窗（对齐 Go #addTabs：浏览器登录 / 导入 JSON 两个子页）。
 import React, { useEffect, useRef, useState } from "react";
 import { req } from "../lib";
+import { ButtonLoadingContent, LoadingIndicator } from "./ui";
 
 export function AddAccountModal({ onClose, onDone, onAuthorized, embedded = false }: {
   onClose: () => void;
@@ -41,16 +42,19 @@ function LoginPane({ onDone, onAuthorized }: { onDone: () => void; onAuthorized?
   const [url, setUrl] = useState("");
   const [state, setState] = useState("");
   const [status, setStatus] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [polling, setPolling] = useState(false);
   const [err, setErr] = useState("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const stop = () => { if (timer.current) { clearInterval(timer.current); timer.current = null; } };
   useEffect(() => stop, []);
 
   const start = async () => {
-    setErr(""); setStatus("正在发起授权…");
+    if (starting) return;
+    setStarting(true); setErr(""); setStatus("正在发起授权…");
     try {
       const r = await req<{ url: string; state: string }>("login/start", { method: "POST", body: { realm } });
-      setUrl(r.url); setState(r.state);
+      setUrl(r.url); setState(r.state); setStarting(false); setPolling(true);
       setStatus("等待用户在打开的页面中完成授权…（每 3 秒轮询）");
       stop();
       timer.current = setInterval(async () => {
@@ -58,14 +62,14 @@ function LoginPane({ onDone, onAuthorized }: { onDone: () => void; onAuthorized?
           const p = await req<{ done: boolean; message?: string; uid?: string }>(
             "login/poll?state=" + encodeURIComponent(r.state));
           if (p.done) {
-            stop();
+            stop(); setPolling(false);
             setStatus("登录成功，账号 " + (p.uid ?? "") + " 已入库，当前机器已获建 Key 权限。");
             setTimeout(() => { onDone(); onAuthorized?.(); }, 1200);
           }
           else if (p.message) setStatus("等待授权…（" + p.message + "）");
-        } catch (e) { stop(); setErr(e instanceof Error ? e.message : String(e)); }
+        } catch (e) { stop(); setPolling(false); setErr(e instanceof Error ? e.message : String(e)); }
       }, 3000);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setStatus(""); }
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setStatus(""); setStarting(false); }
   };
 
   return (
@@ -77,7 +81,7 @@ function LoginPane({ onDone, onAuthorized }: { onDone: () => void; onAuthorized?
           <option value="global">国际（workbuddy.ai）</option>
         </select>
       </div>
-      {!state && <button className="btn primary" onClick={start}>发起授权</button>}
+      {!state && <button className="btn primary" onClick={start} disabled={starting} aria-busy={starting}><ButtonLoadingContent loading={starting} loadingChildren="发起授权中…">发起授权</ButtonLoadingContent></button>}
       {url && (
         <div className="form-row" style={{ marginTop: 12 }}>
           <label className="form-label">请在浏览器中打开以下链接完成授权：</label>
@@ -86,7 +90,7 @@ function LoginPane({ onDone, onAuthorized }: { onDone: () => void; onAuthorized?
           </div>
         </div>
       )}
-      {status && <div className="msg ok">{status}</div>}
+      {status && <div className={"msg ok" + (starting || polling ? " auth-loading" : "")} role="status">{starting || polling ? <LoadingIndicator inline label={status} /> : status}</div>}
       {err && <div className="msg err">{err}</div>}
     </>
   );
@@ -122,7 +126,7 @@ function ImportPane({ onDone, onAuthorized }: { onDone: () => void; onAuthorized
         <textarea className="textarea" rows={8} value={text} onChange={(e) => setText(e.target.value)}
           placeholder='[{"uid":"…","accessToken":"…","refreshToken":"…"}]' />
       </div>
-      <button className="btn primary" onClick={run} disabled={busy || !text.trim()}>{busy ? "导入中…" : "导入"}</button>
+      <button className="btn primary" onClick={run} disabled={busy || !text.trim()} aria-busy={busy}><ButtonLoadingContent loading={busy} loadingChildren="导入中…">导入</ButtonLoadingContent></button>
       {okMsg && <div className="msg ok">{okMsg}</div>}
       {err && <div className="msg err">{err}</div>}
     </>

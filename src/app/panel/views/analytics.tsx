@@ -5,7 +5,7 @@
 // by_provider_model），状态数据源 /api/panel/models 目录 + /api/panel/model_probes 落库记录。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { req, useAutoRefresh, usePanelRefresh } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
 
 /* ── usage 响应里本视图用到的最小形状（与 route.ts 输出对齐） ────── */
 interface Agg {
@@ -595,8 +595,8 @@ function StatusCard({ s, busy, disabled, onProbe }: {
       </div>
       <div className="hb-foot">
         <span className="dim">{latest ? relTime(latest.checked_at) : "未探测"}</span>
-        <button type="button" className="btn xs" disabled={disabled} onClick={onProbe}>
-          {busy ? "探测中…" : "立即探测"}
+        <button type="button" className="btn xs" disabled={disabled} aria-busy={busy} onClick={onProbe}>
+          <ButtonLoadingContent loading={busy} loadingChildren="探测中…">立即探测</ButtonLoadingContent>
         </button>
       </div>
     </div>
@@ -615,12 +615,18 @@ export function AnalyticsView({ flash }: { flash: Flash }) {
   const [probes, setProbes] = useState<Record<string, ProbeRec>>({});
   const [health, setHealth] = useState<Record<string, HealthRec[]>>({});
   const [probeBusy, setProbeBusy] = useState<"all" | string | null>(null);
+  const [usageLoading, setUsageLoading] = useState(true);
+  const [statusLoading, setStatusLoading] = useState(true);
 
-  const loadUsage = useCallback(() => {
-    req<UsageResp>("usage?hours=" + hours).then(setU)
-      .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+  const loadUsage = useCallback(async () => {
+    setUsageLoading(true);
+    try { setU(await req<UsageResp>("usage?hours=" + hours)); }
+    catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    finally { setUsageLoading(false); }
   }, [hours, flash]);
   const loadStatus = useCallback(async () => {
+    setStatusLoading(true);
+    try {
     await Promise.all([
       req<{ models: ModelRow[] }>("models"),
       req<{ probes: Record<string, ProbeRec>; health?: Record<string, HealthRec[]> }>("model_probes")
@@ -631,10 +637,11 @@ export function AnalyticsView({ flash }: { flash: Flash }) {
       setHealth(p.health ?? {});
     })
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+    } finally { setStatusLoading(false); }
   }, [flash]);
 
-  useEffect(loadUsage, [loadUsage]);
-  useEffect(() => { void loadStatus(); }, [loadStatus]);
+  useEffect(() => { const t = setTimeout(() => void loadUsage(), 0); return () => clearTimeout(t); }, [loadUsage]);
+  useEffect(() => { const t = setTimeout(() => void loadStatus(), 0); return () => clearTimeout(t); }, [loadStatus]);
   useAutoRefresh(loadUsage, 60_000);
   useAutoRefresh(loadStatus, 120_000);
   usePanelRefresh(() => { loadUsage(); void loadStatus(); });
@@ -682,14 +689,17 @@ export function AnalyticsView({ flash }: { flash: Flash }) {
 
   return (
     <>
-      <Box title="模型调用分析" hint="分流图：池→KEY→模型 · 供应商→模型；连线粗细=量级"
+      <Box title="模型调用分析" busy={usageLoading} hint="分流图：池→KEY→模型 · 供应商→模型；连线粗细=量级"
         extra={<>
           <select className="select" value={hours} onChange={(e) => setHours(Number(e.target.value))}>
             <option value={24}>近 24 小时</option><option value={72}>近 3 天</option>
             <option value={168}>近 7 天</option><option value={720}>近 30 天</option>
             <option value={0}>全部历史</option>
           </select>
-          <button className="btn xs" onClick={() => { loadUsage(); loadStatus(); }}>刷新</button>
+          <button className="btn xs" disabled={usageLoading || statusLoading} aria-busy={usageLoading || statusLoading}
+            onClick={() => { void Promise.all([loadUsage(), loadStatus()]); }}>
+            <ButtonLoadingContent loading={usageLoading || statusLoading} loadingChildren="刷新中…">刷新</ButtonLoadingContent>
+          </button>
         </>}>
         <div className="pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div className="an-controls">
@@ -718,7 +728,7 @@ export function AnalyticsView({ flash }: { flash: Flash }) {
             </div>
           </div>
           {!u ? (
-            <div className="us-empty">加载用量…</div>
+            <LoadingIndicator label="正在加载用量…" />
           ) : flow.nodes.length === 0 ? (
             <div className="us-empty">窗口内暂无用量。发起一次对话后再刷新。</div>
           ) : (
@@ -736,14 +746,14 @@ export function AnalyticsView({ flash }: { flash: Flash }) {
         </div>
       </Box>
 
-      <Box title="模型状态" hint="真实最小聊天请求探测 · 每次结果落库 · 心跳为实际健康检查记录"
-        extra={<button type="button" className="btn xs"
+      <Box title="模型状态" busy={statusLoading || probeBusy !== null} hint="真实最小聊天请求探测 · 每次结果落库 · 心跳为实际健康检查记录"
+        extra={<button type="button" className="btn xs" aria-busy={probeBusy === "all"}
           disabled={probeBusy !== null || !models || statuses.length === 0}
           onClick={() => { void probeHealth(); }}>
-          {probeBusy === "all" ? "探测全部中…" : "探测全部"}
+          <ButtonLoadingContent loading={probeBusy === "all"} loadingChildren="探测全部中…">探测全部</ButtonLoadingContent>
         </button>}>
         {!models ? (
-          <div className="pad dim">加载模型目录…</div>
+          <LoadingIndicator label="正在加载模型目录…" />
         ) : statuses.length === 0 ? (
           <div className="pad dim">暂无模型。请先在「模型与档位」拉取目录。</div>
         ) : (

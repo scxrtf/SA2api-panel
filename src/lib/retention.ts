@@ -4,7 +4,7 @@
 // 大字段（单行上限约数百 KB），TOAST 增长远快于堆，
 // 免费档 Supabase 磁盘很容易被吃满并触发平台级只读（default_transaction_read_only=on）。
 // 因此分两步收口：
-//   1) 超过 detail 窗口的老行，清空参数覆盖、尝试明细与 errorDetail（保留统计列，面板仍可看用量）；
+//   1) 超过 detail 窗口的老行，清空对话、参数覆盖、尝试明细与 errorDetail（保留统计列，面板仍可看用量）；
 //   2) 超过 retention 天的行整行删除。
 // 两者都按批处理（原生 SQL + LIMIT），避免长事务与一次性 TOAST 抖动。
 // 之后由 autovacuum 回收；如需立即还盘，手工执行 VACUUM (FULL)。
@@ -35,14 +35,14 @@ export function retentionConfig() {
 }
 
 export interface RetentionResult {
-  dialogCleared: number;
   detailCleared: number;
   rowsDeleted: number;
   healthDeleted: number;
   durationMs: number;
 }
 
-// 按管理员操作清理历史对话；新请求的正常对话记录不受影响。
+// 仅供管理员手动清理历史对话，不参与定时保留策略。
+// 正常的对话正文由 clearRequestLogDetails 按 detailHours 到期剥离。
 export async function clearRequestLogDialog(
   batch = BATCH,
   maxRounds = 200,
@@ -96,6 +96,8 @@ export async function clearRequestLogDetails(
   batch = BATCH,
   maxRounds = 200,
 ): Promise<number> {
+  // 0 表示保留详情，不应被解释成“立即清理全部日志”。
+  if (olderThanHours <= 0) return 0;
   if (cloudbaseRestEnabled()) {
     const cutoff = new Date(Date.now() - olderThanHours * 3600_000);
     const NIL: never = null as never;
@@ -220,17 +222,17 @@ export async function pruneModelHealth(
   }
 }
 
-// 一次性跑完整保留策略。
+// 一次性跑完整保留策略。详情清理已包含对话正文；不要再无条件调用
+// clearRequestLogDialog，否则刚写入的诊断对话会在下一轮定时任务中全部丢失。
 export async function runRetention(): Promise<RetentionResult> {
   const started = Date.now();
   const cfg = retentionConfig();
-  const dialogCleared = await clearRequestLogDialog();
   const detailCleared = await clearRequestLogDetails(cfg.detailHours);
   const rowsDeleted = await pruneRequestLogs(cfg.days);
   const healthDeleted = await pruneModelHealth();
-  const result = { dialogCleared, detailCleared, rowsDeleted, healthDeleted, durationMs: Date.now() - started };
+  const result = { detailCleared, rowsDeleted, healthDeleted, durationMs: Date.now() - started };
   runlog(
-    "retention 完成: 清对话 " + dialogCleared + " · 清详情 " + detailCleared + " · 删日志 " + rowsDeleted +
+    "retention 完成: 清详情 " + detailCleared + " · 删日志 " + rowsDeleted +
     " · 删健康检查 " + healthDeleted + " · " + result.durationMs + "ms",
   );
   return result;

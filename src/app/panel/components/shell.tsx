@@ -7,6 +7,7 @@ import { fmtDur } from "../lib";
 import type { Overview } from "./ui";
 import { NAV, pad2, type View } from "../nav";
 import { Rack, RackBase } from "./rack";
+import { ButtonLoadingContent } from "./ui";
 
 export function Shell({ view, onSelect, ov, syncAt, onRefresh, msg, children }: {
   view: View; onSelect: (v: View) => void;
@@ -117,9 +118,8 @@ export function Shell({ view, onSelect, ov, syncAt, onRefresh, msg, children }: 
             <span className="grow"></span>
             {ov && <span className="meta">运行 {fmtDur(ov.uptime_sec)}</span>}
             <span className="meta">上次同步 {syncAt ? new Date(syncAt).toLocaleTimeString("zh-CN", { hour12: false }) : "—"}</span>
-            <button className="btn ghost xs" onClick={handleRefresh} disabled={refreshing}>
-              {refreshing && <span className="spin" style={{ marginRight: 5 }} />}
-              {refreshing ? "刷新中…" : "刷新"}
+            <button className="btn ghost xs" onClick={handleRefresh} disabled={refreshing} aria-busy={refreshing}>
+              <ButtonLoadingContent loading={refreshing} loadingChildren="刷新中…">刷新</ButtonLoadingContent>
             </button>
             <button className="sidenav-toggle" title="收起/展开导航"
               aria-label={mobileNavOpen ? "关闭导航" : "打开导航"}

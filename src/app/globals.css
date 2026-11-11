@@ -99,7 +99,7 @@ body {
 .scan-meta b { font-family: var(--mono); font-weight: 600; color: var(--fg); }
 .scan-ok b { color: var(--ok); }
 .scan-bad b { color: var(--warn); }
-.scan-current { margin-left: auto; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-current { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ─── 用量 KPI 卡 / 维度切换（Go .kpi/.kbar/.ustabs 同构） ────── */
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 10px; }
@@ -148,7 +148,7 @@ body {
 
 /* ─── 标签（等宽胶囊）────────────────────────────────────────── */
 .tag {
-  display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11.5px;
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 9px; border-radius: 999px; font-size: 11.5px;
   border: 1px solid var(--border); color: var(--fg-dim); margin-right: 4px; white-space: nowrap;
   font-family: var(--mono); letter-spacing: .3px;
 }
@@ -159,6 +159,7 @@ body {
 
 /* ─── 按钮 ───────────────────────────────────────────────────── */
 .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 5px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);
   background: #fff; color: var(--fg); cursor: pointer; font-size: 13px;
   position: relative; overflow: hidden;
@@ -200,6 +201,7 @@ body {
 }
 .btn-cta:hover { background: #4a4a52; }
 .btn-cta:active { transform: scale(.99); }
+.btn-cta:disabled { opacity: .6; cursor: wait; }
 .btn-cta .arr { font-family: var(--mono); font-size: 17px; color: #cbccd0; }
 
 /* ─── CloseRouter ControlAction：CODE 徽章 + 标题 + → ────────── */
@@ -220,13 +222,8 @@ body {
 .ctrl-action:disabled { background: #edeeeb; color: var(--fg-dim); cursor: not-allowed; }
 .ctrl-action:disabled:active { transform: none; box-shadow: none; }
 .ctrl-action:disabled:active::after { animation: none; }
-/* 加载态：CODE 徽章转圈（CSS 画环，无素材依赖） */
+/* 加载态：CODE 徽章内使用共享 shadcn/ui Spinner。 */
 .ctrl-action.busy { pointer-events: none; }
-.spin {
-  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-  border: 2px solid rgba(232, 116, 28, .25); border-top-color: var(--accent);
-  animation: spin .7s linear infinite; vertical-align: middle;
-}
 @keyframes spin { to { transform: rotate(360deg); } }
 .ctrl-action.secondary {
   background: #fff; color: var(--ink); border: 1px solid #dedfdf;
@@ -407,23 +404,26 @@ body {
 .machine-progress .dim { margin-top: 5px; font-size: 12px; }
 .machine-authorized-note { color: var(--fg-dim); line-height: 1.7; }
 .machine-submit { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
-.spinner {
-  width: 18px; height: 18px; flex: 0 0 auto; display: inline-block;
-  border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%;
-  animation: machineSpin .7s linear infinite;
-}
-.spinner.large { width: 28px; height: 28px; border-width: 3px; }
-.spinner.small { width: 14px; height: 14px; }
-.spinner.light { border-color: rgba(255,255,255,.45); border-top-color: #fff; }
-
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popIn { from { opacity: 0; transform: scale(.96) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-@keyframes machineSpin { to { transform: rotate(360deg); } }
 @keyframes machineContentIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) {
   .machine-content, .machine-badge, .machine-progress { animation: none; }
-  .spinner { animation-duration: 1.5s; }
 }
+
+/* 所有视图共享的加载反馈。图标由 shadcn/ui Spinner 提供，布局只负责间距。 */
+.loading-indicator {
+  min-height: 112px; display: flex; align-items: center; justify-content: center;
+  gap: 10px; padding: 20px; color: var(--fg-dim); text-align: center;
+}
+.loading-indicator.loading-inline {
+  display: inline-flex; min-height: 0; padding: 0; gap: 6px; text-align: left;
+}
+.route-loading {
+  min-height: 100vh; display: grid; place-items: center; background: var(--bg);
+}
+.route-loading .loading-indicator { min-height: 0; }
+.box[aria-busy="true"] { position: relative; }
 
 .mono { font-family: var(--mono); font-size: 12px; word-break: break-all; }
 .dim { color: var(--fg-dim); }

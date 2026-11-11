@@ -4,7 +4,7 @@
 // 积分双维表 + 时序图。口径与 /api/panel/usage（Go Snapshot 同构 JSON）一一对应。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { req, useAutoRefresh, usePanelRefresh } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
 import { UsageChart, type SeriesPoint } from "../components/usageChart";
 
 /* ── 类型：/api/panel/usage 响应（Go Snapshot 同构） ─────────────── */
@@ -238,13 +238,16 @@ export function UsageView({ flash }: { flash: Flash }) {
   const [creditDim, setCreditDim] = useState<"account" | "model" | "key">("account");
   const [provOpen, setProvOpen] = useState<string | null>(null);
   const [keyOpen, setKeyOpen] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    setLoading(true);
     const query = "usage?hours=" + hours + (chartDim === "total" ? "" : "&group=" + chartDim);
-    req<UsageResp>(query).then(setU)
-      .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+    try { setU(await req<UsageResp>(query)); }
+    catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    finally { setLoading(false); }
   }, [hours, chartDim, flash]);
-  useEffect(load, [load]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
   useAutoRefresh(load, 60_000);
   // 顶栏「刷新」按钮广播的事件：否则在该 tab 点刷新只更新了侧边栏统计。
   usePanelRefresh(load);
@@ -278,7 +281,7 @@ export function UsageView({ flash }: { flash: Flash }) {
     return m;
   }, [u]);
 
-  if (!u) return <Box title="用量统计" pad><div className="dim">加载用量…</div></Box>;
+  if (!u) return <Box title="用量统计" busy pad><LoadingIndicator label="正在加载用量…" /></Box>;
 
   const t = u.totals;
   const total = t.total_tokens, pt = t.prompt_tokens, ct = t.completion_tokens;
@@ -308,14 +311,16 @@ export function UsageView({ flash }: { flash: Flash }) {
 
   return (
     <>
-      <Box title="用量统计" hint="请求与积分均按所选窗口统计" extra={<>
+      <Box title="用量统计" hint="请求与积分均按所选窗口统计" busy={loading} extra={<>
         <select className="select" style={{ width: 140 }} value={hours}
           onChange={(e) => setHours(Number(e.target.value))}>
           <option value={24}>近 24 小时</option><option value={72}>近 3 天</option>
           <option value={168}>近 7 天</option><option value={720}>近 30 天</option>
           <option value={0}>全部历史</option>
         </select>
-        <button className="btn xs" onClick={load}>刷新</button>
+        <button className="btn xs" disabled={loading} aria-busy={loading} onClick={() => void load()}>
+          <ButtonLoadingContent loading={loading} loadingChildren="刷新中…">刷新</ButtonLoadingContent>
+        </button>
       </>}>
         <div className="pad">
           <div className="kpi-grid">

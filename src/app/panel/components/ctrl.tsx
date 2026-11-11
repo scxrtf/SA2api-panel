@@ -2,6 +2,7 @@
 // CloseRouter ControlPanel.kt 的 Web 复刻组件体系：
 // CtrlCard / CtrlStatus / CtrlAction / CtrlMetric / CtrlValue / CtrlHint。
 import React, { useEffect, useRef, useState } from "react";
+import { Spinner } from "@/components/ui/spinner";
 
 /** ControlCard：灰面 14px 圆角容器 */
 export function CtrlCard({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
@@ -59,8 +60,8 @@ export function CtrlAction({ text, code, onClick, secondary, disabled, title, pe
   };
   return (
     <button className={"ctrl-action" + (secondary ? " secondary" : "") + (busy ? " busy" : "")}
-      onClick={handle} disabled={disabled || busy} title={title}>
-      <span className="code">{busy ? <span className="spin" /> : code}</span>
+      onClick={handle} disabled={disabled || busy} title={title} aria-busy={busy || undefined}>
+      <span className="code">{busy ? <Spinner className="size-3" /> : code}</span>
       <span className="txt">{busy ? (pendingText ?? "发起中…") : text}</span>
     </button>
   );

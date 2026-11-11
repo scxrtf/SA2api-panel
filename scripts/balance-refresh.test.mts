@@ -2,6 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BALANCE_HISTORY_CACHE_MS, panelCacheTtlMs } from "../src/lib/balance-history-cache.ts";
 import { panelCacheGet, panelCacheSet, panelCacheStats } from "../src/lib/panel-cache.ts";
+import { rollupBalanceSamples, sampleAll } from "../src/lib/balance.ts";
+import { prisma } from "../src/lib/db.ts";
+
+const integration = process.env.RUN_BALANCE_INTEGRATION === "1";
+
+test("余额保留策略不删除原始采样点", { skip: !integration }, async () => {
+  const uid = "__balance_rollup_regression__";
+  await prisma.balanceSample.deleteMany({ where: { uid } });
+  try {
+    assert.equal(await sampleAll([{ uid, credits: 100 }]), 1);
+    const before = await prisma.balanceSample.findFirst({ where: { uid } });
+    assert.ok(before);
+    await rollupBalanceSamples();
+    const after = await prisma.balanceSample.findUnique({ where: { id: before.id } });
+    assert.ok(after, "rollup 后原始采样点仍应存在");
+    assert.equal(after.credits, 100n);
+    assert.equal(after.day, "");
+  } finally {
+    await prisma.balanceSample.deleteMany({ where: { uid } });
+  }
+});
 
 test("余额趋势采用 60 秒短缓存，其他面板数据仍保留 1 小时", () => {
   assert.equal(BALANCE_HISTORY_CACHE_MS, 60_000);

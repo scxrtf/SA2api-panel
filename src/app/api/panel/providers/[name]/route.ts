@@ -18,12 +18,13 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const { name } = await ctx.params;
-  let body: { models?: string; base_url?: string; key?: string };
+  let body: { models?: string; base_url?: string; key?: string; super_password?: unknown };
   try {
     body = (await req.json()) as { models?: string; base_url?: string; key?: string };
   } catch {
     return fail(400, "invalid json body");
   }
+  if (!verifySuperPassword(body.super_password)) return fail(403, "超级密码错误");
   const existing = await prisma.provider.findUnique({ where: { name } });
   if (!existing) return fail(404, "未找到供应商：" + name);
 

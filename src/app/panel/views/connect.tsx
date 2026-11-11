@@ -3,7 +3,7 @@
 // 地址按当前访问域名自动生成：本机访问显示 127.0.0.1，线上域名访问显示线上域名。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getKey, req } from "../lib";
-import { Box } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator } from "../components/ui";
 import { CtrlHint } from "../components/ctrl";
 
 interface ModelRow {
@@ -265,8 +265,8 @@ Content-Type: application/json
       <Box
         title="接入引导"
         hint="三步：取模型 → 选模型 → 发对话；地址按当前访问域名自动生成"
-        extra={<button className="btn xs" onClick={() => void loadModels()} disabled={loadingModels}>
-          {loadingModels ? "读取中…" : "刷新模型"}
+        extra={<button className="btn xs" onClick={() => void loadModels()} disabled={loadingModels} aria-busy={loadingModels}>
+          <ButtonLoadingContent loading={loadingModels} loadingChildren="读取中…">刷新模型</ButtonLoadingContent>
         </button>}
         pad
       >
@@ -359,7 +359,7 @@ Content-Type: application/json
 
             <CtrlHint>
               {loadingModels
-                ? "正在读取模型目录…"
+                ? <LoadingIndicator inline label="正在读取模型目录…" />
                 : "共 " + models.length + " 个可选模型" + (modelErr ? "（读取失败：" + modelErr + "）" : "") + "。模型 ID 必须原样使用，前缀决定路由通道。"}
             </CtrlHint>
           </StepCard>
@@ -413,7 +413,7 @@ Content-Type: application/json
           <div className="connect-empty">
             {models.length === 0
               ? (loadingModels
-                ? "正在读取模型目录…"
+                ? <LoadingIndicator inline label="正在读取模型目录…" />
                 : modelErr ? "模型目录读取失败：" + modelErr : "暂无可用模型，请先在「账号池」添加账号")
               : "没有匹配的模型，换个关键词试试"}
           </div>

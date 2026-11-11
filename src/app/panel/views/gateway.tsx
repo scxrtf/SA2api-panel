@@ -2,12 +2,15 @@
 // 供应商与密钥视图（对齐 Go view-gateway：密钥环 + 聚合供应商合一页）。
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { req, useAutoRefresh, usePanelRefresh, emitPanelRefresh } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
+import { Spinner } from "@/components/ui/spinner";
 import { AddAccountModal } from "../components/addAccount";
 import { SuperPasswordModal } from "../components/superPassword";
 
 interface KeyRow { name: string; key_mask: string; providers: string[]; created_at: string }
 interface ProviderRow { name: string; base_url: string; key_mask: string; models: string; created_at: string }
+const errorText = (e: unknown) => e instanceof Error && e.message === "__AUTH__"
+  ? "登录已过期，请重新登录" : e instanceof Error ? e.message : String(e);
 
 export function GatewayView({ flash }: { flash: Flash }) {
   return (
@@ -29,6 +32,7 @@ function KeysBox({ flash }: { flash: Flash }) {
   const [machineError, setMachineError] = useState("");
   const [machineBusy, setMachineBusy] = useState(false);
   const [machineChecking, setMachineChecking] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const machineRequest = useRef(0);
   // 可授权的供应商名列表（来自「聚合供应商」）。
@@ -42,14 +46,19 @@ function KeysBox({ flash }: { flash: Flash }) {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
 
-  const load = useCallback(() => {
-    req<{ keys: KeyRow[] }>("keys").then((r) => setKeys(r.keys))
-      .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
-    req<{ providers: { name: string }[] }>("providers")
-      .then((r) => setProviders(r.providers.map((p) => p.name)))
-      .catch(() => undefined);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      await Promise.all([
+        req<{ keys: KeyRow[] }>("keys").then((r) => setKeys(r.keys))
+          .catch((e) => flash("err", e instanceof Error ? e.message : String(e))),
+        req<{ providers: { name: string }[] }>("providers")
+          .then((r) => setProviders(r.providers.map((p) => p.name)))
+          .catch(() => undefined),
+      ]);
+    } finally { setLoading(false); }
   }, [flash]);
-  useEffect(load, [load]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
   useAutoRefresh(load, 30_000);
   usePanelRefresh(load);
 
@@ -153,7 +162,7 @@ function KeysBox({ flash }: { flash: Flash }) {
         : "未授权（无供应商）";
 
   return (
-    <Box title="网关密钥环" hint="可调用 /api/v1/* 的子密钥；新建默认无供应商授权，勾选后仅可调用已授权供应商（池通道不受限）">
+    <Box title="网关密钥环" busy={loading || creating || machineChecking || machineBusy} hint="可调用 /api/v1/* 的子密钥；新建默认无供应商授权，勾选后仅可调用已授权供应商（池通道不受限）">
       <div className="pad">
         {created && (
           <div className="msg ok">新密钥 {created.name}：<span className="mono">{created.key}</span>（仅显示一次，请立即保存；默认无供应商授权，如需调用聚合供应商请在下方「授权」中勾选）</div>
@@ -161,8 +170,8 @@ function KeysBox({ flash }: { flash: Flash }) {
         <div className="btn-row" style={{ marginBottom: 12 }}>
           <input className="input" style={{ width: 220 }} placeholder="密钥名称"
             value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn primary" onClick={create} disabled={!name.trim() || machineChecking || machineBusy || creating}>
-            {creating ? "创建中…" : "新建密钥"}
+          <button className="btn primary" onClick={create} disabled={!name.trim() || machineChecking || machineBusy || creating} aria-busy={machineChecking || machineBusy || creating}>
+            <ButtonLoadingContent loading={machineChecking || machineBusy || creating} loadingChildren={creating ? "创建中…" : "检测授权中…"}>新建密钥</ButtonLoadingContent>
           </button>
           {machine?.authorized && <span className="dim" style={{ alignSelf: "center" }}>本机已获建 Key 权限</span>}
         </div>
@@ -183,7 +192,8 @@ function KeysBox({ flash }: { flash: Flash }) {
                   </td>
                 </tr>
               ))}
-              {(keys ?? []).length === 0 && <tr><td colSpan={5} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无密钥</td></tr>}
+              {keys === null && loading && <tr><td colSpan={5}><LoadingIndicator label="正在加载网关密钥…" /></td></tr>}
+              {keys !== null && keys.length === 0 && <tr><td colSpan={5} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无密钥</td></tr>}
             </tbody>
           </table>
         </div>
@@ -229,7 +239,7 @@ function KeysBox({ flash }: { flash: Flash }) {
             <div className="modal machine-modal" role="dialog" aria-modal="true" aria-labelledby="machine-auth-title" aria-busy={machineChecking || machineBusy || creating}>
               <div className="machine-modal-heading">
                 <div className="modal-title" id="machine-auth-title">创建密钥 · 本机授权检测</div>
-                {(machineChecking || machineBusy || creating) && <span className="spinner" aria-label="处理中" />}
+                {(machineChecking || machineBusy || creating) && <Spinner className="size-[18px] text-[var(--accent)]" />}
               </div>
               <div className={"machine-state" + (machine?.authorized ? " authorized" : "")}>
                 <div className="machine-state-top">
@@ -244,7 +254,7 @@ function KeysBox({ flash }: { flash: Flash }) {
               </div>
               {machineChecking ? (
                 <div className="machine-progress" role="status">
-                  <span className="spinner large" />
+                  <Spinner className="size-7 text-[var(--accent)]" />
                   <div><b>正在检测本机状态</b><div className="dim">核对机器码记录与建 Key 权限…</div></div>
                 </div>
               ) : machine?.authorized ? (
@@ -254,9 +264,8 @@ function KeysBox({ flash }: { flash: Flash }) {
                   </div>
                   <div className="btn-row" style={{ marginTop: 16 }}>
                     <button className="btn primary machine-submit" onClick={createAuthorized}
-                      disabled={creating || !name.trim()}>
-                      {creating && <span className="spinner small light" />}
-                      {creating ? "正在生成密钥…" : "确认生成密钥"}
+                      disabled={creating || !name.trim()} aria-busy={creating}>
+                      <ButtonLoadingContent loading={creating} loadingChildren="正在生成密钥…">确认生成密钥</ButtonLoadingContent>
                     </button>
                     <button className="btn" onClick={() => setMachineOpen(false)} disabled={creating}>取消</button>
                   </div>
@@ -291,9 +300,8 @@ function KeysBox({ flash }: { flash: Flash }) {
                       </div>
                       <div className="btn-row" style={{ marginTop: 12 }}>
                         <button className="btn primary machine-submit" onClick={authorizeByPassword}
-                          disabled={!machinePassword || machineBusy || creating}>
-                          {(machineBusy || creating) && <span className="spinner small light" />}
-                          {creating ? "正在生成密钥…" : machineBusy ? "正在验证授权…" : "授权并创建密钥"}
+                          disabled={!machinePassword || machineBusy || creating} aria-busy={machineBusy || creating}>
+                          <ButtonLoadingContent loading={machineBusy || creating} loadingChildren={creating ? "正在生成密钥…" : "正在验证授权…"}>授权并创建密钥</ButtonLoadingContent>
                         </button>
                         <button className="btn" onClick={() => setMachineOpen(false)} disabled={creating}>取消</button>
                       </div>
@@ -326,23 +334,34 @@ function ProvidersBox({ flash }: { flash: Flash }) {
   const [removeName, setRemoveName] = useState<string | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState("");
+  const [writeAction, setWriteAction] = useState<"create" | "edit" | null>(null);
+  const [writeBusy, setWriteBusy] = useState(false);
+  const [writeError, setWriteError] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
-    req<{ providers: ProviderRow[] }>("providers").then((r) => setRows(r.providers))
-      .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      await req<{ providers: ProviderRow[] }>("providers").then((r) => setRows(r.providers))
+        .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+    } finally { setLoading(false); }
   }, [flash]);
-  useEffect(load, [load]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
   useAutoRefresh(load, 30_000);
   usePanelRefresh(load);
 
-  const create = async () => {
+  const create = () => { setWriteError(""); setWriteAction("create"); };
+  const createAuthorized = async (password: string) => {
+    setWriteBusy(true); setWriteError("");
     try {
-      await req("providers", { method: "POST", body: form });
+      await req("providers", { method: "POST", body: { ...form, super_password: password } });
       setForm({ name: "", base_url: "", key: "", models: "" });
+      setWriteAction(null);
       // 广播刷新：已挂载的「模型与档位」视图立即重载，不必等 120s 轮询。
       emitPanelRefresh();
       flash("ok", "供应商已添加");
-    } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setWriteError(errorText(e)); }
+    finally { setWriteBusy(false); }
   };
   const remove = (n: string) => { setRemoveError(""); setRemoveName(n); };
   const removeAuthorized = async (password: string) => {
@@ -354,7 +373,7 @@ function ProvidersBox({ flash }: { flash: Flash }) {
       emitPanelRefresh();
       flash("ok", "供应商已删除");
     }
-    catch (e) { setRemoveError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setRemoveError(errorText(e)); }
     finally { setRemoveBusy(false); }
   };
   const [probing, setProbing] = useState(false);
@@ -370,7 +389,7 @@ function ProvidersBox({ flash }: { flash: Flash }) {
     } catch (e) {
       setProbeErr(true);
       setProbeModels([]);
-      setProbe(e instanceof Error ? e.message : String(e));
+      setProbe(errorText(e));
     }
     finally { setProbing(false); }
   };
@@ -416,22 +435,28 @@ function ProvidersBox({ flash }: { flash: Flash }) {
     } catch (e) {
       setEditorProbeErr(true);
       setEditorProbeModels([]);
-      setEditorProbe(e instanceof Error ? e.message : String(e));
+      setEditorProbe(errorText(e));
     } finally { setEditorProbing(false); }
   };
-  const saveEditor = async () => {
+  const saveEditor = () => { if (editor) { setWriteError(""); setWriteAction("edit"); } };
+  const saveEditorAuthorized = async (password: string) => {
     if (!editor) return;
+    setWriteBusy(true); setWriteError("");
     try {
-      await req("providers/" + encodeURIComponent(editor.name), { method: "PATCH", body: { models: editor.models } });
+      await req("providers/" + encodeURIComponent(editor.name), {
+        method: "PATCH", body: { models: editor.models, super_password: password },
+      });
       setEditor(null);
+      setWriteAction(null);
       emitPanelRefresh();
       load();
       flash("ok", "供应商 " + editor.name + " 的模型白名单已更新");
-    } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setWriteError(errorText(e)); }
+    finally { setWriteBusy(false); }
   };
 
   return (
-    <Box title="聚合供应商" hint="OpenAI 兼容上游，模型以「供应商名:模型」暴露">
+    <Box title="聚合供应商" busy={loading || probing || editorProbing} hint="OpenAI 兼容上游，模型以「供应商名:模型」暴露">
       <div className="pad">
         <div className="form-grid" style={{ marginBottom: 10 }}>
           <div className="form-row"><label className="form-label">名称</label>
@@ -448,8 +473,8 @@ function ProvidersBox({ flash }: { flash: Flash }) {
         </div>
         <div className="btn-row">
           <button className="btn primary" onClick={create} disabled={!form.name || !form.base_url || !form.key}>添加供应商</button>
-          <button className="btn" onClick={probeNow} disabled={!form.base_url || !form.key || probing}>
-            {probing ? "探测中…" : "获取模型列表"}
+          <button className="btn" onClick={probeNow} disabled={!form.base_url || !form.key || probing} aria-busy={probing}>
+            <ButtonLoadingContent loading={probing} loadingChildren="探测中…">获取模型列表</ButtonLoadingContent>
           </button>
           {probe && <span className={probeErr ? "" : "dim"} style={{ alignSelf: "center", ...(probeErr ? { color: "var(--err)", fontSize: 12 } : {}) }}>{probe}</span>}
         </div>
@@ -485,7 +510,8 @@ function ProvidersBox({ flash }: { flash: Flash }) {
                   </td>
                 </tr>
               ))}
-              {(rows ?? []).length === 0 && <tr><td colSpan={5} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无供应商</td></tr>}
+              {rows === null && loading && <tr><td colSpan={5}><LoadingIndicator label="正在加载聚合供应商…" /></td></tr>}
+              {rows !== null && rows.length === 0 && <tr><td colSpan={5} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无供应商</td></tr>}
             </tbody>
           </table>
         </div>
@@ -500,8 +526,8 @@ function ProvidersBox({ flash }: { flash: Flash }) {
                 onChange={(e) => setEditor({ ...editor, models: e.target.value })} />
             </div>
             <div className="btn-row" style={{ marginBottom: editorProbeModels.length ? 8 : 0 }}>
-              <button className="btn" onClick={editorProbeNow} disabled={editorProbing}>
-                {editorProbing ? "探测中…" : "获取上游模型列表"}
+              <button className="btn" onClick={editorProbeNow} disabled={editorProbing} aria-busy={editorProbing}>
+                <ButtonLoadingContent loading={editorProbing} loadingChildren="探测中…">获取上游模型列表</ButtonLoadingContent>
               </button>
               {editorProbeModels.length > 0 && (<>
                 <button className="btn xs" onClick={() => setEditor({ ...editor, models: editorProbeModels.join(", ") })}>全选</button>
@@ -529,6 +555,12 @@ function ProvidersBox({ flash }: { flash: Flash }) {
       {removeName && <SuperPasswordModal title="删除聚合供应商" confirmText="验证并删除" busy={removeBusy} error={removeError}
         description={<>即将删除供应商 <b>{removeName}</b>，所有密钥中对该供应商的授权也会同步移除。</>}
         onCancel={() => { if (!removeBusy) setRemoveName(null); }} onConfirm={removeAuthorized} />}
+      {writeAction === "create" && <SuperPasswordModal title="添加聚合供应商" confirmText="验证并添加" busy={writeBusy} error={writeError}
+        description={<>即将添加供应商 <b>{form.name}</b>，并保存其上游地址、API Key 与模型白名单。</>}
+        onCancel={() => { if (!writeBusy) setWriteAction(null); }} onConfirm={createAuthorized} />}
+      {writeAction === "edit" && editor && <SuperPasswordModal title="修改聚合供应商" confirmText="验证并保存" busy={writeBusy} error={writeError}
+        description={<>即将更新供应商 <b>{editor.name}</b> 的模型白名单。</>}
+        onCancel={() => { if (!writeBusy) setWriteAction(null); }} onConfirm={saveEditorAuthorized} />}
     </Box>
   );
 }

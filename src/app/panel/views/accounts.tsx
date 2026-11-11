@@ -2,7 +2,7 @@
 // 账号池视图（对齐 Go view-accounts）：统计条 + 批量操作 + 账号表 + 模型锁池。
 import React, { useCallback, useEffect, useState } from "react";
 import { req, fmtNum, fmtTime, fmtDur } from "../lib";
-import { Box, type StatusRow, type Overview, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type StatusRow, type Overview, type Flash } from "../components/ui";
 import { CtrlMetric, CtrlAction, CtrlCard, CtrlHint } from "../components/ctrl";
 import { AddAccountModal } from "../components/addAccount";
 import { SuperPasswordModal } from "../components/superPassword";
@@ -122,7 +122,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
       return nv;
     });
   }, []);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<{ uid: string; action: string } | null>(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"" | "healthy" | "cooling" | "paused" | "disabled">("");
   const [realm, setRealm] = useState("");
@@ -130,25 +130,25 @@ export function AccountsView({ ov, flash, onRefresh }: {
   const op = useCallback(async (uid: string, action: string, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
     if (action === "remove") { setRemoveError(""); setRemoveTarget(uid); return; }
-    setBusy(true);
+    setBusy({ uid, action });
     try {
       await req("accounts/" + encodeURIComponent(uid) + "/" + action, { method: "POST" });
       flash("ok", "操作完成：" + action);
       await onRefresh();
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); }
+    } finally { setBusy(null); }
   }, [flash, onRefresh]);
   const removeAccount = async (password: string) => {
     if (!removeTarget) return;
-    setBusy(true); setRemoveError("");
+    setBusy({ uid: removeTarget, action: "remove" }); setRemoveError("");
     try {
       await req("accounts/" + encodeURIComponent(removeTarget) + "/remove", {
         method: "POST", body: { super_password: password },
       });
       flash("ok", "账号已移除"); setRemoveTarget(null); await onRefresh();
     } catch (e) { setRemoveError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   };
 
   // batch 返回 Promise 供 CtrlAction 进入「发起中…」加载态，空窗期按钮即反馈。
@@ -221,7 +221,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
           <CtrlAction code="KEEP" text="全部保活" pendingText="发起保活中…" secondary onClick={() => batch("keepalive_all", "全部保活")} />
           <CtrlAction code="BAL" text="刷新余额" pendingText="刷新中…" secondary onClick={() => batch("balance_all", "刷新余额")} />
           <CtrlAction code="SCAN" text="扫描模型限流" pendingText="启动中…" secondary
-            disabled={scan.scan?.running} onClick={async () => {
+            disabled={scan.scan?.running || scan.initialLoading || scan.starting} onClick={async () => {
               if (!window.confirm("扫描会向每个未禁用账号的每个模型发送一次最小请求，可能消耗少量积分并触发上游限流。确认开始？")) return;
               await scan.start();
             }} />
@@ -232,9 +232,11 @@ export function AccountsView({ ov, flash, onRefresh }: {
         </CtrlHint>
       </CtrlCard>
 
-      {scan.scan && (
+      {scan.initialLoading ? (
+        <div style={{ marginBottom: 16 }}><Box title="模型可用性扫描" busy><LoadingIndicator label="正在读取扫描状态…" /></Box></div>
+      ) : scan.scan && (
         <div style={{ marginBottom: 16 }}>
-          <ModelScanPanel scan={scan.scan} onCancel={scan.cancel} />
+          <ModelScanPanel scan={scan.scan} onCancel={scan.cancel} cancelling={scan.cancelling} />
         </div>
       )}
 
@@ -323,16 +325,20 @@ export function AccountsView({ ov, flash, onRefresh }: {
                   <td className="mono dim">{a.last_success ? fmtAgo(a.last_success) : "—"}</td>
                   <td>
                     <div className="btn-row" style={{ flexWrap: "nowrap" }}>
-                      <button className="btn small" disabled={busy} onClick={() => op(a.uid, "checkin")}>签到</button>
-                      <button className="btn small" disabled={busy} onClick={() => op(a.uid, "balance")}>余额</button>
+                      <button className="btn small" disabled={!!busy} aria-busy={busy?.uid === a.uid && busy.action === "checkin"} onClick={() => op(a.uid, "checkin")}>
+                        <ButtonLoadingContent loading={busy?.uid === a.uid && busy.action === "checkin"}>签到</ButtonLoadingContent>
+                      </button>
+                      <button className="btn small" disabled={!!busy} aria-busy={busy?.uid === a.uid && busy.action === "balance"} onClick={() => op(a.uid, "balance")}>
+                        <ButtonLoadingContent loading={busy?.uid === a.uid && busy.action === "balance"}>余额</ButtonLoadingContent>
+                      </button>
                       {a.paused
-                        ? <button className="btn small" disabled={busy} onClick={() => op(a.uid, "resume")}>恢复</button>
-                        : <button className="btn small" disabled={busy} onClick={() => op(a.uid, "pause")}>暂停</button>}
+                        ? <button className="btn small" disabled={!!busy} aria-busy={busy?.uid === a.uid && busy.action === "resume"} onClick={() => op(a.uid, "resume")}><ButtonLoadingContent loading={busy?.uid === a.uid && busy.action === "resume"}>恢复</ButtonLoadingContent></button>
+                        : <button className="btn small" disabled={!!busy} aria-busy={busy?.uid === a.uid && busy.action === "pause"} onClick={() => op(a.uid, "pause")}><ButtonLoadingContent loading={busy?.uid === a.uid && busy.action === "pause"}>暂停</ButtonLoadingContent></button>}
                       {a.disabled
-                        ? <button className="btn small" disabled={busy} onClick={() => op(a.uid, "revive")}>复活</button>
-                        : <button className="btn small danger" disabled={busy} onClick={() => op(a.uid, "disable", "确认禁用 " + a.uid + "？")}>禁用</button>}
-                      <button className="btn small danger" disabled={busy}
-                        onClick={() => op(a.uid, "remove", "确认移除 " + a.uid + "？该操作不可撤销。")}>移除</button>
+                        ? <button className="btn small" disabled={!!busy} aria-busy={busy?.uid === a.uid && busy.action === "revive"} onClick={() => op(a.uid, "revive")}><ButtonLoadingContent loading={busy?.uid === a.uid && busy.action === "revive"}>复活</ButtonLoadingContent></button>
+                        : <button className="btn small danger" disabled={!!busy} aria-busy={busy?.uid === a.uid && busy.action === "disable"} onClick={() => op(a.uid, "disable", "确认禁用 " + a.uid + "？")}><ButtonLoadingContent loading={busy?.uid === a.uid && busy.action === "disable"}>禁用</ButtonLoadingContent></button>}
+                      <button className="btn small danger" disabled={!!busy} aria-busy={busy?.uid === a.uid && busy.action === "remove"}
+                        onClick={() => op(a.uid, "remove", "确认移除 " + a.uid + "？该操作不可撤销。")}><ButtonLoadingContent loading={busy?.uid === a.uid && busy.action === "remove"}>移除</ButtonLoadingContent></button>
                     </div>
                   </td>
                 </tr>
@@ -401,7 +407,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
 
       {addOpen && <AddAccountModal onClose={() => setAddOpen(false)}
         onDone={async () => { setAddOpen(false); await onRefresh(); }} />}
-      {removeTarget && <SuperPasswordModal title="移除账号" confirmText="验证并移除" busy={busy} error={removeError}
+      {removeTarget && <SuperPasswordModal title="移除账号" confirmText="验证并移除" busy={!!busy} error={removeError}
         description={<>即将移除账号 <b className="mono">{removeTarget}</b>，账号凭证及其状态将一并删除。</>}
         onCancel={() => { if (!busy) setRemoveTarget(null); }} onConfirm={removeAccount} />}
     </>

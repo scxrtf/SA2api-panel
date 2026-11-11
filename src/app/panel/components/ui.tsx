@@ -1,6 +1,8 @@
 "use client";
 // 面板共享 UI 组件与类型（P3 拆分自原单文件 page.tsx）。
 import React from "react";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 
 export interface StatusRow {
   uid: string; nickname: string; realm: string; enterprise: boolean;
@@ -45,13 +47,46 @@ export interface ModelLockRow {
 }
 export type Flash = (k: "ok" | "err", t: string) => void;
 
-// Box 容器（对齐 Go .box）。
-export function Box({ title, hint, extra, children, pad }: {
-  title: React.ReactNode; hint?: string; extra?: React.ReactNode;
-  children: React.ReactNode; pad?: boolean;
+/** 统一的按钮加载反馈：保留原按钮尺寸与文案，仅替换为真实 busy 状态。 */
+export function ButtonLoadingContent({ loading, children, loadingChildren }: {
+  loading: boolean;
+  children: React.ReactNode;
+  loadingChildren?: React.ReactNode;
 }) {
   return (
-    <div className="box">
+    <>
+      {loading && <Spinner className="size-3.5" />}
+      <span>{loading ? (loadingChildren ?? children) : children}</span>
+    </>
+  );
+}
+
+/** 首屏、详情和局部刷新共用的加载态。inline 用于标题/状态栏，block 用于内容区。 */
+export function LoadingIndicator({ label = "加载中…", inline = false, className }: {
+  label?: string;
+  inline?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn("loading-indicator", inline && "loading-inline", className)}
+      role="status"
+      aria-live="polite"
+      aria-label={label}
+    >
+      <Spinner className={inline ? "size-3.5" : "size-5"} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+// Box 容器（对齐 Go .box）。
+export function Box({ title, hint, extra, children, pad, busy = false }: {
+  title: React.ReactNode; hint?: string; extra?: React.ReactNode;
+  children: React.ReactNode; pad?: boolean; busy?: boolean;
+}) {
+  return (
+    <div className="box" aria-busy={busy || undefined}>
       <header>
         <h3>{title}{hint && <span className="hint">{hint}</span>}</h3>
         <span className="grow"></span>

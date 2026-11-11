@@ -1,9 +1,9 @@
 "use client";
 // 配置视图（对齐 Go view-config）：分组（服务/定时任务/账号池与流量治理/上游与高级），
 // 开关 + 描述 + 热生效保存。字段集对齐 Go CFG_MAP；Next 版部分字段为平铺命名。
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { req } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
 import { SuperPasswordModal } from "../components/superPassword";
 
 type Config = Record<string, string | number | boolean | number[] | Record<string, string>>;
@@ -99,19 +99,26 @@ export function ConfigView({ flash }: { flash: Flash }) {
   const [saveOpen, setSaveOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [discarding, setDiscarding] = useState(false);
 
   const loadConfig = (config: Config) => {
     setCfg(config);
     setFallbackRows(toFallbackRows(config.model_fallback));
   };
 
-  useEffect(() => {
-    req<{ config: Config }>("config")
-      .then((r) => loadConfig(r.config))
-      .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+  const fetchConfig = useCallback(async (discard = false) => {
+    if (discard) setDiscarding(true); else setLoading(true);
+    try {
+      const r = await req<{ config: Config }>("config");
+      loadConfig(r.config);
+      if (discard) flash("ok", "已放弃未保存的修改");
+    } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    finally { if (discard) setDiscarding(false); else setLoading(false); }
   }, [flash]);
+  useEffect(() => { const t = setTimeout(() => void fetchConfig(), 0); return () => clearTimeout(t); }, [fetchConfig]);
 
-  if (!cfg) return <Box title="运行配置" pad><div className="dim">加载配置…</div></Box>;
+  if (!cfg) return <Box title="运行配置" busy={loading} pad><LoadingIndicator label="正在加载配置…" /></Box>;
 
   const set = (k: string, v: Config[string]) => setCfg({ ...cfg, [k]: v });
 
@@ -237,7 +244,9 @@ export function ConfigView({ flash }: { flash: Flash }) {
       </Box>
       <div className="savebar">
         <span className="grow"></span>
-        <button className="btn" onClick={() => req<{ config: Config }>("config").then((r) => loadConfig(r.config)).catch(() => null)}>放弃修改</button>
+        <button className="btn" disabled={discarding || saving} aria-busy={discarding} onClick={() => void fetchConfig(true)}>
+          <ButtonLoadingContent loading={discarding} loadingChildren="正在还原…">放弃修改</ButtonLoadingContent>
+        </button>
         <button className="btn primary" onClick={save}>保存配置</button>
       </div>
       {saveOpen && <SuperPasswordModal title="保存运行配置" confirmText="验证并保存" busy={saving} error={saveError}

@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { req, reqCached, invalidateCache } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
 
 interface ModelRow { id: string; name?: string; provider?: boolean }
 interface BaselineItem {
@@ -53,7 +53,8 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
   const [result, setResult] = useState<CheckResult | null>(null);
   const [errorsOpen, setErrorsOpen] = useState(false);
   const [hoverBin, setHoverBin] = useState<number | null>(null);
-  const [baselineBusy, setBaselineBusy] = useState(false);
+  const [baselineBusy, setBaselineBusy] = useState<"import" | "save" | "remove" | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveLabel, setSaveLabel] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
@@ -76,7 +77,7 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
 
   // 模型目录 + 基准列表。
   useEffect(() => {
-    reqCached<{ models: ModelRow[]; warnings?: string[] }>("models")
+    const modelsRequest = reqCached<{ models: ModelRow[]; warnings?: string[] }>("models")
       .then((r) => {
         setModels(r.models ?? []);
         setModelWarnings(r.warnings ?? []);
@@ -87,7 +88,8 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
       });
     // loadBaselines 内部在 await 之后 setState；规则误判为同步 setState，这里显式豁免。
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadBaselines().catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+    const baselinesRequest = loadBaselines().catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+    void Promise.allSettled([modelsRequest, baselinesRequest]).then(() => setInitialLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -175,7 +177,7 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
     if (!result) return;
     const label = saveLabel.trim();
     if (!label) { flash("err", "请填写基准名称"); return; }
-    setBaselineBusy(true);
+    setBaselineBusy("save");
     try {
       const r = await req<{ baseline: { id: string; label: string } }>("aichecker/baselines", {
         method: "POST",
@@ -193,12 +195,12 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     } finally {
-      setBaselineBusy(false);
+      setBaselineBusy(null);
     }
   }, [result, saveLabel, loadBaselines, flash]);
 
   const importBaseline = useCallback(async (file: File) => {
-    setBaselineBusy(true);
+    setBaselineBusy("import");
     try {
       let raw: unknown;
       try { raw = JSON.parse(await file.text()) as unknown; }
@@ -213,14 +215,14 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     } finally {
-      setBaselineBusy(false);
+      setBaselineBusy(null);
     }
   }, [loadBaselines, flash]);
 
   const removeBaseline = useCallback(async () => {
     if (!selectedBaseline || selectedBaseline.source !== "custom") return;
     if (!confirm(`删除自建基准「${selectedBaseline.label ?? selectedBaseline.id}」？此操作不可撤销。`)) return;
-    setBaselineBusy(true);
+    setBaselineBusy("remove");
     try {
       await req("aichecker/baselines?name=" + encodeURIComponent(selectedBaseline.id), { method: "DELETE" });
       invalidateCache("aichecker/baselines");
@@ -229,7 +231,7 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     } finally {
-      setBaselineBusy(false);
+      setBaselineBusy(null);
     }
   }, [selectedBaseline, loadBaselines, flash]);
 
@@ -348,7 +350,8 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
                 比对基准
                 <span className="dim"> · 官方 {officialCount} / 自建 {customCount}</span>
               </div>
-              <select className="select" style={{ width: "100%" }} value={baseline} onChange={(e) => setBaseline(e.target.value)}
+              {initialLoading && <LoadingIndicator inline label="正在加载模型目录与鉴别基准…" />}
+              <select className="select" style={{ width: "100%" }} value={baseline} disabled={initialLoading || running} onChange={(e) => setBaseline(e.target.value)}
                 title="选择待测模型声称对应的模型；切换待测模型时若存在同名或同日快照基准会自动选中">
                 {baselines.map((b) => <option key={b.id} value={b.id}>{baselineOptionLabel(b)}</option>)}
               </select>
@@ -357,9 +360,9 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
                   title={result ? "把本次鉴别的 355 桶分布存为自建基准" : "先完成一次鉴别才能保存基准"}>
                   存为基准
                 </button>
-                <button className="btn small ghost" disabled={baselineBusy} onClick={() => importRef.current?.click()}
+                <button className="btn small ghost" disabled={!!baselineBusy} aria-busy={baselineBusy === "import"} onClick={() => importRef.current?.click()}
                   title="导入上游 hlwy-ai-checker 导出的基准 JSON">
-                  {baselineBusy ? "处理中…" : "导入 JSON"}
+                  <ButtonLoadingContent loading={baselineBusy === "import"} loadingChildren="导入中…">导入 JSON</ButtonLoadingContent>
                 </button>
                 <input ref={importRef} type="file" accept=".json,application/json" hidden
                   onChange={(e) => {
@@ -369,12 +372,11 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
                   }} />
                 <button className="btn small ghost" disabled={syncBusy || running} onClick={syncBaselines}
                   title="从上游 hlwy-ai-checker 仓库拉取最新官方基准，覆盖内置快照">
-                  {syncBusy && <span className="spin" style={{ marginRight: 5 }} />}
-                  {syncBusy ? "拉取中…" : "更新基准"}
+                  <ButtonLoadingContent loading={syncBusy} loadingChildren="拉取中…">更新基准</ButtonLoadingContent>
                 </button>
                 {selectedBaseline?.source === "custom" && (
-                  <button className="btn small danger" disabled={baselineBusy} onClick={removeBaseline}>
-                    删除自建
+                  <button className="btn small danger" disabled={!!baselineBusy} aria-busy={baselineBusy === "remove"} onClick={removeBaseline}>
+                    <ButtonLoadingContent loading={baselineBusy === "remove"} loadingChildren="删除中…">删除自建</ButtonLoadingContent>
                   </button>
                 )}
               </div>
@@ -390,8 +392,8 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
                   <input className="input" value={saveLabel} maxLength={60}
                     onChange={(e) => setSaveLabel(e.target.value)}
                     placeholder="基准名称（如 glm-5.2-1020）" />
-                  <button className="btn primary small" disabled={baselineBusy} onClick={saveBaseline}>
-                    {baselineBusy ? "保存中…" : "保存"}
+                  <button className="btn primary small" disabled={!!baselineBusy} aria-busy={baselineBusy === "save"} onClick={saveBaseline}>
+                    <ButtonLoadingContent loading={baselineBusy === "save"} loadingChildren="保存中…">保存</ButtonLoadingContent>
                   </button>
                   <button className="btn ghost small" onClick={() => setSaveOpen(false)}>取消</button>
                 </div>
@@ -422,7 +424,7 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
             {!running
               ? <button className="btn primary" onClick={start}>开始鉴别</button>
                 : <>
-                  <button className="btn" disabled>鉴别中… 已用 {elapsed}s · 计划 {iterations} 次采样</button>
+                  <button className="btn" disabled aria-busy="true"><ButtonLoadingContent loading>{`鉴别中… 已用 ${elapsed}s · 计划 ${iterations} 次采样`}</ButtonLoadingContent></button>
                   <button className="btn danger" onClick={stop}>中止</button>
                 </>}
           </div>

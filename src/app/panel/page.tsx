@@ -2,8 +2,8 @@
 // 管理面板入口（CloseRouter 大改版）：只负责鉴权态 / 视图调度 / overview 轮询，
 // 外壳（机柜+侧边栏+页头）在 components/shell.tsx，登录页在 components/login.tsx。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, useAutoRefresh, emitPanelRefresh, PanelActivityProvider } from "./lib";
-import type { Overview } from "./components/ui";
+import { req, useAutoRefresh, emitPanelRefresh, PanelActivityProvider, PANEL_AUTH_EVENT } from "./lib";
+import { LoadingIndicator, type Overview } from "./components/ui";
 import { Shell } from "./components/shell";
 import { LoginScreen } from "./components/login";
 import type { View } from "./nav";
@@ -43,6 +43,7 @@ export default function PanelPage() {
   }, []);
 
   const flash = useCallback((kind: "ok" | "err", text: string) => {
+    if (text === "__AUTH__") { setAuthed(false); return; }
     setMsg({ kind, text });
     setTimeout(() => setMsg(null), 4200);
   }, []);
@@ -59,6 +60,11 @@ export default function PanelPage() {
   }, [flash]);
 
   useEffect(() => { const t = setTimeout(() => { void loadOverview(); }, 0); return () => clearTimeout(t); }, [loadOverview]);
+  useEffect(() => {
+    const expired = () => setAuthed(false);
+    window.addEventListener(PANEL_AUTH_EVENT, expired);
+    return () => window.removeEventListener(PANEL_AUTH_EVENT, expired);
+  }, []);
   useAutoRefresh(() => { void loadOverview(); }, 120_000, authed === true);
 
   // 顶栏刷新：先刷 overview（侧边栏统计），再广播事件让当前视图刷自己的数据。
@@ -80,7 +86,7 @@ export default function PanelPage() {
         <ViewPane active={view === "accounts"}>
           {ov
             ? <AccountsView ov={ov} flash={flash} onRefresh={loadOverview} />
-            : <div className="box"><div className="pad dim">加载中…</div></div>}
+            : <div className="box" aria-busy="true"><LoadingIndicator label="正在加载账号池…" /></div>}
         </ViewPane>
       )}
       {visited.has("usage") && <ViewPane active={view === "usage"}><UsageView flash={flash} /></ViewPane>}

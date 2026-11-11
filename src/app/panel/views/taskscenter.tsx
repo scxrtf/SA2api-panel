@@ -2,7 +2,8 @@
 // 任务中心视图（对齐 Go view-taskscenter）：成长任务队列 + 扫描待办 + 执行全部。
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { req } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, LoadingIndicator, type Flash } from "../components/ui";
+import { Spinner } from "@/components/ui/spinner";
 import { CtrlAction, CtrlCard, CtrlHint } from "../components/ctrl";
 
 interface GrowthTask {
@@ -203,7 +204,7 @@ export function TasksCenterView({ flash }: { flash: Flash }) {
       <CtrlHint>扫描所有账号的成长任务与开学季待办，排成队列后按并发执行；执行状态会直接回填到下方原列表。</CtrlHint>
     </CtrlCard>
 
-    <Box title="成长任务队列"
+    <Box title="成长任务队列" busy={scanning || !!queue?.running}
       hint={scanning
         ? "正在刷新…"
         : queue?.running
@@ -222,7 +223,9 @@ export function TasksCenterView({ flash }: { flash: Flash }) {
         </div>
       )}
 
-      {!hasData ? (
+      {!hasData ? (scanning ? (
+        <LoadingIndicator label="正在扫描账号待办…" />
+      ) : (
         <div className="tc-empty">
           <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <rect x="8" y="6" width="24" height="36" rx="3" />
@@ -232,11 +235,11 @@ export function TasksCenterView({ flash }: { flash: Flash }) {
           <div className="t">还没有扫描过</div>
           <div className="d">扫描所有账号的成长任务与开学季待办，把没做的排成一列，一键执行。</div>
         </div>
-      ) : (
+      )) : (
         <>
           {scanning && (
             <div className="tc-refreshing">
-              <span className="spin" /> 已扫描过，正在重新拉取最新待办…
+              <LoadingIndicator inline label="已扫描过，正在重新拉取最新待办…" />
             </div>
           )}
           <div className={"tc-list" + (scanning ? " is-refreshing" : "")} key={scanSeq} aria-busy={scanning}>
@@ -253,7 +256,7 @@ export function TasksCenterView({ flash }: { flash: Flash }) {
                       <span className="nm">{t.name}</span>
                       {t.rewardBuddy && <span className="tag info">buddy</span>}
                       {t.credit ? <span className="tag ok">+{t.credit}</span> : null}
-                      {st && <span className={"tag " + st.cls}>{st.text}</span>}
+                      {st && <span className={"tag " + st.cls}>{t.queue?.status === "running" && <Spinner className="size-3" />}{st.text}</span>}
                       <span className="st dim qmsg" title={t.queue?.message || undefined}>
                         {t.queue?.message || t.progress}
                       </span>

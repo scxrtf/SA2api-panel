@@ -436,7 +436,10 @@ export async function runBalanceRefresh(): Promise<{ updated: number; failed: nu
       );
       // 余额采样：这里已拿到新鲜余额，顺手记一点（不额外打上游）。
       // 内部按账号 30 分钟节流，多数刷新周期不会落点。
-      await sampleAll([{ uid: a.uid, credits: r.remain }]).catch(() => 0);
+      await sampleAll([{ uid: a.uid, credits: r.remain }]).catch((e) => {
+        runlog("balance sample " + label(a.uid, a.nickname) + ": " + errMsg(e));
+        return 0;
+      });
       updated++;
     } catch (e) {
       failed++;

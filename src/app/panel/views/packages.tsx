@@ -4,7 +4,7 @@
 // 也不计入域合计——否则整页会读出「CN 剩余 0」这种与事实相反的结论。
 import React, { useCallback, useEffect, useState } from "react";
 import { reqCached, fmtNum, fmtTime, usePanelRefresh } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
 import { PackageMixBar, ExpiryDistribution } from "../components/packageCharts";
 
 export interface CreditPackage {
@@ -37,18 +37,20 @@ export function PackagesView({ flash }: { flash: Flash }) {
   const [loadedAt, setLoadedAt] = useState(0);
   const [detailLimit, setDetailLimit] = useState(5);
   const [expandAll, setExpandAll] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback((force = false) => {
-    reqCached<{ accounts: PkgAccount[]; detail_limit?: number }>("packages", { force })
-      .then((r) => {
-        setRows(r.accounts);
-        setLoadedAt(new Date().getTime());
-        const n = Number(r.detail_limit);
-        setDetailLimit(Number.isFinite(n) && n > 0 ? Math.floor(n) : 5);
-      })
-      .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
+  const load = useCallback(async (force = false) => {
+    setLoading(true);
+    try {
+      const r = await reqCached<{ accounts: PkgAccount[]; detail_limit?: number }>("packages", { force });
+      setRows(r.accounts);
+      setLoadedAt(new Date().getTime());
+      const n = Number(r.detail_limit);
+      setDetailLimit(Number.isFinite(n) && n > 0 ? Math.floor(n) : 5);
+    } catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
+    finally { setLoading(false); }
   }, [flash]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
   // 积分构成变化频率低：取消分钟级轮询，数据 1 小时内走缓存；
   // 手动「刷新」按钮与顶栏刷新通过 force 立即拉新数据。
   usePanelRefresh(() => load(true));
@@ -74,10 +76,12 @@ export function PackagesView({ flash }: { flash: Flash }) {
   const totalFailed = (rows ?? []).filter((a) => a.ok === false).length;
 
   return (
-    <Box title="积分构成" hint="按账号列出套餐包 · 上游按失效时刻先后自动优先扣减（FEFO）"
-      extra={<button className="btn xs" onClick={() => load(true)}>刷新</button>}>
+    <Box title="积分构成" hint="按账号列出套餐包 · 上游按失效时刻先后自动优先扣减（FEFO）" busy={loading}
+      extra={<button className="btn xs" disabled={loading} aria-busy={loading} onClick={() => void load(true)}>
+        <ButtonLoadingContent loading={loading} loadingChildren="刷新中…">刷新</ButtonLoadingContent>
+      </button>}>
       {!rows ? (
-        <div className="pad dim">加载中…</div>
+        <LoadingIndicator label="正在加载积分构成…" />
       ) : rows.length === 0 ? (
         <div className="pad dim">暂无账号</div>
       ) : (

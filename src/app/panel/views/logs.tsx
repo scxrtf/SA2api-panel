@@ -2,7 +2,7 @@
 // 运行日志视图（对齐 Go view-logs）：请求日志 / 运行日志 / 缓存详细 三模式 + 过滤。
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { req, fmtNum, fmtClock, fmtDateTime, useAutoRefresh, usePanelRefresh } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
 import { errKindLabel, knownText, uaDisplay } from "@/lib/logfmt";
 
 interface LogEntry {
@@ -102,7 +102,7 @@ function CachePanel({ stats, loading }: {
   stats: CacheStatsResp | null;
   loading: boolean;
 }) {
-  if (!stats && loading) return <div className="pad dim">读取缓存状态中…</div>;
+  if (!stats && loading) return <LoadingIndicator label="正在读取缓存状态…" />;
   if (!stats) return <div className="pad dim">暂无数据</div>;
   const at = fmtClock(stats.at);
   return (
@@ -318,7 +318,7 @@ function RequestLogDetailView({ entry, loading, error }: {
   loading: boolean;
   error?: string;
 }) {
-  if (loading) return <div className="log-detail-state">正在加载详情…</div>;
+  if (loading) return <div className="log-detail-state"><LoadingIndicator inline label="正在加载详情…" /></div>;
   if (error) return <div className="log-detail-state err">{error}</div>;
   if (!entry) return <div className="log-detail-state">暂无详情</div>;
 
@@ -526,7 +526,7 @@ export function LogsView({ flash }: { flash: Flash }) {
   };
 
   return (
-    <Box title={mode === "requests" ? "请求日志" : mode === "cache" ? "缓存详细" : "运行日志"} extra={<>
+    <Box title={mode === "requests" ? "请求日志" : mode === "cache" ? "缓存详细" : "运行日志"} busy={loading} extra={<>
       <button className={"btn xs" + (mode === "requests" ? " primary" : "")} onClick={() => setMode("requests")}>请求日志</button>
       <button className={"btn xs" + (mode === "runtime" ? " primary" : "")} onClick={() => setMode("runtime")}>运行日志</button>
       <button className={"btn xs" + (mode === "cache" ? " primary" : "")} onClick={() => setMode("cache")}>缓存详细</button>
@@ -548,12 +548,12 @@ export function LogsView({ flash }: { flash: Flash }) {
           onChange={(e) => setFilter({ ...filter, err: e.target.value })} />
       </>}
       <span className="dim" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-        {loading ? "正在刷新…" : loadError ? "刷新失败，请重试" : lastLoadedAt
+        {loading ? <LoadingIndicator inline label="正在刷新…" /> : loadError ? "刷新失败，请重试" : lastLoadedAt
           ? `更新于 ${fmtClock(lastLoadedAt)}`
           : "等待加载"}
       </span>
-      <button className="btn xs" disabled={loading} onClick={() => { void load(false); }}>
-        {loading ? "刷新中…" : "刷新"}
+      <button className="btn xs" disabled={loading} aria-busy={loading} onClick={() => { void load(false); }}>
+        <ButtonLoadingContent loading={loading} loadingChildren="刷新中…">刷新</ButtonLoadingContent>
       </button>
       {mode === "runtime" && <>
         <select className="select" style={{ width: 104 }} value={ch}
@@ -576,7 +576,7 @@ export function LogsView({ flash }: { flash: Flash }) {
               const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 36;
               setFollowLogs(atBottom);
             }}>
-            {logs.length === 0 && <div style={{ color: "#64748b" }}>暂无运行日志</div>}
+            {loading && !lastLoadedAt ? <LoadingIndicator label="正在加载运行日志…" /> : logs.length === 0 && <div style={{ color: "#64748b" }}>暂无运行日志</div>}
             {logs.map((l, i) => (
               <div key={l.id ?? i} className={"ln" + (/error|失败|错误/.test(l.text) ? " e" : /warn|冷却|熔断/.test(l.text) ? " w" : "")}>{
                 fmtClock(l.ts)
@@ -596,7 +596,7 @@ export function LogsView({ flash }: { flash: Flash }) {
               <th>Token</th><th>积分</th><th>请求 ID</th><th style={{ width: 1 }}></th>
             </tr></thead>
             <tbody>
-              {reqs.length === 0 && <tr><td colSpan={15} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无请求日志</td></tr>}
+              {loading && !lastLoadedAt ? <tr><td colSpan={15}><LoadingIndicator label="正在加载请求日志…" /></td></tr> : reqs.length === 0 && <tr><td colSpan={15} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无请求日志</td></tr>}
               {reqs.map((r) => {
                 const open = expanded === r.id;
                 const total = r.totalTokens || ((r.promptTokens ?? 0) + (r.completionTok ?? 0));

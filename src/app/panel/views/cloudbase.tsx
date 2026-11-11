@@ -1,7 +1,7 @@
 "use client";
 import React, { useCallback, useEffect, useState } from "react";
 import { fmtNum, req, reqCached, usePanelRefresh } from "../lib";
-import { Box, type Flash } from "../components/ui";
+import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
 import { SuperPasswordModal } from "../components/superPassword";
 
 interface TableStat {
@@ -303,11 +303,14 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
   const qpsPeak = qpsPoints.length ? Math.max(...qpsPoints.map((p) => p.value)) : null;
   const qpsAverage = qpsPoints.length ? Math.round(qpsPoints.reduce((s, p) => s + p.value, 0) / qpsPoints.length * 10) / 10 : null;
   return <div style={{ display: "grid", gap: 16 }}>
-    <Box title="CloudBase 监控"
+    <Box title="CloudBase 监控" busy={loading}
       extra={<div className="cb-box-extra">
         <span className="cb-env-chip" title={`采集于 ${collectedAt}`}><i className={"cb-dot" + (stats ? " on" : "")} /><b className="mono">{db?.name ?? "…"}</b><em>采集于 {collectedAt}</em></span>
-        <button className="btn xs" disabled={loading} onClick={() => void load(true)}>{loading ? "读取中…" : "刷新"}</button>
+        <button className="btn xs" disabled={loading} aria-busy={loading} onClick={() => void load(true)}>
+          <ButtonLoadingContent loading={loading} loadingChildren="读取中…">刷新</ButtonLoadingContent>
+        </button>
       </div>} pad>
+      {!stats ? <LoadingIndicator label="正在读取数据库监控…" /> : <>
       <div className={isCb ? "cb-kpi-grid cb" : "cb-kpi-grid"}>
         <div className={"cb-kpi span2" + (isCb ? " capacity" : "")}>
           <div className="cb-kpi-head"><span className="k">{isCb ? "资源点" : "容量"}</span><span className={"cb-chip" + (barCls ? " " + barCls : "") + (isCb && !pointsAvailable ? " muted" : "")}>{isCb && !pointsAvailable ? "数据暂缺" : barCls === "crit" ? "告急" : barCls === "warn" ? "偏高" : "健康"}</span></div>
@@ -346,6 +349,7 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
           <span className="s">上限 {db?.maxConnections ?? "—"}</span>
         </div>}
       </div>
+      </>}
     </Box>
     {isCb && <Box title="环境 QPS 趋势" hint="CloudBase 平台 · 最近一小时" extra={!platform?.available ? <span className="cb-chip muted">待配置</span> : undefined} pad>
       <div className="cb-qps-summary"><div><span>最新</span><b>{platform?.qps == null ? "—" : fmtNum(platform.qps)}<em> QPS</em></b></div><div><span>小时峰值</span><b>{qpsPeak == null ? "—" : fmtNum(qpsPeak)}<em> QPS</em></b></div><div><span>采样均值</span><b>{qpsAverage == null ? "—" : fmtNum(qpsAverage)}<em> QPS</em></b></div><div><span>配额</span><b>{platform?.qpsQuota == null ? "—" : fmtNum(platform.qpsQuota)}<em> QPS</em></b></div></div>
@@ -365,8 +369,8 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
         </div>
         <div className="cb-ret">
           <span className="k">仍含历史对话</span>
-          <span className={"v" + ((db?.dialogRows ?? 0) > 0 ? " warn" : "")}>{fmtNum(db?.dialogRows)}</span>
-          <span className="s">{((db?.dialogRows ?? 0) > 0) ? "可执行「清理历史对话」剥离正文" : "正文已全部剥离"}</span>
+          <span className="v">{fmtNum(db?.dialogRows)}</span>
+          <span className="s">详情到期后自动剥离，也可手动清理</span>
         </div>
         <div className="cb-ret wide policy">
           <span className="k">正文保存策略</span>
@@ -384,7 +388,7 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
         {cleanup === "clear_dialog" && <p>剥离全部日志中的请求消息与助手回复，用量、错误详情和参数记录继续保留。</p>}
         {cleanup === "clear_details" && <><p>只清理指定时间之前的对话、失败详情、参数覆盖和尝试明细，保留整行统计。</p><label className="form-label">清理早于（小时），0 表示全部</label><input className="input" type="number" min="0" max="8760" step="1" required disabled={!!busy} value={detailHours} onChange={(e) => setDetailHours(Number(e.target.value))} /></>}
         {cleanup === "clear_expired_logs" && <><p>删除指定时间之前的整行请求日志，同时清理过期模型健康检查。</p><div className="cb-cleanup-fields"><label>日志早于（天）<input className="input" type="number" min="1" max="365" step="1" required disabled={!!busy} value={logDays} onChange={(e) => setLogDays(Number(e.target.value))} /></label><label>健康检查早于（天）<input className="input" type="number" min="1" max="365" step="1" required disabled={!!busy} value={healthDays} onChange={(e) => setHealthDays(Number(e.target.value))} /></label></div></>}
-        {cleanup === "run_retention" && <p>依次清理历史对话、超过 {stats?.retention.detailHours ?? 24} 小时的诊断详情、超过 {stats?.retention.days ?? 7} 天的日志和过期健康检查。</p>}
+        {cleanup === "run_retention" && <p>清理超过 {stats?.retention.detailHours ?? 24} 小时的诊断详情（含对话正文）、超过 {stats?.retention.days ?? 7} 天的日志和过期健康检查；保留期内的对话不会提前清理。</p>}
       </div>}
       onCancel={() => { if (!busy) setCleanup(null); }} onConfirm={action} />}
   </div>;

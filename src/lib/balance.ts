@@ -120,7 +120,9 @@ export async function rollupBalanceSamples(now = Date.now()): Promise<void> {
   }
   // 超期日粒度点裁剪
   const dayCutoff = shanghaiDay(new Date(now - DAY_KEEP_MS));
-  await prisma.balanceSample.deleteMany({ where: { day: { not: "", lt: dayCutoff } } });
+  // CloudBase 当前把 day 为空的原始点也匹配进 { not: "", lt }，会误删全部新采样。
+  // 用显式范围表达「非空且早于保留窗口」，同时兼容 Prisma 与 PostgREST。
+  await prisma.balanceSample.deleteMany({ where: { day: { gt: "", lt: dayCutoff } } });
 }
 
 // snapshot 返回 sinceMs 之后各账号的余额序列（含按日聚合），供「余额趋势」视图。

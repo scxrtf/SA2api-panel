@@ -1,6 +1,8 @@
 "use client";
 // 权限级操作统一的二次确认弹窗：沿用建 Key 的遮罩、状态与按钮体系。
 import React, { useEffect, useRef, useState } from "react";
+import { Spinner } from "@/components/ui/spinner";
+import { ButtonLoadingContent } from "./ui";
 
 export function SuperPasswordModal({ title, description, confirmText = "确认执行", busy = false,
   error = "", onCancel, onConfirm }: {
@@ -40,7 +42,7 @@ export function SuperPasswordModal({ title, description, confirmText = "确认�
       <div ref={dialogRef} className="modal super-password-modal" role="dialog" aria-modal="true" aria-labelledby="super-password-title" aria-busy={busy}>
         <div className="machine-modal-heading">
           <div className="modal-title" id="super-password-title">{title}</div>
-          {busy && <span className="spinner" aria-label="处理中" />}
+          {busy && <Spinner className="size-[18px] text-[var(--accent)]" />}
         </div>
         <div className="machine-state">
           <div className="machine-state-top"><span className="machine-state-label">超级密码验证</span><span className="machine-badge">权限操作</span></div>
@@ -55,8 +57,8 @@ export function SuperPasswordModal({ title, description, confirmText = "确认�
         </div>
         {error && <div className="msg err super-password-error" role="alert">{error}</div>}
         <div className="btn-row super-password-actions">
-          <button className="btn primary machine-submit" onClick={() => void submit()} disabled={!password || busy}>
-            {busy && <span className="spinner small light" />}{busy ? "正在验证并执行…" : confirmText}
+          <button className="btn primary machine-submit" onClick={() => void submit()} disabled={!password || busy} aria-busy={busy}>
+            <ButtonLoadingContent loading={busy} loadingChildren="正在验证并执行…">{confirmText}</ButtonLoadingContent>
           </button>
           <button className="btn" onClick={onCancel} disabled={busy}>取消</button>
         </div>

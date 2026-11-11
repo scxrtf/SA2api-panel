@@ -34,7 +34,10 @@ export async function req<T = Record<string, unknown>>(
   });
   let j: ApiResp<T>;
   try { j = (await r.json()) as ApiResp<T>; } catch { j = { ok: false, error: "HTTP " + r.status }; }
-  if (r.status === 401) throw new Error("__AUTH__");
+  if (r.status === 401) {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(PANEL_AUTH_EVENT));
+    throw new Error("__AUTH__");
+  }
   if (!j.ok) throw new Error(j.error ?? "HTTP " + r.status);
   return j as T & ApiResp<T>;
 }
@@ -135,6 +138,9 @@ export function useAutoRefresh(loader: () => void, ms: number, enabled = true): 
 // 各视图的数据在自己组件里，靠这个事件让当前视图也跑自己的 load——
 // 否则在用量/日志等 tab 点顶栏刷新只更新了侧边栏统计，主区纹丝不动。
 export const PANEL_REFRESH_EVENT = "wb2a:panel-refresh";
+
+// 任一视图遇到 401 都切回登录页，不把内部错误标记显示给用户。
+export const PANEL_AUTH_EVENT = "wb2a:panel-auth-expired";
 
 export function emitPanelRefresh(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(PANEL_REFRESH_EVENT));

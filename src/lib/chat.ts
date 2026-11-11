@@ -248,8 +248,10 @@ async function recordRequestLog(r: {
     });
     markRunlogPersisted(logRef, row.id);
     return true;
-  } catch {
-    // 同上。
+  } catch (error) {
+    // 日志写入失败不阻断主链路，但必须留下可诊断的错误。
+    runlog("WARN: request log write failed: " + clipLogText(errorText(error), 500));
+    console.error("[request-log] create failed", error);
     return false;
   }
 }

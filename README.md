@@ -58,13 +58,14 @@ npm run dev                 # http://localhost:3000/panel
 
 ### 磁盘 / 保留策略
 
-`RequestLog` 永不保存请求对话与助手回复，仅保留用量统计、失败诊断、参数覆盖和尝试明细；应用写入与
-数据库触发器都会剥离正文，旧 `REQUEST_LOG_DIALOG` 环境变量不再生效。托管 PostgreSQL 磁盘超限时可能把数据库切成
-只读（`default_transaction_read_only=on`），表现为整站写入失败。
+`RequestLog` 在诊断详情保留期内保存请求对话、助手回复、失败诊断、参数覆盖和尝试明细，到期后剥离大字段，
+仅保留用量统计。`REQUEST_LOG_DIALOG=0` 可关闭对话记录。托管 PostgreSQL 磁盘超限时可能把数据库切成只读
+（`default_transaction_read_only=on`），表现为整站写入失败。
 
 - 保留参数（环境变量）：`REQUEST_LOG_RETENTION_DAYS`（默认 7）、`REQUEST_LOG_DETAIL_HOURS`（默认 24，
-  超过就清空参数覆盖、尝试明细与错误详情但保留统计列）、`MODEL_HEALTH_RETENTION_DAYS`（默认 3）。
+  超过就清空对话、参数覆盖、尝试明细与错误详情但保留统计列）、`MODEL_HEALTH_RETENTION_DAYS`（默认 3）。
 - 定时打 `/api/cron/retention`（每 6~12 小时）即可自动维持；临时收紧可带 `?days=3&detailHours=12`。
+  定时任务不会提前清理保留期内的对话；「清理历史对话」按钮仍会立即清理全部对话，仅供管理员手动使用。
 - 面板「CloudBase」显示数据库与表占用，提供历史对话清理和保留策略按钮；Egress、Log Ingestion、
   Log Query 使用可编辑的控制台快照与额度进度条。快照仅保存在当前浏览器，数据库统计每 60 秒缓存刷新。
 - 紧急救火（平台已只读、连清理都跑不动时）：`node scripts/db-truncate.mjs --yes` 直接 `TRUNCATE`
