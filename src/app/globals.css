@@ -1550,3 +1550,78 @@ select:focus-visible, textarea:focus-visible {
   .tb-meta { gap: 6px 8px; }
   .tb-title { font-size: 18px; }
 }
+
+/* CloudBase QPS 趋势图（参考监控面板多序列样式，跟随项目主题变量） */
+.cb-chart-dark {
+  position: relative;
+  background: var(--bg-card);
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px 10px;
+  margin: 4px 0;
+}
+.cb-chart-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 22px;
+  padding: 0 2px 12px;
+  font-size: 13px; color: var(--fg);
+}
+.cb-chart-legend .lg { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.cb-chart-legend .lg i { width: 16px; height: 3px; border-radius: 2px; display: block; }
+.cb-chart-dark .grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 4 4; }
+.cb-chart-dark .grid.v { opacity: .6; }
+.cb-chart-dark .tick { fill: var(--fg-dim); font: 12px var(--mono); }
+.cb-chart-dark .tick.tick-r { opacity: .75; }
+.cb-chart-dark .line { stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.cb-chart-dark .dot { stroke-width: 2; pointer-events: none; }
+.cb-chart-dark .hit { fill: transparent; cursor: crosshair; }
+.cb-chart-dark .point:hover .dot { stroke-width: 3; }
+.cb-chart-dark.cb-line-wrap { border-top: none; padding-top: 14px; }
+.cb-chart-dark .crosshair,
+.cb-miniarea .crosshair {
+  stroke: var(--fg-dim); stroke-width: 1; stroke-dasharray: 4 4;
+  pointer-events: none; opacity: .65;
+}
+.cb-chart-dark .dot.active,
+.cb-miniarea .dot.active { fill: var(--accent); stroke: var(--bg-card); }
+.cb-plot { position: relative; }
+.cb-chart-tip {
+  position: absolute; z-index: 3;
+  min-width: 168px; max-width: min(260px, 80%);
+  padding: 10px 12px; pointer-events: none;
+  transform: translate(-50%, calc(-100% - 16px));
+  background: var(--bg-card); color: var(--fg);
+  border: 0.5px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  font-size: 12px; line-height: 1.5;
+  animation: cb-chart-tip-in .12s ease-out;
+}
+.cb-chart-tip.below { transform: translate(-50%, 16px); }
+.cb-chart-tip b { display: block; margin-bottom: 5px; font-weight: 600; overflow-wrap: anywhere; }
+.cb-chart-tip span { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.cb-chart-tip i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); }
+.cb-chart-tip em { margin-left: auto; padding-left: 18px; font-style: normal; font-weight: 600; font-variant-numeric: tabular-nums; }
+@keyframes cb-chart-tip-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 大标题右侧的环境信息 + 刷新 */
+.cb-box-extra { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cb-env-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border: 0.5px solid var(--border); border-radius: 999px; background: var(--bg-soft); font-size: 12px; }
+.cb-env-chip b { font-weight: 600; color: var(--fg); }
+.cb-env-chip em { font-style: normal; color: var(--fg-dim); }
+
+/* CloudBase：容量与请求日志同行，总行数独占下一整行。 */
+.cb-kpi-grid.cb { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cb-kpi-grid.cb .capacity { grid-column: auto; }
+.cb-kpi-grid.cb .total-rows { grid-column: 1 / -1; }
+.cb-kpi .s { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+@media (max-width: 560px) { .cb-kpi-grid.cb { grid-template-columns: 1fr; } }
+
+/* 迷你面积趋势图 */
+.cb-miniarea-wrap { position: relative; width: 100%; }
+.cb-miniarea { display: block; width: 100%; height: 128px; overflow: visible; cursor: crosshair; }
+.cb-miniarea .line { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cb-miniarea .dot { fill: var(--bg-card); stroke: var(--accent); stroke-width: 1.6; pointer-events: none; }
+.cb-miniarea .hit { fill: transparent; cursor: crosshair; }
+.cb-miniarea .point:hover .dot { fill: var(--accent); }
+.cb-miniarea .tick { fill: var(--fg-dim); font-size: 12px; }
+.cb-mini-tip { min-width: 156px; }
+@media (prefers-reduced-motion: reduce) { .cb-chart-tip { animation: none; } }

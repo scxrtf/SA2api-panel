@@ -10,9 +10,22 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const CACHE_MS = 60_000;
+// CloudBase 监控数据变化频率低，与面板其它视图统一缓存 1 小时；
+// 手动刷新（前端 force 会带 ?refresh=1）与 POST 清理动作立即失效重拉。
+const CACHE_MS = 3_600_000;
 const LIMIT_GB = Number(process.env.DB_SIZE_LIMIT_GB || 5);
 let cache: { at: number; data: Record<string, unknown> } | null = null;
+
+// 缓存快照（供面板「缓存详细」页展示）：是否命中、剩余 TTL。
+export function databaseCacheStats(): { cached: boolean; ttlMs: number; cacheMs: number } {
+  const snapshot = cache;
+  const hit = snapshot !== null && Date.now() - snapshot.at < CACHE_MS;
+  return {
+    cached: !!hit,
+    ttlMs: hit && snapshot ? CACHE_MS - (Date.now() - snapshot.at) : 0,
+    cacheMs: CACHE_MS,
+  };
+}
 
 interface StatsRow {
   database_name: string;
@@ -41,26 +54,56 @@ async function sampleRowBytes(table: string, pk = "id"): Promise<number> {
   } catch { return 0; }
 }
 
-// 表增长速率：按时间索引分页拉时间列自数；网关的 HEAD/count=exact 实测不可用。
-async function growth24h(table: string, timeCol: string): Promise<number | null> {
+type GrowthSeries = { at: string; value: number }[];
+type Growth24h = { total: number; series: GrowthSeries } | null;
+
+// 固定整点小时桶：后端直接输出连续 24 小时，前端不需要猜测或补零。
+function hourlyGrowthSeries(times: string[], now = new Date()): GrowthSeries {
+  const currentHour = Math.floor(now.getTime() / 3600_000) * 3600_000;
+  const buckets = new Map<number, number>();
+  for (let i = 23; i >= 0; i--) buckets.set(currentHour - i * 3600_000, 0);
+  for (const time of times) {
+    const timestamp = Date.parse(time);
+    if (!Number.isFinite(timestamp)) continue;
+    const hour = Math.floor(timestamp / 3600_000) * 3600_000;
+    if (buckets.has(hour)) buckets.set(hour, (buckets.get(hour) ?? 0) + 1);
+  }
+  return [...buckets].map(([hour, value]) => ({ at: new Date(hour).toISOString(), value }));
+}
+
+// 表增长速率：按时间索引分页拉时间列；网关的 HEAD/count=exact 实测不可用。
+async function growth24h(table: string, timeCol: string): Promise<Growth24h> {
   try {
-    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const now = new Date();
+    const currentHour = Math.floor(now.getTime() / 3600_000) * 3600_000;
+    const since = new Date(currentHour - 23 * 3600_000).toISOString();
+    const times: string[] = [];
     let offset = 0;
     for (;;) {
-      const rows = await cbSelect<unknown[]>(table, {
+      const rows = await cbSelect<Record<string, unknown>[]>(table, {
         select: timeCol,
         filters: [{ col: timeCol, op: "gte", val: since }],
         limit: 1000,
         offset,
       });
-      if (rows.length < 1000) return offset + rows.length;
+      times.push(...rows.flatMap((row) => typeof row[timeCol] === "string" ? [row[timeCol]] : []));
+      if (rows.length < 1000) return { total: rows.length + offset, series: hourlyGrowthSeries(times, now) };
       offset += 1000;
     }
   } catch { return null; }
 }
 
+function mergeGrowthSeries(series: GrowthSeries[]): GrowthSeries {
+  const buckets = new Map<string, number>();
+  for (const points of series) {
+    for (const point of points) buckets.set(point.at, (buckets.get(point.at) ?? 0) + point.value);
+  }
+  return [...buckets].sort(([a], [b]) => a.localeCompare(b))
+    .map(([at, value]) => ({ at, value }));
+}
+
 // CloudBase PostgREST 没有 pg_catalog 访问权限：库大小/连接数/版本拿不到，
-// 业务行数走 DAL 主键分页计数；容量保留采样估算，平台 QPS 走 CAM 接口。
+// 业务行数走 DAL 主键分页计数；旧容量字段保留采样估算，资源点与 QPS 走 CAM 接口。
 async function readStatsDal(): Promise<Record<string, unknown>> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.data;
   const TABLES: { name: string; model: keyof typeof dal }[] = [
@@ -97,7 +140,8 @@ async function readStatsDal(): Promise<Record<string, unknown>> {
   const growthEntries = await Promise.all(GROWTH.map(async ([name, col]) => {
     return [name, await growth24h(name, col)] as const;
   }));
-  const growthMap = new Map<string, number | null>(growthEntries);
+  const growthMap = new Map<string, Growth24h>(growthEntries);
+  const growthSeries = mergeGrowthSeries(growthEntries.flatMap(([, growth]) => growth ? [growth.series] : []));
 
   // JSON 字节采样比堆行多记字段名/JSON 语法；1.25 仅作索引与页开销的保守系数。
   const OVERHEAD = 1.25;
@@ -105,7 +149,7 @@ async function readStatsDal(): Promise<Record<string, unknown>> {
   const tables = counts.map((c) => ({
     ...c,
     avgRowBytes: sampleMap.get(c.name) ?? 0,
-    added24h: growthMap.get(c.name) ?? null,
+    added24h: growthMap.get(c.name)?.total ?? null,
     totalBytes: approxBytes(c.name, c.rows),
     dataBytes: Math.round(approxBytes(c.name, c.rows) * 0.7),
     indexBytes: Math.round(approxBytes(c.name, c.rows) * 0.3),
@@ -138,7 +182,8 @@ async function readStatsDal(): Promise<Record<string, unknown>> {
     },
     tables,
     platform,
-    growth: Object.fromEntries(growthEntries),
+    growthSeries,
+    growth: Object.fromEntries(growthEntries.map(([name, growth]) => [name, growth?.total ?? null])),
     growthBasis: "24h",
     retention: retentionConfig(),
   };

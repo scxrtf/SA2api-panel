@@ -44,7 +44,7 @@ import { tokensPerSecond } from "./upstream/usage";
 import { currentModelRate } from "./upstream/modelCatalog";
 import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
-import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import { errorText, failureDetail, parameterOverrides, type AttemptDetail } from "./request-log-detail";
+import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import { assistantMessageForLog, errorText, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, responseMessageFromObject, type AttemptDetail } from "./request-log-detail";
 
 import { sleepAbortable } from "./backoff";
 
@@ -235,13 +235,15 @@ async function recordRequestLog(r: {
   machineId?: string;
   // 报错内容：失败请求的上游响应正文摘要（已 clipLogText）。成功请求留空。
   errMsg?: string;
+  requestMessages?: unknown;
+  responseMessage?: unknown;
   errorDetail?: string;
   parameterOverrides?: unknown;
   attemptDetails?: unknown;
 }, logRef = ""): Promise<boolean> {
   try {
     const row = await prisma.requestLog.create({
-      data: r as never,
+      data: (logDialogEnabled() ? r : { ...r, requestMessages: undefined, responseMessage: undefined }) as never,
       select: { id: true },
     });
     markRunlogPersisted(logRef, row.id);
@@ -331,6 +333,7 @@ export async function handleChat(opts: {
   const { body, clientIP, ua, path } = opts;
   const stream = body["stream"] === true;
   const rawModel = typeof body["model"] === "string" ? (body["model"] as string) : "";
+  const dialogOn = logDialogEnabled(); const loggedRequestMessages = dialogOn ? requestMessagesForLog(body["messages"]) : null;
   const attemptDetails: AttemptDetail[] = [];
   let latestOutboundOverrides = parameterOverrides(body, body);
 
@@ -358,6 +361,7 @@ export async function handleChat(opts: {
           errMsg: "key 未授权使用供应商 " + provider,
           durationMs: Date.now() - started, clientIp: clientIP, ua, path, keyName,
           attempts: 0,
+          requestMessages: loggedRequestMessages,
           errorDetail: failureDetail({
             status: 403,
             code: "provider_not_authorized",
@@ -530,10 +534,19 @@ export async function handleChat(opts: {
     errKind: string,
     extra?: Partial<StreamStats>,
     detailOverride?: string,
+    responseOverride?: Record<string, unknown> | null,
     durationOverride?: number,
   ) => {     const logRef = runlog(       "[call] " + bare + " " + (status < 400 && !errKind ? "成功" : "失败") +       " HTTP " + status + (uid ? " uid=" + uid : "") +       (errKind ? " kind=" + errKind : "") +       " " + (Date.now() - started) + "ms",
     );
     const failed = status >= 400 || errKind !== "";
+    const responseMessage = responseOverride !== undefined
+      ? responseOverride
+      : extra ? assistantMessageForLog({
+        role: extra.assistantRole,
+        content: extra.assistantContent,
+        reasoningContent: extra.assistantReasoning,
+        toolCalls: extra.assistantToolCalls,
+      }) : null;
     let detail = detailOverride ?? "";
     if (failed && !detail) {
       detail = failureDetail({
@@ -564,6 +577,8 @@ export async function handleChat(opts: {
       // 机器码 = 实际用号按 desktop.go deriveID("machine") 同盐派生（sha36 截 36 hex）。
       // uid 为空（选号前失败 / 供应商直连）时留空，与 Go 请求日志"账号列 + 派生"口径一致。
       machineId: uid ? deriveID({ uid }, "machine") : "",
+      requestMessages: loggedRequestMessages,
+      responseMessage: responseMessage ?? undefined,
       errorDetail: detail,
       parameterOverrides: latestOutboundOverrides.length ? latestOutboundOverrides : undefined,
       attemptDetails: attemptDetails.length ? attemptDetails : undefined,
@@ -1013,6 +1028,7 @@ export async function handleChat(opts: {
               kind,
               stats,
               detail,
+              undefined,
               endedAt - started,
             );
           }
@@ -1058,6 +1074,7 @@ export async function handleChat(opts: {
               kind,
               stats,
               detail,
+              undefined,
               endedAt - started,
             );
           }
@@ -1179,7 +1196,13 @@ export async function handleChat(opts: {
       // 这里必须序列化 resp，不能把返回值当响应体（否则客户端只拿到
       // {allowed, allowUnknown, hold, inBlock, …} 这类内部字段）。
       repairAggregatedResponse(agg.resp as Obj, declaredTools, true);
-      finishLog(200, acct.uid, "", agg.stats, undefined, endedAt - started);
+      const choices = agg.resp["choices"];
+      const firstChoice = Array.isArray(choices) && choices[0]
+        && typeof choices[0] === "object" ? choices[0] as Obj : null;
+      const finalResponse = firstChoice
+        ? responseMessageFromObject(firstChoice["message"])
+        : null;
+      finishLog(200, acct.uid, "", agg.stats, undefined, finalResponse, endedAt - started);
       return Response.json(agg.resp);
     }
   } finally {

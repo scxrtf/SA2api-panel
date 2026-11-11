@@ -3,10 +3,9 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
-type Captured = { method: string; url: URL; body: any };
+type Captured = { method: string; url: URL; body?: Record<string, unknown>[] };
 const requests: Captured[] = [];
 let findPage = 0;
-let upsertConflict = true;
 let relationRows: { uid: string }[] = [];
 const allRows = Array.from({ length: 1001 }, (_, i) => ({ id: `row-${i}`, totalTokens: 1, at: "2026-11-10T00:00:00.000Z" }));
 
@@ -23,15 +22,9 @@ const server = createServer(async (req, res) => {
   if (table === "AccountState") return send(relationRows);
   if (table === "Account") return send([{ uid: "keep", expiresAt: "123", state: null }]);
   if (table === "ModelCooldown" && req.method === "POST") return send([{ id: "cooldown-id", ...((requests.at(-1)?.body?.[0]) ?? {}) }]);
-  if (table === "Setting" && req.method === "GET") {
-    return send(upsertConflict ? [] : [{ key: "lease", value: "old" }]);
-  }
-  if (table === "Setting" && req.method === "POST" && upsertConflict) {
-    upsertConflict = false;
-    return send({ code: "23505", message: "duplicate key value violates unique constraint" }, 409);
-  }
-  if (table === "Setting" && req.method === "PATCH") {
-    return send([{ key: "lease", value: "new", updatedAt: "2026-11-10T00:00:00.000Z" }]);
+  if (table === "Setting" && req.method === "POST") {
+    const row = requests.at(-1)?.body?.[0];
+    return send([{ ...row, updatedAt: "2026-11-10T00:00:00.000Z" }]);
   }
   if (table === "Provider") return send([{ id: requests.at(-1)?.body?.[0]?.id, name: "vendor" }]);
   if (table === "UsageEvent") {
@@ -63,6 +56,11 @@ try {
   assert.equal(url.searchParams.get("model"), 'eq."m1"');
   assert.equal(url.searchParams.has("uid_model"), false);
 
+  await dal.accountState.findMany({ where: { disabled: false, paused: { not: true } } });
+  url = requests.at(-1)!.url;
+  assert.equal(url.searchParams.get("disabled"), "eq.false");
+  assert.equal(url.searchParams.get("paused"), "not.eq.true");
+
   await dal.modelCooldown.findMany({ where: {
     reason: { not: { startsWith: "11102" } },
     OR: [
@@ -75,11 +73,16 @@ try {
   assert.equal(url.searchParams.get("or"), String.raw`or(and(uid.eq."u1",model.ilike."*a,b\"(x)\\%\\*\\\\*"),until.gte."12")`);
 
   await dal.provider.create({ data: { name: "vendor", baseUrl: "https://vendor.invalid" }, select: { id: true, name: true } });
-  let captured = requests.at(-1)!;
+  const captured = requests.at(-1)!;
   assert.match(captured.body[0].id, /^c/);
   assert.equal(captured.url.searchParams.get("select"), "id,name");
 
   relationRows = [{ uid: "blocked-a" }, { uid: "blocked,b" }];
+  await dal.account.findMany({ where: { state: { is: { disabled: false } } } });
+  url = requests.at(-1)!.url;
+  assert.equal(url.searchParams.get("uid"), 'in.("blocked-a","blocked,b")');
+  assert.match(url.search, /uid=in\.%28/, "positive in filters must include encoded list parentheses");
+
   const accounts = await dal.account.findMany({ where: { state: { isNot: { disabled: false } } } });
   url = requests.at(-1)!.url;
   assert.equal(url.searchParams.get("uid"), 'not.in.("blocked-a","blocked,b")');
@@ -96,10 +99,24 @@ try {
   });
   assert.equal(state.value, "new");
   assert.equal(requests.filter((r) => r.url.pathname.endsWith("/Setting") && r.method === "POST").length, 1);
-  const patch = requests.filter((r) => r.url.pathname.endsWith("/Setting") && r.method === "PATCH").at(-1)!;
-  assert.equal(patch.body.value, "new");
-  assert.ok(patch.body.updatedAt, "@updatedAt must be injected on updates");
-  assert.equal(patch.url.searchParams.get("select"), "key,value");
+  assert.equal(requests.filter((r) => r.url.pathname.endsWith("/Setting") && r.method === "GET").length, 0,
+    "atomic upsert must not pre-read the row");
+  const upsert = requests.find((r) => r.url.pathname.endsWith("/Setting") && r.method === "POST")!;
+  assert.equal(upsert.body[0].value, "new");
+  assert.equal(upsert.body[0].createdOnly, undefined);
+  assert.equal(upsert.url.searchParams.get("on_conflict"), "key");
+  assert.equal(upsert.url.searchParams.get("select"), "key,value");
+  assert.ok(upsert.body[0].updatedAt, "@updatedAt must be injected on upsert");
+
+  await dal.modelCooldown.upsert({
+    where: { uid_model: { uid: "u1", model: "m1" } },
+    create: { uid: "u1", model: "m1", until: 1n, reason: "first" },
+    update: { until: 2n, reason: "latest" },
+  });
+  const compoundUpsert = requests.at(-1)!;
+  assert.equal(compoundUpsert.url.searchParams.get("on_conflict"), "uid,model");
+  assert.equal(compoundUpsert.body[0].until, "2");
+  assert.equal(compoundUpsert.body[0].reason, "latest");
 
   findPage = 0;
   const rows = await dal.usageEvent.findMany({ select: { id: true } });
@@ -119,7 +136,7 @@ try {
   const aggregate = await dal.requestLog.aggregate({ _avg: { durationMs: true } });
   assert.equal(aggregate._avg.durationMs, 2);
 
-  console.log("PASS DAL compound keys, escaping, relation negation, BigInt, write select, upsert race, and pagination");
+  console.log("PASS DAL compound keys, booleans, escaping, relation negation, BigInt, atomic upsert, and pagination");
 } finally {
   await new Promise<void>((resolve, reject) => server.close((e) => e ? reject(e) : resolve()));
 }

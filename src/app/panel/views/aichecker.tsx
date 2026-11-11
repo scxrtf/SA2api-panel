@@ -6,7 +6,7 @@
 // 支持三种通道：池模型（cn:/global:）、供应商模型（供应商名:）、自定义外站。
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { req } from "../lib";
+import { req, reqCached, invalidateCache } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
 interface ModelRow { id: string; name?: string; provider?: boolean }
@@ -60,8 +60,8 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
   const distRef = useRef<HTMLCanvasElement>(null);
 
   // loadBaselines 拉取「官方快照 + 自建」合并列表，尽量保留当前选中项。
-  const loadBaselines = useCallback(async (keep?: string): Promise<BaselineItem[]> => {
-    const r = await req<{ models: BaselineItem[] }>("aichecker/baselines");
+  const loadBaselines = useCallback(async (keep?: string, force = false): Promise<BaselineItem[]> => {
+    const r = await reqCached<{ models: BaselineItem[] }>("aichecker/baselines", { force });
     const list = r.models ?? [];
     setBaselines(list);
     if (list.length) {
@@ -76,7 +76,7 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
 
   // 模型目录 + 基准列表。
   useEffect(() => {
-    req<{ models: ModelRow[]; warnings?: string[] }>("models")
+    reqCached<{ models: ModelRow[]; warnings?: string[] }>("models")
       .then((r) => {
         setModels(r.models ?? []);
         setModelWarnings(r.warnings ?? []);
@@ -185,7 +185,8 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
           samples: result.samples,
         },
       });
-      await loadBaselines(r.baseline.id);
+      invalidateCache("aichecker/baselines");
+      await loadBaselines(r.baseline.id, true);
       setBaseline(r.baseline.id);
       setSaveOpen(false);
       flash("ok", `已保存自建基准「${r.baseline.label}」`);
@@ -205,7 +206,8 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
       const r = await req<{ baseline: { id: string; label: string } }>("aichecker/baselines", {
         method: "POST", body: { import: raw },
       });
-      await loadBaselines(r.baseline.id);
+      invalidateCache("aichecker/baselines");
+      await loadBaselines(r.baseline.id, true);
       setBaseline(r.baseline.id);
       flash("ok", `已导入基准「${r.baseline.label}」`);
     } catch (e) {
@@ -221,7 +223,8 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
     setBaselineBusy(true);
     try {
       await req("aichecker/baselines?name=" + encodeURIComponent(selectedBaseline.id), { method: "DELETE" });
-      await loadBaselines();
+      invalidateCache("aichecker/baselines");
+      await loadBaselines(undefined, true);
       flash("ok", `已删除自建基准「${selectedBaseline.label ?? selectedBaseline.id}」`);
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
@@ -239,7 +242,8 @@ export function AiCheckerView({ flash }: { flash: Flash }) {
         total: number; added: string[]; updated: string[];
         unchanged: number; skipped: { id: string; reason: string }[];
       }>("aichecker/baselines/sync", { method: "POST" });
-      await loadBaselines();
+      invalidateCache("aichecker/baselines");
+      await loadBaselines(undefined, true);
       const parts = [
         r.added.length ? `新增 ${r.added.length}` : "",
         r.updated.length ? `更新 ${r.updated.length}` : "",

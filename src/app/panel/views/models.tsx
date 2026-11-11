@@ -1,7 +1,7 @@
 "use client";
 // 模型与档位视图（对齐 Go view-models）：实时模型目录 + 连通性实测（池/供应商双通道）。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, useAutoRefresh, usePanelRefresh } from "../lib";
+import { req, reqCached, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 
 interface ModelRow {
@@ -220,11 +220,11 @@ export function ModelsView({ flash }: { flash: Flash }) {
   const [probes, setProbes] = useState<Record<string, ProbeRec>>({});
   const [probing, setProbing] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
-  const load = useCallback(() => {
+  const load = useCallback((force = false) => {
     setLoading(true);
     Promise.all([
-      req<{ models: ModelRow[]; warnings?: string[] }>("models"),
-      req<{ probes: Record<string, ProbeRec> }>("model_probes").catch(() => ({ probes: {} })),
+      reqCached<{ models: ModelRow[]; warnings?: string[] }>("models", { force }),
+      reqCached<{ probes: Record<string, ProbeRec> }>("model_probes", { force }).catch(() => ({ probes: {} })),
     ])
       .then(([r, pr]) => {
         setModels(r.models);
@@ -235,9 +235,10 @@ export function ModelsView({ flash }: { flash: Flash }) {
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, [flash]);
-  useEffect(load, [load]);
-  useAutoRefresh(load, 120_000);
-  usePanelRefresh(load);
+  useEffect(() => { load(); }, [load]);
+  // 模型目录变化频率低：取消分钟级轮询，1 小时内走缓存；
+  // 手动「重新获取」与顶栏刷新走 force 立即拉新数据。
+  usePanelRefresh(() => load(true));
 
   const test = useCallback(async (m: ModelRow) => {
     const id = m.id;
@@ -312,7 +313,7 @@ export function ModelsView({ flash }: { flash: Flash }) {
             <button key={v} className={"btn xs" + (realm === v ? " primary" : "")} onClick={() => setRealm(v)}>{label}</button>
           ))}
         </div>
-        <button className="btn xs" onClick={load} disabled={loading}>
+        <button className="btn xs" onClick={() => load(true)} disabled={loading}>
           {loading ? "获取中…" : "重新获取"}
         </button>
         {loadedAt && <span className="dim" style={{ fontSize: 12, alignSelf: "center" }}>

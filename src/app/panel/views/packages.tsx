@@ -3,7 +3,7 @@
 // 取数失败的行显式标注原因（会话失效/鉴权被拒/上游失败），不再用 0/0 冒充真实余额，
 // 也不计入域合计——否则整页会读出「CN 剩余 0」这种与事实相反的结论。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, fmtNum, fmtTime, useAutoRefresh, usePanelRefresh } from "../lib";
+import { reqCached, fmtNum, fmtTime, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { PackageMixBar, ExpiryDistribution } from "../components/packageCharts";
 
@@ -38,8 +38,8 @@ export function PackagesView({ flash }: { flash: Flash }) {
   const [detailLimit, setDetailLimit] = useState(5);
   const [expandAll, setExpandAll] = useState(false);
 
-  const load = useCallback(() => {
-    req<{ accounts: PkgAccount[]; detail_limit?: number }>("packages")
+  const load = useCallback((force = false) => {
+    reqCached<{ accounts: PkgAccount[]; detail_limit?: number }>("packages", { force })
       .then((r) => {
         setRows(r.accounts);
         setLoadedAt(new Date().getTime());
@@ -48,9 +48,10 @@ export function PackagesView({ flash }: { flash: Flash }) {
       })
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [flash]);
-  useEffect(load, [load]);
-  useAutoRefresh(load, 60_000);
-  usePanelRefresh(load);
+  useEffect(() => { load(); }, [load]);
+  // 积分构成变化频率低：取消分钟级轮询，数据 1 小时内走缓存；
+  // 手动「刷新」按钮与顶栏刷新通过 force 立即拉新数据。
+  usePanelRefresh(() => load(true));
 
   // 域分组汇总：只累加取数成功的账号；失败账号单独计数，不污染合计。
   const realmSummary = (rows ?? []).reduce(
@@ -74,7 +75,7 @@ export function PackagesView({ flash }: { flash: Flash }) {
 
   return (
     <Box title="积分构成" hint="按账号列出套餐包 · 上游按失效时刻先后自动优先扣减（FEFO）"
-      extra={<button className="btn xs" onClick={load}>刷新</button>}>
+      extra={<button className="btn xs" onClick={() => load(true)}>刷新</button>}>
       {!rows ? (
         <div className="pad dim">加载中…</div>
       ) : rows.length === 0 ? (

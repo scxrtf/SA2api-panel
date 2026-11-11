@@ -1,5 +1,5 @@
 "use client";
-// 运行日志视图（对齐 Go view-logs）：请求日志 / 运行日志双模式 + 过滤。
+// 运行日志视图（对齐 Go view-logs）：请求日志 / 运行日志 / 缓存详细 三模式 + 过滤。
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { req, fmtNum, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
@@ -29,6 +29,23 @@ interface ReqLogDetail extends ReqLog {
   attemptDetails?: unknown;
   requestMessages?: unknown;
   responseMessage?: unknown;
+}
+
+interface CacheLayer {
+  name: string;
+  scope: string;
+  ttlMs: number;
+  maxEntries?: number;
+  size: number | null;
+  entries: { key: string; ttlMs: number }[];
+  note?: string;
+  visible: boolean;
+  cached?: boolean;
+  remainingMs?: number;
+}
+interface CacheStatsResp {
+  at: number;
+  layers: CacheLayer[];
 }
 
 // fmtTok token 缩写（Go app.js fmtTok 同口径）：1000+ 用 k 缩写避免表列撑宽。
@@ -69,6 +86,80 @@ function uaSummary(ua: string): string {
 function machineShort(id: string | undefined): string {
   return id ? id.slice(0, 8) : "";
 }
+
+// ── 缓存详细面板 ────────────────────────────────────────────────────────────
+// 展示进程内各层缓存的实时状态：条目数、剩余 TTL、命中情况。
+// 数据来自 GET /api/panel/cache_stats，不经过 reqCached（这个页面本身就该看实时值）。
+function fmtTtl(ms: number): string {
+  if (ms <= 0) return "已过期";
+  const s = Math.ceil(ms / 1000);
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m" + (s % 60 > 0 ? " " + (s % 60) + "s" : "");
+  return Math.floor(s / 3600) + "h" + (Math.floor((s % 3600) / 60) > 0 ? Math.floor((s % 3600) / 60) + "m" : "");
+}
+
+function CachePanel({ stats, loading }: {
+  stats: CacheStatsResp | null;
+  loading: boolean;
+}) {
+  if (!stats && loading) return <div className="pad dim">读取缓存状态中…</div>;
+  if (!stats) return <div className="pad dim">暂无数据</div>;
+  const at = new Date(stats.at).toLocaleTimeString("zh-CN", { hour12: false });
+  return (
+    <div className="pad" style={{ display: "grid", gap: 16 }}>
+      <div className="dim" style={{ fontSize: 12 }}>
+        采集于 {at} · 服务端进程内缓存实时状态（前端 reqCached 为浏览器内存，服务端不可见条目）
+      </div>
+      {stats.layers.map((layer) => (
+        <div key={layer.name} style={{
+          border: "1px solid var(--border)", borderRadius: 10,
+          padding: "14px 16px", background: "var(--bg-soft)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{layer.name}</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span className="tag">{layer.scope}</span>
+              {layer.cached !== undefined && (
+                <span className={"tag " + (layer.cached ? "ok" : "err")}>
+                  {layer.cached ? "已缓存" : "未缓存"}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="kv-grid" style={{ marginBottom: layer.entries.length > 0 ? 10 : 0 }}>
+            <span className="dim">TTL</span><span>{fmtTtl(layer.ttlMs)}</span>
+            {layer.maxEntries !== undefined && <>
+              <span className="dim">容量</span><span>{layer.size ?? 0} / {layer.maxEntries} 条</span>
+            </>}
+            {layer.remainingMs !== undefined && <>
+              <span className="dim">剩余有效期</span><span>{fmtTtl(layer.remainingMs)}</span>
+            </>}
+            {layer.note && <>
+              <span className="dim">说明</span><span style={{ fontSize: 12, lineHeight: 1.5 }}>{layer.note}</span>
+            </>}
+          </div>
+          {layer.entries.length > 0 && (
+            <table className="tbl" style={{ marginTop: 8 }}>
+              <thead><tr><th>缓存键</th><th>剩余 TTL</th></tr></thead>
+              <tbody>
+                {layer.entries.map((e) => (
+                  <tr key={e.key}>
+                    <td className="mono" style={{ wordBreak: "break-all" }}>{e.key}</td>
+                    <td className="mono">{fmtTtl(e.ttlMs)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {layer.visible && layer.entries.length === 0 && (
+            <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>当前无活跃缓存条目</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 
 // ── 增量合并 ────────────────────────────────────────────────────────────────
 // 运行日志保持升序（旧→新，底部跟随最新），请求日志保持降序（新→旧）。
@@ -235,7 +326,7 @@ function RequestLogDetailView({ entry, loading, error }: {
 }
 
 export function LogsView({ flash }: { flash: Flash }) {
-  const [mode, setMode] = useState<"runtime" | "requests">("runtime");
+  const [mode, setMode] = useState<"runtime" | "requests" | "cache">("runtime");
   const [ch, setCh] = useState<"all" | "task" | "call" | "probe" | "sys">("all");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [reqs, setReqs] = useState<ReqLog[]>([]);
@@ -254,13 +345,18 @@ export function LogsView({ flash }: { flash: Flash }) {
   const runtimeSinceRef = useRef(0);
   const reqSinceRef = useRef(0);
   const requestSeqRef = useRef(0);
+  const [cacheStats, setCacheStats] = useState<CacheStatsResp | null>(null);
 
   const load = useCallback(async (delta = false) => {
     const seq = ++requestSeqRef.current;
     setLoading(true);
     setLoadError("");
     try {
-      if (mode === "runtime") {
+      if (mode === "cache") {
+        const r = await req<CacheStatsResp>("cache_stats");
+        if (seq !== requestSeqRef.current) return;
+        setCacheStats(r);
+      } else if (mode === "runtime") {
         const since = delta ? runtimeSinceRef.current : 0;
         const r = await req<{ entries: LogEntry[]; mode?: string }>("logs" + (since ? "?since=" + since : ""));
         if (seq !== requestSeqRef.current) return;
@@ -327,9 +423,14 @@ export function LogsView({ flash }: { flash: Flash }) {
         setDetails((prev) => ({ ...prev, [id]: r.entry }));
       })
       .catch((e) => {
-        const msg = e instanceof Error ? e.message : String(e);
-        setDetailErrors((prev) => ({ ...prev, [id]: msg }));
-        flash("err", msg);
+        const raw = e instanceof Error ? e.message : String(e);
+        // 详情为空时保留当前日志行与展开状态，仅展示空状态文案。
+        if (raw === "request_log_not_found") {
+          setDetailErrors((prev) => ({ ...prev, [id]: "暂无相关" }));
+        } else {
+          setDetailErrors((prev) => ({ ...prev, [id]: raw }));
+          flash("err", raw);
+        }
       })
       .finally(() => {
         setDetailLoading((prev) => ({ ...prev, [id]: false }));
@@ -346,9 +447,10 @@ export function LogsView({ flash }: { flash: Flash }) {
   };
 
   return (
-    <Box title={mode === "requests" ? "请求日志" : "运行日志"} extra={<>
+    <Box title={mode === "requests" ? "请求日志" : mode === "cache" ? "缓存详细" : "运行日志"} extra={<>
       <button className={"btn xs" + (mode === "requests" ? " primary" : "")} onClick={() => setMode("requests")}>请求日志</button>
       <button className={"btn xs" + (mode === "runtime" ? " primary" : "")} onClick={() => setMode("runtime")}>运行日志</button>
+      <button className={"btn xs" + (mode === "cache" ? " primary" : "")} onClick={() => setMode("cache")}>缓存详细</button>
       {mode === "requests" && <>
         <input className="input" style={{ width: 130 }} placeholder="账号过滤" value={filter.account}
           onChange={(e) => setFilter({ ...filter, account: e.target.value })} />
@@ -383,7 +485,9 @@ export function LogsView({ flash }: { flash: Flash }) {
         </select>
       </>}
     </>}>
-      {mode === "runtime" ? (
+      {mode === "cache" ? (
+        <CachePanel stats={cacheStats} loading={loading} />
+      ) : mode === "runtime" ? (
         <div className="pad">
           <div
             ref={logViewRef}

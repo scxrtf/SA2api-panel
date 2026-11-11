@@ -99,6 +99,8 @@ export async function GET(
     where: { id },
     select: DETAIL_SELECT,
   });
+  // 行已被保留期整行删除（默认 7 天）时列表缓存里可能还留着旧行；
+  // 错误码保持稳定，由前端映射为可读提示并从列表移除该死行。
   if (!entry) return fail(404, "request_log_not_found");
   return ok({
     entry: {

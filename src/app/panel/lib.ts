@@ -39,6 +39,44 @@ export async function req<T = Record<string, unknown>>(
   return j as T & ApiResp<T>;
 }
 
+// ==================== 1 小时前端数据缓存 ====================
+// 积分构成 / 余额趋势 / CloudBase 监控 / 模型与档位 / 模型鉴别 这五个视图的数据
+// 变化频率低，实时轮询只会白白消耗出口流量。统一在这里加一层内存缓存：
+//   · 默认 TTL 1 小时，到期前重复调用直接命中缓存，不发请求；
+//   · 手动「刷新」按钮 / 顶栏刷新通过 force=true 绕过前端缓存，并给 URL 追加
+//     refresh=1 同步绕过服务端 panel-cache，立即拉新数据；
+//   · 缓存按 path 区分，写入操作（POST/DELETE）不经过这里；
+//   · 进程内内存缓存，刷新页面即清空，不会读到跨会话的陈旧数据。
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 小时
+const dataCache = new Map<string, { at: number; data: unknown }>();
+const inflight = new Map<string, Promise<unknown>>();
+
+export async function reqCached<T = Record<string, unknown>>(
+  path: string,
+  opts: { force?: boolean; ttlMs?: number } = {},
+): Promise<T & ApiResp<T>> {
+  const ttl = opts.ttlMs ?? CACHE_TTL_MS;
+  const hit = dataCache.get(path);
+  if (!opts.force && hit && Date.now() - hit.at < ttl) {
+    return hit.data as T & ApiResp<T>;
+  }
+  // 去重并发：同一 path 在途的重复请求复用同一个 Promise。
+  const pending = inflight.get(path);
+  if (!opts.force && pending) return pending as Promise<T & ApiResp<T>>;
+  const fetchPath = opts.force ? path + (path.includes("?") ? "&" : "?") + "refresh=1" : path;
+  const p = req<T>(fetchPath)
+    .then((data) => { dataCache.set(path, { at: Date.now(), data }); return data; })
+    .finally(() => { inflight.delete(path); });
+  inflight.set(path, p);
+  return p;
+}
+
+// 外部写入（新增/删除基准等）后调用，让相关缓存立即失效。
+export function invalidateCache(pathPrefix?: string): void {
+  if (!pathPrefix) { dataCache.clear(); return; }
+  for (const k of dataCache.keys()) if (k.startsWith(pathPrefix)) dataCache.delete(k);
+}
+
 // fmt*：数字/时间展示工具。
 export function fmtNum(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "-";

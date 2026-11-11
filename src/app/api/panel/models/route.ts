@@ -12,6 +12,7 @@ import {
 import { effortListing } from "@/lib/upstream/payload";
 import { providerModels } from "@/lib/provider";
 import { authShapeOf } from "@/lib/login";
+import { panelCacheGet, panelCacheSet } from "@/lib/panel-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,6 +60,11 @@ function panelModelEntry(realm: string, mi: ModelInfoFull): Record<string, unkno
 export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
+  const refresh = new URL(req.url).searchParams.get("refresh") === "1";
+  if (!refresh) {
+    const cached = panelCacheGet<Record<string, unknown>>("models");
+    if (cached) return ok({ ...cached, cached: true });
+  }
   const cfg = await getConfig();
   const out: Record<string, unknown>[] = [];
   const fetchErrs: string[] = [];
@@ -122,5 +128,7 @@ export async function GET(req: Request) {
     return fail(503, "没有可用账号：请先在面板添加账号再查询");
   }
   // 供应商目录失败时透出原因，避免「探测能拿到模型、模型页却空着」无从排查。
-  return ok({ models: out, ...(providerErrs.length > 0 ? { warnings: providerErrs } : {}) });
+  const payload = { models: out, ...(providerErrs.length > 0 ? { warnings: providerErrs } : {}) };
+  panelCacheSet("models", payload);
+  return ok(payload);
 }

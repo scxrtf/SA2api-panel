@@ -1,4 +1,5 @@
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { panelCacheGet, panelCacheSet, panelCacheDel } from "@/lib/panel-cache";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,11 @@ import {
 export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
+  const refresh = new URL(req.url).searchParams.get("refresh") === "1";
+  if (!refresh) {
+    const cached = panelCacheGet<Record<string, unknown>>("aichecker/baselines");
+    if (cached) return ok({ ...cached, cached: true });
+  }
 
   let official: { id: string; file: string }[] = [];
   let officialError = "";
@@ -39,13 +45,15 @@ export async function GET(req: Request) {
       label: b.label, model: b.model, createdAt: b.createdAt,
     })),
   ];
-  return ok({
+  const payload = {
     models, count: models.length,
     official: official.length, custom: custom.length,
     source: "内置快照 + 自建",
     repo: "hanlinwenyuan/hlwy-ai-checker",
     ...(officialError ? { official_error: officialError } : {}),
-  });
+  };
+  panelCacheSet("aichecker/baselines", payload);
+  return ok(payload);
 }
 
 // POST 保存基准：
@@ -96,6 +104,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return fail(500, "保存基准失败：" + (e instanceof Error ? e.message : String(e)));
   }
+  panelCacheDel("aichecker/baselines");
   return ok({ baseline: { id, label, source: "custom", created: !customIDs.has(id) } });
 }
 
@@ -109,6 +118,7 @@ export async function DELETE(req: Request) {
   try {
     const removed = await deleteCustomBaseline(id);
     if (!removed) return fail(404, `自建基准「${id}」不存在`);
+    panelCacheDel("aichecker/baselines");
     return ok({ deleted: id });
   } catch (e) {
     return fail(500, "删除基准失败：" + (e instanceof Error ? e.message : String(e)));

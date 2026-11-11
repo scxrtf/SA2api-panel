@@ -249,16 +249,25 @@ function renderCond(cond: Cond): string {
     return `${cond.logical}(${cond.children.map(renderCond).join(",")})`;
   }
   const col = cond.col!;
-  if (cond.op.endsWith(".in")) {
+  if (cond.op === "in" || cond.op.endsWith(".in")) {
+    // in / not.in 都必须走列表分支，生成 in.("a","b")。
+    // 漏掉裸 in 会生成 in."a,b"，解析器报 PGRST100 failed to parse filter。
     return `${col}.${cond.op}.(${(cond.value as unknown[]).map(quoteValue).join(",")})`;
   }
+  // 标量类型保持 PostgREST 字面量语义：布尔值必须是不带引号的 true/false，
+  // 否则 Postgres 收到的是字符串 '"false"'，对 boolean 列报 22P02。
   // null 只属于 is / not.is；比较操作符保留 PostgREST 原生 null 语义。
-  return `${col}.${cond.op}.${cond.value === null ? "null" : quoteValue(cond.value)}`;
+  const value = cond.value === null
+    ? "null"
+    : typeof cond.value === "boolean"
+      ? String(cond.value)
+      : quoteValue(cond.value);
+  return `${col}.${cond.op}.${value}`;
 }
 
 function whereParams(where: Where | undefined): [string, string][] {
   return whereTree(where).map((cond) => {
-    if (cond.children) return [cond.logical!, renderCond(cond)];
+    if (cond.children) return [cond.logical!, `(${cond.children.map(renderCond).join(",")})`];
     const rendered = renderCond(cond);
     const split = rendered.indexOf(".");
     return [rendered.slice(0, split), rendered.slice(split + 1)];
@@ -513,18 +522,17 @@ async function dalUpsert<T>(table: string, args: {
   update: Record<string, unknown>;
   select?: Record<string, boolean>;
 }): Promise<T> {
-  // 保留 Prisma create/update 分离语义，不能把 update 字段误用于首次插入。
-  const existing = await dalFindFirst<T>(table, { where: args.where, select: args.select });
-  if (existing) return dalUpdate<T>(table, { where: args.where, data: args.update, select: args.select });
-  try {
-    return await dalCreate<T>(table, { data: args.create, select: args.select });
-  } catch (error) {
-    // 并发插入唯一键冲突后，胜出的行已经存在；转走 update 分支。
-    if (!/\b409\b|P0001|23505|duplicate key/i.test(error instanceof Error ? error.message : String(error))) throw error;
-    const raced = await dalFindFirst<T>(table, { where: args.where, select: args.select });
-    if (!raced) throw error;
-    return dalUpdate<T>(table, { where: args.where, data: args.update, select: args.select });
-  }
+  // 先合并 create/update，再交给数据库单语句 UPSERT。现有调用方的 create 与 update
+  // 冲突字段值一致；以 update 为准可保持 Prisma 对已有行的覆盖语义。
+  // 数据库原子处理并发插入，彻底消除「查无此行 → 并发 INSERT → 409」窗口。
+  const row = { ...args.create, ...args.update };
+  const search = new URL(writeUrl(table, undefined, args.select));
+  const conflictCols = Object.keys(expandWhere(args.where)).filter((key) => key !== "AND" && key !== "OR");
+  if (conflictCols.length) search.searchParams.set("on_conflict", conflictCols.join(","));
+  const rows = await http<Record<string, unknown>[]>("POST", search.toString(),
+    [encodeRow(withDefaults(table, row))],
+    { Prefer: "resolution=merge-duplicates,return=representation" });
+  return decodeRow(rows[0]) as T;
 }
 
 async function dalCount(table: string, args: { where?: Where } = {}): Promise<number> {

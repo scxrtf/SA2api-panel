@@ -5,7 +5,7 @@
 // 消耗与到账为**下界估计**：采样间隔 30 分钟远粗于真实事件密度，同一窗口内的消耗与
 // 到账会被合并成净差（不完整日淡化显示）。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { req, fmtNum, useAutoRefresh, usePanelRefresh } from "../lib";
+import { reqCached, fmtNum, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { BalanceLineChart, BalanceDailyBars, type BalancePoint } from "../components/balanceChart";
 
@@ -36,14 +36,15 @@ export function BalHistView({ flash }: { flash: Flash }) {
   const [days, setDays] = useState(30);
   const [realm, setRealm] = useState<"cn" | "global">("cn");
 
-  const load = useCallback(() => {
-    req<HistResp>(`balance_history?days=${days}`)
+  const load = useCallback((force = false) => {
+    reqCached<HistResp>(`balance_history?days=${days}`, { force })
       .then(setData)
       .catch((e) => flash("err", e instanceof Error ? e.message : String(e)));
   }, [days, flash]);
-  useEffect(load, [load]);
-  useAutoRefresh(load, 120_000);
-  usePanelRefresh(load);
+  useEffect(() => { load(); }, [load]);
+  // 余额趋势按 30 分钟采样入库，分钟级轮询无意义：1 小时内走缓存，
+  // 手动刷新按钮 / 顶栏刷新走 force 立即拉新数据。
+  usePanelRefresh(() => load(true));
 
   const realms = useMemo(() => {
     const set = new Set<string>();
@@ -93,7 +94,7 @@ export function BalHistView({ flash }: { flash: Flash }) {
           <option value={7}>近 7 天</option>
           <option value={30}>近 30 天</option>
         </select>
-        <button className="btn xs" onClick={load}>刷新</button>
+        <button className="btn xs" onClick={() => load(true)}>刷新</button>
       </>}>
       <div className="pad">
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>

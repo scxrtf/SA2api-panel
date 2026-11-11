@@ -27,3 +27,14 @@ export function cachedUsageQuery<T>(key: string, loader: () => Promise<T>): Prom
   }
   return value;
 }
+
+// 缓存条目快照（供面板「缓存详细」页展示）：键、剩余 TTL、是否在途。
+export function usageCacheStats(): { size: number; maxEntries: number; ttlMs: number; entries: { key: string; ttlMs: number }[] } {
+  const now = Date.now();
+  const entries: { key: string; ttlMs: number }[] = [];
+  for (const [k, e] of cache) {
+    if (e.expires > now) entries.push({ key: k, ttlMs: e.expires - now });
+    else cache.delete(k);
+  }
+  return { size: entries.length, maxEntries: MAX_ENTRIES, ttlMs: TTL_MS, entries };
+}

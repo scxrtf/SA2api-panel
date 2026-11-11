@@ -1,4 +1,5 @@
 import { panelAuth, ok } from "@/lib/panel-auth";
+import { panelCacheGet, panelCacheSet } from "@/lib/panel-cache";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,13 @@ import { listModelHealth } from "@/lib/modelhealth";
 export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
+  const refresh = new URL(req.url).searchParams.get("refresh") === "1";
+  if (!refresh) {
+    const cached = panelCacheGet<Record<string, unknown>>("model_probes");
+    if (cached) return ok({ ...cached, cached: true });
+  }
   const [probes, health] = await Promise.all([listProbes(), listModelHealth()]);
-  return ok({ ...probes, health });
+  const payload = { ...probes, health };
+  panelCacheSet("model_probes", payload);
+  return ok(payload);
 }

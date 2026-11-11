@@ -1,0 +1,163 @@
+// 网关与面板共用的 Bearer 鉴权原语（移植 internal/httpauth）。
+// SHA-256 摘要 + 常量时间比较。生产环境空主密钥 fail closed；
+// 仅非生产本地开发保留空 key 放行，便于离线启动与测试。
+import { createHash, timingSafeEqual } from "crypto";
+import { prisma } from "./db";
+import { getConfig } from "./config";
+
+function digest(s: string): Buffer {
+  return createHash("sha256").update(s, "utf8").digest();
+}
+
+function constTimeEq(a: string, b: string): boolean {
+  return timingSafeEqual(digest(a), digest(b));
+}
+
+// 密钥环进程内快照。原先 /api/v1/* 的每个请求都要扫两遍 ApiKey 全表
+// （verifyAny 一遍、identifyKeyIdentity 一遍），是 Supabase egress 的主要来源之一。
+// 30s TTL 覆盖突发流量；面板增删改密钥后立即失效（见 api/panel/keys 路由）。
+// DB 异常时若已有快照则继续用快照（更稳），无快照才按 dbOk=false 处理。
+const KEY_RING_TTL_MS = 30_000;
+export interface KeyRingRow {
+  name: string;
+  key: string;
+  providers: string;
+}
+type KeyRingCache = { at: number; rows: KeyRingRow[] };
+const keyRingGlobals = globalThis as unknown as { __wbKeyRing?: KeyRingCache };
+
+export function invalidateKeyRing(): void {
+  delete keyRingGlobals.__wbKeyRing;
+}
+
+async function loadKeyRing(): Promise<KeyRingRow[]> {
+  const cached = keyRingGlobals.__wbKeyRing;
+  if (cached && Date.now() - cached.at < KEY_RING_TTL_MS) return cached.rows.slice();
+  const rows = await prisma.apiKey.findMany({
+    select: { name: true, key: true, providers: true },
+  });
+  keyRingGlobals.__wbKeyRing = { at: Date.now(), rows };
+  return rows.slice();
+}
+
+// extractToken 提取请求凭证：优先 Authorization: Bearer，其次 x-api-key
+// （Anthropic/Claude Code 客户端默认凭证头）。
+export function extractToken(req: Request): string {
+  const authz = req.headers.get("authorization") ?? "";
+  if (authz.startsWith("Bearer ") && authz.length > 7) {
+    return authz.slice(7);
+  }
+  const xkey = (req.headers.get("x-api-key") ?? "").trim();
+  if (xkey) return xkey;
+  return "";
+}
+
+// verifyBearer 校验主密钥。生产环境空 key 一律拒绝。
+export function verifyBearer(req: Request, key: string): boolean {
+  if (!key) return process.env.NODE_ENV !== "production";
+  return constTimeEq(extractToken(req), key);
+}
+
+// KeyIdentity 请求凭证的归属与供应商授权面。unrestricted 仅用于主密钥 / 未启用
+// 鉴权的部署；子密钥一律按 providers 白名单判定，未授权任何供应商 = 全拒绝
+// （DB 异常同样 fail closed）。
+export interface KeyIdentity {
+  name: string;
+  providers: string;
+  unrestricted: boolean;
+}
+
+// parseProviderAccess 解析 ApiKey.providers 存储串：
+//   "*"        → ["*"]（全部供应商）
+//   ""         → []（未授权任何供应商；新建密钥的默认态）
+//   "foo,bar"  → ["foo", "bar"]
+export function parseProviderAccess(raw: string): string[] {
+  const s = (raw ?? "").trim();
+  if (!s) return [];
+  const parts = s.split(",").map((v) => v.trim()).filter(Boolean);
+  if (parts.includes("*")) return ["*"];
+  return Array.from(new Set(parts));
+}
+
+// providerAllowed 判断指定供应商是否在该 key 的授权名单内。
+// 未授权任何供应商（空串）→ 一律拒绝（fail closed）；"*" → 全部放行。
+export function providerAllowed(providersRaw: string, provider: string): boolean {
+  const list = parseProviderAccess(providersRaw);
+  // 未授权任何供应商 = 拒绝（新建密钥默认态，需在面板显式勾选）。
+  if (list.length === 0) return false;
+  return list.includes("*") || list.includes(provider);
+}
+
+// identifyKeyIdentity 识别请求凭证：主密钥 / 未启用鉴权 → unrestricted；
+// 命中 ApiKey 环 → 返回该行的 name + providers；无法识别或 DB 异常 → null。
+export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | null> {
+  const tok = extractToken(req);
+  const cfg = await getConfig();
+  let rows: KeyRingRow[] = [];
+  let dbOk = true;
+  try {
+    rows = await loadKeyRing();
+  } catch {
+    dbOk = false;
+  }
+  // 未启用鉴权（主密钥为空且 key 环为空）：全部放行。
+  if (dbOk && !cfg.api_key && rows.length === 0 && process.env.NODE_ENV !== "production") {
+    return { name: "", providers: "*", unrestricted: true };
+  }
+  if (!tok) return null;
+  if (cfg.api_key && constTimeEq(tok, cfg.api_key)) {
+    return { name: "", providers: "*", unrestricted: true };
+  }
+  for (const r of rows) {
+    if (r.key && constTimeEq(tok, r.key)) {
+      return { name: r.name || mask(r.key), providers: r.providers ?? "", unrestricted: false };
+    }
+  }
+  return null;
+}
+
+// providerAllowlist 把身份折算成供应商白名单：
+//   null       = 不限制（主密钥 / 未启用鉴权 / 子密钥显式 "*"）
+//   空集合     = 禁止所有供应商（子密钥未授权任何供应商 / 身份缺失，fail closed）
+export function providerAllowlist(id: KeyIdentity | null): Set<string> | null {
+  if (!id) return new Set();
+  if (id.unrestricted) return null;
+  const list = parseProviderAccess(id.providers);
+  if (list.includes("*")) return null;
+  return new Set(list);
+}
+
+// identifyKeyName 识别请求凭证的 key 归属名（多 sk-key 模式）：命中 ApiKey 环
+// 中某把 key 时返回其 name（name 空时回落掩码，对齐 Go keyring.Identify）。
+// 单 key 模式 / 未携带 / DB 不可用时返回空串（归档字段自动省略，零回归）。
+export async function identifyKeyName(req: Request): Promise<string> {
+  const id = await identifyKeyIdentity(req);
+  return id?.name ?? "";
+}
+
+// verifyAny 校验凭证是否命中 主密钥 ∪ ApiKey 环 中的任意一把。
+// 全部为空 = 未启用鉴权，恒 true（与 Go VerifyAny 同语义）。
+export async function verifyAny(req: Request): Promise<boolean> {
+  const cfg = await getConfig();
+  const keys: string[] = [];
+  if (cfg.api_key) keys.push(cfg.api_key);
+  try {
+    const rows = await loadKeyRing();
+    for (const r of rows) if (r.key) keys.push(r.key);
+  } catch {
+    // DB 不可用时仅按主密钥判定。
+  }
+  if (keys.length === 0) return process.env.NODE_ENV !== "production";
+  const tok = extractToken(req);
+  let matched = false;
+  for (const k of keys) {
+    if (constTimeEq(tok, k)) matched = true;
+  }
+  return matched;
+}
+
+// mask 密钥展示脱敏：前 4 后 4，中间打码。
+export function mask(key: string): string {
+  if (key.length <= 8) return "****";
+  return key.slice(0, 4) + "****" + key.slice(-4);
+}

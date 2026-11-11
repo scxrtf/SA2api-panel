@@ -4,6 +4,7 @@ import { panelAuth, ok } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { cbAccountNames, cbBalanceSamples, isCloudbaseRestEnabled } from "@/lib/cloudbase-rest";
 import { snapshotBalance } from "@/lib/balance";
+import { panelCacheGet, panelCacheSet } from "@/lib/panel-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +13,7 @@ export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const url = new URL(req.url);
+  const refresh = url.searchParams.get("refresh") === "1";
   let days = 30;
   const v = url.searchParams.get("days");
   if (v) {
@@ -19,6 +21,11 @@ export async function GET(req: Request) {
     if (Number.isFinite(n) && n > 0) days = n;
   }
   if (days > 30) days = 30;
+  const cacheKey = `balance_history:${days}`;
+  if (!refresh) {
+    const cached = panelCacheGet<Record<string, unknown>>(cacheKey);
+    if (cached) return ok({ ...cached, cached: true });
+  }
   const sinceMs = new Date().getTime() - days * 24 * 3600_000;
   // 昵称与域仅用于展示，取自账号表（不含任何凭证）。realm 必须在 snapshot 前注入：
   // cn 与 global 的积分不同源、不可互换，前端需按域分组渲染。
@@ -42,7 +49,9 @@ export async function GET(req: Request) {
       gained: BigInt(r.gained),
     }));
     const series = await snapshotBalance(sinceMs, names, realms, samples);
-    return ok({ now: new Date().toISOString(), days, series, source: "cloudbase" });
+    const payload = { now: new Date().toISOString(), days, series, source: "cloudbase" };
+    panelCacheSet(cacheKey, payload);
+    return ok(payload);
   }
   const accounts = await prisma.account.findMany({ select: { uid: true, nickname: true, realm: true } });
   const names: Record<string, string> = {};
@@ -52,10 +61,12 @@ export async function GET(req: Request) {
     if (a.realm) realms[a.uid] = a.realm;
   }
   const series = await snapshotBalance(sinceMs, names, realms);
-  return ok({
+  const payload = {
     now: new Date().toISOString(),
     days,
     series,
     source: "prisma",
-  });
+  };
+  panelCacheSet(cacheKey, payload);
+  return ok(payload);
 }

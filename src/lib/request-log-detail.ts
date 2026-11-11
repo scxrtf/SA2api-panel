@@ -11,9 +11,11 @@ const MAX_OVERRIDE_ITEMS = 200;
 const MAX_OVERRIDE_VALUE_CHARS = 4_000;
 const MAX_DEPTH = 12;
 
-// 对话正文永不落库，只保留统计列与失败详情。保留旧函数用于兼容旧调用方。
+// 对话正文（requestMessages / responseMessage）始终落库：面板「请求日志」对话
+// 记录区块依赖这两列。单行体积已由 MAX_MESSAGE_CHARS（120K）+ 图片脱敏兜底，
+// 保留清理任务（retention）负责按保留期置空旧行控制磁盘。
 export function logDialogEnabled(): boolean {
-  return false;
+  return true;
 }
 
 export interface ParameterOverride {

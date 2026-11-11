@@ -8,6 +8,7 @@ import { BASELINE_ID_RE, parseBaselineIndex } from "@/lib/aichecker-official";
 import {
   fetchUpstreamText, MAX_BASELINE_FILE_BYTES, validateBaselineJSON,
 } from "@/lib/aichecker-upstream";
+import { panelCacheDel } from "@/lib/panel-cache";
 
 export async function POST(req: Request) {
   const auth = await panelAuth(req);
@@ -63,6 +64,9 @@ export async function POST(req: Request) {
   // 清单最后写：部分基准失败时 index 与磁盘文件保持一致（失败的仍沿用旧文件，
   // 不在 index 里剔除——上游清单是权威，用户应该知道哪些没拉下来）。
   await fs.writeFile(path.join(dir, "index.json"), indexText, "utf8");
+
+  // 基准集可能变化，让面板「模型鉴别」的服务端缓存立即失效。
+  panelCacheDel("aichecker/baselines");
 
   return ok({
     total: items.length,

@@ -1,5 +1,5 @@
 // CloudBase 环境级监控：官方 TCB API + CAM TC3-HMAC-SHA256。
-// 只返回本环境确实提供的指标；共享 PG 不伪造容量或连接数。
+// 只返回本环境确实提供的指标；资源点使用控制台同口径的套餐内抵扣量。
 import { createHash, createHmac } from "node:crypto";
 
 type CurveResponse = {
@@ -15,9 +15,31 @@ type EnvResponse = {
   Error?: { Code?: string; Message?: string };
   EnvInfo?: {
     BillingInfo?: { EnvQps?: { QpsQuota?: number }; PackageId?: string };
-    EnvBaseInfo?: { PackageName?: string; PostgreSQL?: { TenantType?: string }[] };
+    EnvBaseInfo?: { PackageId?: string; PackageName?: string; PostgreSQL?: { TenantType?: string }[] };
   };
 };
+
+type AccountCircleResponse = {
+  Error?: { Code?: string; Message?: string };
+  StartTime?: string;
+  EndTime?: string;
+};
+
+type CreditsUsageResponse = {
+  Error?: { Code?: string; Message?: string };
+  DeductValue?: number;
+};
+
+export interface CloudbaseResourcePoints {
+  used: number | null;
+  total: number | null;
+  remaining: number | null;
+  percent: number | null;
+  startDate: string | null;
+  endDate: string | null;
+  source: "tcb DescribeCreditsUsage";
+  error: string | null;
+}
 
 export interface CloudbasePlatformStats {
   configured: boolean;
@@ -30,8 +52,28 @@ export interface CloudbasePlatformStats {
   statistics: string | null;
   packageName: string | null;
   postgresTenantType: string | null;
+  resourcePoints: CloudbaseResourcePoints;
   error: string | null;
   qpsSeries?: { at: string; value: number }[];
+}
+
+// 官方资源点价格文档 product/876/127357 的月度套餐配额。
+const PACKAGE_CREDITS: Record<string, number> = {
+  baas_trial: 3_000,
+  baas_personal: 40_000,
+  baas_pf_standard: 330_000,
+  baas_pf_enterprise: 1_500_000,
+  baas_pf_enterprise_senior: 6_500_000,
+  "免费体验版": 3_000,
+  "体验版": 3_000,
+  "个人版": 40_000,
+  "标准版": 330_000,
+  "企业版": 1_500_000,
+  "企业高级版": 6_500_000,
+};
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240);
 }
 
 function sha256(value: string): string {
@@ -103,19 +145,24 @@ export async function getCloudbasePlatformStats(): Promise<CloudbasePlatformStat
     statistics: null,
     packageName: null,
     postgresTenantType: null,
+    resourcePoints: {
+      used: null, total: null, remaining: null, percent: null,
+      startDate: null, endDate: null, source: "tcb DescribeCreditsUsage", error: null,
+    },
     error: null,
   };
+  const env = await tcbApi<EnvResponse>("DescribeEnvInfo", { EnvId: envId });
+  result.qpsQuota = env.EnvInfo?.BillingInfo?.EnvQps?.QpsQuota ?? null;
+  result.packageName = env.EnvInfo?.EnvBaseInfo?.PackageName ?? env.EnvInfo?.BillingInfo?.PackageId ?? null;
+  result.postgresTenantType = env.EnvInfo?.EnvBaseInfo?.PostgreSQL?.[0]?.TenantType ?? null;
   try {
-    const [env, curve] = await Promise.all([
-      tcbApi<EnvResponse>("DescribeEnvInfo", { EnvId: envId }),
-      tcbApi<CurveResponse>("DescribeCurveData", {
-        EnvId: envId,
-        MetricName: "EnvQPSAll",
-        StartTime: localTime(start),
-        EndTime: localTime(end),
-        Period: periodSeconds,
-      }),
-    ]);
+    const curve = await tcbApi<CurveResponse>("DescribeCurveData", {
+      EnvId: envId,
+      MetricName: "EnvQPSAll",
+      StartTime: localTime(start),
+      EndTime: localTime(end),
+      Period: periodSeconds,
+    });
     const values = curve.NewValues ?? curve.Values ?? [];
     result.qpsSeries = values.flatMap((value, i) => {
       const at = curve.Time?.[i];
@@ -124,16 +171,38 @@ export async function getCloudbasePlatformStats(): Promise<CloudbasePlatformStat
     });
     const last = values.length ? values[values.length - 1] : null;
     result.qps = typeof last === "number" && Number.isFinite(last) ? last : null;
-    result.qpsQuota = env.EnvInfo?.BillingInfo?.EnvQps?.QpsQuota ?? null;
     result.periodSeconds = curve.Period || periodSeconds;
     result.sampledAt = curve.Time?.length ? new Date(curve.Time[curve.Time.length - 1] * 1000).toISOString() : null;
     result.statistics = curve.Statistics ?? null;
-    result.packageName = env.EnvInfo?.EnvBaseInfo?.PackageName ?? env.EnvInfo?.BillingInfo?.PackageId ?? null;
-    result.postgresTenantType = env.EnvInfo?.EnvBaseInfo?.PostgreSQL?.[0]?.TenantType ?? null;
     result.available = result.qps !== null;
     if (!result.available) result.error = "最近一小时暂无 QPS 数据点";
   } catch (error) {
-    result.error = error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240);
+    result.error = errorMessage(error);
+  }
+  try {
+    const circle = await tcbApi<AccountCircleResponse>("DescribeEnvAccountCircle", { EnvId: envId });
+    const startDate = circle.StartTime?.slice(0, 10);
+    const endDate = circle.EndTime?.slice(0, 10);
+    result.resourcePoints.startDate = startDate ?? null;
+    result.resourcePoints.endDate = endDate ?? null;
+    if (!startDate || !endDate) throw new Error("DescribeEnvAccountCircle: 当前账期日期缺失");
+    const usage = await tcbApi<CreditsUsageResponse>("DescribeCreditsUsage", { EnvId: envId, StartDate: startDate, EndDate: endDate });
+    if (typeof usage.DeductValue !== "number" || !Number.isFinite(usage.DeductValue)) {
+      throw new Error("DescribeCreditsUsage: DeductValue 缺失或不是有限数");
+    }
+    const packageId = env.EnvInfo?.EnvBaseInfo?.PackageId ?? env.EnvInfo?.BillingInfo?.PackageId ?? env.EnvInfo?.EnvBaseInfo?.PackageName;
+    const total = packageId ? PACKAGE_CREDITS[packageId] ?? null : null;
+    const used = usage.DeductValue;
+    result.resourcePoints.used = used;
+    result.resourcePoints.total = total;
+    if (total !== null) {
+      result.resourcePoints.remaining = Math.max(0, total - used);
+      result.resourcePoints.percent = used / total * 100;
+    } else {
+      result.resourcePoints.error = `未识别套餐 ${packageId ?? "unknown"} 的月度资源点配额`;
+    }
+  } catch (error) {
+    result.resourcePoints.error = errorMessage(error);
   }
   return result;
 }

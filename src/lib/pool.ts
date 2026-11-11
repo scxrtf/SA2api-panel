@@ -867,10 +867,21 @@ export async function noteModelCost(
   const prev = await prisma.modelCost.findUnique({ where: { uid_model: { uid, model } } });
   const ALPHA = 0.3;
   if (!prev) {
-    await prisma.modelCost.create({
-      data: {
+    // 并发首观测：同 uid+model 的两条流式结算可能同时 findUnique 为空，
+    // 双双进 create，第二条撞 ModelCost_uid_model_key 唯一约束(23505)。
+    // 用 upsert 把判空与写入合并为原子操作；并发冲突时按 EMA 收敛，
+    // 失败方不再抛错（旧行为在 chat.ts 流回调里打 WARN: stream accounting failed）。
+    await prisma.modelCost.upsert({
+      where: { uid_model: { uid, model } },
+      create: {
         uid, model, costPer1k: per1k, tokens,
         observedAt: BigInt(now), expiresAt: BigInt(now + MODEL_COST_TTL_MS),
+      },
+      update: {
+        costPer1k: per1k, // 无历史行时直接取本次观测（与 create 分支同值）
+        tokens,
+        observedAt: BigInt(now),
+        expiresAt: BigInt(now + MODEL_COST_TTL_MS),
       },
     });
   } else {

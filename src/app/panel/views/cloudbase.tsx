@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useState } from "react";
-import { fmtNum, req, useAutoRefresh, usePanelRefresh } from "../lib";
+import { fmtNum, req, reqCached, usePanelRefresh } from "../lib";
 import { Box, type Flash } from "../components/ui";
 import { SuperPasswordModal } from "../components/superPassword";
 
@@ -21,8 +21,14 @@ interface Stats {
     configured: boolean; available: boolean; qps: number | null; qpsQuota: number | null;
     periodSeconds: number; sampledAt: string | null; statistics: string | null;
     packageName: string | null; postgresTenantType: string | null; error: string | null;
+    resourcePoints?: {
+      used: number | null; total: number | null; remaining: number | null; percent: number | null;
+      startDate: string | null; endDate: string | null;
+      source: "tcb DescribeCreditsUsage"; error: string | null;
+    };
     qpsSeries?: { at: string; value: number }[];
   } | null;
+  growthSeries?: { at: string; value: number }[];
   retention: { days: number; detailHours: number };
 }
 
@@ -47,33 +53,115 @@ function smoothPath(pts: { x: number; y: number }[]): string {
   return d;
 }
 
-// 轻量 SVG 平滑折线图：数据来自 CloudBase 平台采样，无额外图表依赖。
+// 深色多序列平滑曲线图（参考面板监控图样式）：
+// 顶部图例 + 双 Y 轴（左：QPS；右：配额归一化）+ 渐变填充 + 虚线网格 + 数据点小圆点。
+type ChartSeries = {
+  key: string; label: string; color: string;
+  points: { at: string; value: number }[]; axis: "left" | "right";
+};
+function niceCeil(v: number): number {
+  if (v <= 0) return 10;
+  const mag = 10 ** Math.floor(Math.log10(v));
+  const n = v / mag;
+  const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+  return step * mag;
+}
 function QpsLineChart({ points, quota }: { points: { at: string; value: number }[]; quota: number | null }) {
-  const W = 920, H = 260, left = 48, right = 20, top = 24, bottom = 38;
+  const series: ChartSeries[] = [
+    { key: "qps", label: "环境 QPS", color: "var(--accent-bright)", points, axis: "left" },
+    ...(quota ? [{ key: "quota", label: "QPS 配额 (右轴)", color: "#ff7f6e", axis: "right" as const,
+      points: points.map((p) => ({ at: p.at, value: quota })) }] : []),
+  ];
+  const W = 1160, H = 400, left = 64, right = 64, top = 34, bottom = 46;
   const cw = W - left - right, ch = H - top - bottom;
-  const maxValue = Math.max(10, ...points.map((p) => p.value), quota ?? 0);
-  const yMax = Math.ceil(maxValue / 10) * 10;
-  const xy = points.map((p, i) => ({
-    ...p,
-    x: left + (points.length === 1 ? cw / 2 : i * cw / (points.length - 1)),
-    y: top + ch - p.value / yMax * ch,
-  }));
-  const line = smoothPath(xy);
-  const area = xy.length ? `${line} L ${xy[xy.length - 1].x} ${top + ch} L ${xy[0].x} ${top + ch} Z` : "";
-  const quotaY = quota ? top + ch - Math.min(quota, yMax) / yMax * ch : null;
-  const tickIndexes = [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])].filter((i) => i >= 0);
-  return <div className="cb-line-wrap">
-    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`CloudBase 最近一小时环境 QPS 折线图，共 ${points.length} 个采样点`}>
-      <defs><linearGradient id="cb-qps-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--accent)" stopOpacity=".22" /><stop offset="100%" stopColor="var(--accent)" stopOpacity="0" /></linearGradient></defs>
-      {[0, .25, .5, .75, 1].map((f) => <g key={f}><line className="grid" x1={left} x2={W - right} y1={top + ch * f} y2={top + ch * f} /><text className="tick" x={left - 10} y={top + ch * f + 4} textAnchor="end">{Math.round(yMax * (1 - f))}</text></g>)}
-      {area && <path d={area} fill="url(#cb-qps-area)" />}
-      {line && <path className="line" d={line} fill="none" />}
-      {quotaY != null && <g className="quota"><line x1={left} x2={W - right} y1={quotaY} y2={quotaY} /><text x={W - right} y={quotaY - 6} textAnchor="end">配额 {fmtNum(quota!)}</text></g>}
-      {xy.map((p, i) => <g key={p.at} className="point"><circle cx={p.x} cy={p.y} r={9} className="hit"><title>{new Date(p.at).toLocaleTimeString("zh-CN", { hour12: false })} · {p.value} QPS</title></circle><circle cx={p.x} cy={p.y} r={i === xy.length - 1 ? 4 : 2.5} className="dot" /></g>)}
-      {tickIndexes.map((i) => xy[i] && <text key={i} className="tick" x={xy[i].x} y={H - 12} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"}>{new Date(xy[i].at).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" })}</text>)}
+  const maxLeft = Math.max(10, ...series.filter((s) => s.axis === "left").flatMap((s) => s.points.map((p) => p.value)));
+  const maxRight = Math.max(10, ...series.filter((s) => s.axis === "right").flatMap((s) => s.points.map((p) => p.value)));
+  const yMaxL = niceCeil(maxLeft * 1.08), yMaxR = niceCeil(maxRight * 1.08);
+  const n = Math.max(0, ...series.map((s) => s.points.length));
+  const xyOf = (s: ChartSeries) => {
+    const yMax = s.axis === "left" ? yMaxL : yMaxR;
+    return s.points.map((p, i) => ({
+      ...p,
+      x: left + (s.points.length === 1 ? cw / 2 : i * cw / (s.points.length - 1)),
+      y: top + ch - Math.min(p.value, yMax) / yMax * ch,
+    }));
+  };
+  const yTicks = 4;
+  const leftTicks = Array.from({ length: yTicks + 1 }, (_, i) => Math.round(yMaxL * (1 - i / yTicks)));
+  const rightTicks = Array.from({ length: yTicks + 1 }, (_, i) => Math.round(yMaxR * (1 - i / yTicks)));
+  const ref = series.find((s) => s.points.length)?.points ?? [];
+  const xTickCount = Math.min(7, Math.max(2, ref.length));
+  const xTickIdx = new Set(Array.from({ length: xTickCount }, (_, i) => Math.round(i * (ref.length - 1) / (xTickCount - 1))));
+  const [hover, setHover] = React.useState<number | null>(null);
+  const xyTable = series.map((s) => xyOf(s));
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!ref.length) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width * W;
+    const t = (px - left) / cw;
+    if (t < -0.02 || t > 1.02) { setHover(null); return; }
+    setHover(Math.max(0, Math.min(ref.length - 1, Math.round(t * (ref.length - 1)))));
+  };
+  const hoverX = hover != null && ref[hover] ? left + (ref.length === 1 ? cw / 2 : hover * cw / (ref.length - 1)) : null;
+  const hoverTime = hover != null && ref[hover] ? new Date(ref[hover].at).toLocaleTimeString("zh-CN", { hour12: false }) : "";
+  const hoverPt = hover != null ? xyTable[0]?.[hover] ?? null : null;
+  return <div className="cb-line-wrap cb-chart-dark">
+    <div className="cb-chart-legend" aria-hidden="true">
+      {series.map((s) => <span key={s.key} className="lg"><i style={{ background: s.color }} />{s.label}</span>)}
+    </div>
+    <div className="cb-plot">
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`CloudBase 最近一小时环境 QPS 折线图，共 ${n} 个采样点`} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <defs>
+        {series.map((s) => (
+          <linearGradient key={s.key} id={`cb-grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={s.color} stopOpacity=".30" />
+            <stop offset="100%" stopColor={s.color} stopOpacity=".02" />
+          </linearGradient>
+        ))}
+      </defs>
+      {leftTicks.map((t, i) => {
+        const y = top + ch * (i / yTicks);
+        return <g key={t + "-" + i}>
+          <line className="grid" x1={left} x2={W - right} y1={y} y2={y} />
+          <text className="tick" x={left - 12} y={y + 4} textAnchor="end">{fmtNum(t)}</text>
+          <text className="tick tick-r" x={W - right + 12} y={y + 4} textAnchor="start">{fmtNum(rightTicks[i])}</text>
+        </g>;
+      })}
+      {[0, .25, .5, .75, 1].map((f) => (
+        <line key={f} className="grid v" x1={left + cw * f} x2={left + cw * f} y1={top} y2={top + ch} />
+      ))}
+      {series.map((s, si) => {
+        const xy = xyTable[si];
+        const line = smoothPath(xy);
+        const area = xy.length ? `${line} L ${xy[xy.length - 1].x} ${top + ch} L ${xy[0].x} ${top + ch} Z` : "";
+        return <g key={s.key}>
+          {area && <path d={area} fill={`url(#cb-grad-${s.key})`} />}
+          {line && <path d={line} fill="none" className="line" stroke={s.color} />}
+          {xy.map((p, i) => (
+            <g key={p.at + s.key} className="point">
+              <circle cx={p.x} cy={p.y} r={10} className="hit" />
+              <circle cx={p.x} cy={p.y} r={i === hover ? 5 : i === xy.length - 1 ? 4.5 : 3} className={"dot" + (i === hover ? " active" : "")} fill="var(--bg-card)" stroke={s.color} />
+            </g>
+          ))}
+        </g>;
+      })}
+      {hoverX != null && <line className="crosshair" x1={hoverX} x2={hoverX} y1={top} y2={top + ch} />}
+      {[...xTickIdx].map((i) => ref[i] && (
+        <text key={i} className="tick" x={left + (ref.length === 1 ? cw / 2 : i * cw / (ref.length - 1))} y={H - 14}
+          textAnchor={i === 0 ? "start" : i === ref.length - 1 ? "end" : "middle"}>
+          {new Date(ref[i].at).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" })}
+        </text>
+      ))}
     </svg>
+    {hover != null && ref[hover] && hoverPt && <div
+      className={"cb-chart-tip" + (hoverPt.y < top + ch * 0.45 ? " below" : "")}
+      style={{ left: `${Math.max(10, Math.min(90, hoverPt.x / W * 100)).toFixed(2)}%`, top: `${(hoverPt.y / H * 100).toFixed(2)}%` }}>
+      <b>{hoverTime}</b>
+      {series.map((s, si) => { const p = xyTable[si][hover]; return p ? <span key={s.key}><i style={{ background: s.color }} />{s.label}<em>{fmtNum(p.value)}</em></span> : null; })}
+    </div>}
+    </div>
     {!points.length && <div className="cb-line-empty">最近一小时暂无平台采样数据</div>}
-    <div className="cb-line-foot"><span><i />环境全部请求 · 每 5 分钟峰值</span><span>{points.length} 个采样点{quota ? ` · 配额 ${fmtNum(quota)} QPS` : ""}</span></div>
+    <div className="cb-line-foot"><span>环境全部请求 · 每 5 分钟峰值</span><span>{points.length} 个采样点{quota ? ` · 配额 ${fmtNum(quota)} QPS` : ""}</span></div>
   </div>;
 }
 
@@ -89,18 +177,47 @@ function DonutGauge({ pct, tone }: { pct: number; tone: string }) {
   </svg>;
 }
 
-// 迷你柱状分布图：表行数 Top N 分布。
-function MiniBars({ items }: { items: { label: string; value: number }[] }) {
+// 迷你面积趋势图：近 24 小时逐小时新增行数。
+function MiniArea({ items }: { items: { at: string; value: number }[] }) {
+  const gid = React.useId().replace(/:/g, "");
+  const [hover, setHover] = React.useState<number | null>(null);
   const max = Math.max(1, ...items.map((i) => i.value));
-  const W = 200, H = 64, gap = 6;
-  const bw = items.length ? (W - gap * (items.length - 1)) / items.length : W;
-  return <svg viewBox={`0 0 ${W} ${H}`} className="cb-minibars" role="img" aria-label="表行数分布柱状图" preserveAspectRatio="none">
-    {items.map((it, i) => {
-      const h = Math.max(3, it.value / max * (H - 14));
-      return <g key={it.label}><rect x={i * (bw + gap)} y={H - h} width={bw} height={h} rx={2.5} className={i === 0 ? "bar first" : "bar"}><title>{it.label} · {fmtNum(it.value)} 行</title></rect></g>;
-    })}
-    {!items.length && <text x={W / 2} y={H / 2} textAnchor="middle" className="tick">暂无数据</text>}
-  </svg>;
+  const W = 1000, H = 128, pad = 12;
+  const cw = W - pad * 2, ch = H - pad * 2 - 6;
+  const pts = items.map((it, i) => ({
+    ...it,
+    label: new Date(it.at).toLocaleString("zh-CN", {
+      hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    }),
+    x: pad + (items.length === 1 ? cw / 2 : i * cw / (items.length - 1)),
+    y: pad + ch - (it.value / max) * ch,
+  }));
+  const line = smoothPath(pts);
+  const area = pts.length ? `${line} L ${pts[pts.length - 1].x} ${pad + ch} L ${pts[0].x} ${pad + ch} Z` : "";
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!pts.length) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width * W;
+    const t = (px - pad) / cw;
+    if (t < -0.02 || t > 1.02) { setHover(null); return; }
+    setHover(Math.max(0, Math.min(pts.length - 1, Math.round(t * (pts.length - 1)))));
+  };
+  const active = hover == null ? null : pts[hover];
+  return <div className="cb-miniarea-wrap">
+    <svg viewBox={`0 0 ${W} ${H}`} className="cb-miniarea" role="img" aria-label="近 24 小时行数增长折线图" preserveAspectRatio="none" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <defs><linearGradient id={`mini-${gid}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--accent)" stopOpacity=".28" /><stop offset="100%" stopColor="var(--accent)" stopOpacity="0" /></linearGradient></defs>
+      {area && <path d={area} fill={`url(#mini-${gid})`} />}
+      {line && <path d={line} fill="none" className="line" />}
+      {active && <line className="crosshair" x1={active.x} x2={active.x} y1={pad} y2={pad + ch} />}
+      {pts.map((p, i) => <g key={p.at} className="point"><circle cx={p.x} cy={p.y} r={12} className="hit" /><circle cx={p.x} cy={p.y} r={i === hover ? 5 : 3} className={"dot" + (i === hover ? " active" : "")} /></g>)}
+      {!items.length && <text x={W / 2} y={H / 2} textAnchor="middle" className="tick">暂无数据</text>}
+    </svg>
+    {active && <div
+      className={"cb-chart-tip cb-mini-tip" + (active.y < H * 0.55 ? " below" : "")}
+      style={{ left: `${Math.max(11, Math.min(89, active.x / W * 100)).toFixed(2)}%`, top: `${(active.y / H * 100).toFixed(2)}%` }}>
+      <b>{active.label}</b><span><i />新增行数<em>{fmtNum(active.value)} 行</em></span>
+    </div>}
+  </div>;
 }
 
 // 占比环形图：请求日志中仍含历史对话的比例。
@@ -135,12 +252,13 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
   const [healthDays, setHealthDays] = useState(3);
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
-    try { setStats(await req<Stats>("database" + (refresh ? "?refresh=1" : ""))); }
+    try { setStats(await reqCached<Stats>("database", { force: refresh })); }
     catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
     finally { setLoading(false); }
   }, [flash]);
   useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
-  useAutoRefresh(() => void load(), 60_000);
+  // CloudBase 监控数据变化频率低：取消分钟级轮询，1 小时内走缓存；
+  // 手动「刷新」按钮与顶栏刷新走 force 立即拉新数据。
   usePanelRefresh(() => void load(true));
   const openCleanup = (name: CleanupAction) => { setCleanupError(""); setDetailHours(stats?.retention.detailHours ?? 24); setLogDays(stats?.retention.days ?? 7); setCleanup(name); };
   const action = async (password: string) => {
@@ -173,9 +291,11 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
   const totalRows = stats?.tables.reduce((s, t) => s + t.rows, 0) ?? 0;
   const growthRows = stats?.tables.reduce((s, t) => s + (t.added24h ?? 0), 0) ?? 0;
   const growthBytes = stats?.tables.reduce((s, t) => s + (t.added24h ?? 0) * (t.avgRowBytes || 1024) * 1.25, 0) ?? 0;
-  const pct = db?.percent ?? 0;
+  const points = stats?.platform?.resourcePoints;
+  const pointsAvailable = points?.used != null && points.total != null && points.percent != null;
+  const pct = isCb ? points?.percent ?? 0 : db?.percent ?? 0;
   const barCls = pct >= 90 ? "crit" : pct >= 70 ? "warn" : "";
-  const topTables = (stats?.tables ?? []).slice().sort((a, b) => b.rows - a.rows).slice(0, 8).map((t) => ({ label: t.name, value: t.rows }));
+  const growthSeries = stats?.growthSeries ?? [];
   const collectedAt = stats ? new Date(stats.measuredAt).toLocaleString("zh-CN", { hour12: false }) : "…";
   const platform = stats?.platform;
   const qpsAt = platform?.sampledAt ? new Date(platform.sampledAt).toLocaleTimeString("zh-CN", { hour12: false }) : "—";
@@ -183,24 +303,26 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
   const qpsPeak = qpsPoints.length ? Math.max(...qpsPoints.map((p) => p.value)) : null;
   const qpsAverage = qpsPoints.length ? Math.round(qpsPoints.reduce((s, p) => s + p.value, 0) / qpsPoints.length * 10) / 10 : null;
   return <div style={{ display: "grid", gap: 16 }}>
-    <Box title="CloudBase 监控" hint={db ? `${db.host} · ${db.version}` : "读取中…"}
-      extra={<button className="btn xs" disabled={loading} onClick={() => void load(true)}>{loading ? "读取中…" : "刷新"}</button>} pad>
-      <div className="cb-kpi-grid">
-        <div className="cb-kpi span2">
-          <div className="cb-kpi-head"><span className="k">容量{isCb ? " · 采样估算" : ""}</span><span className={"cb-chip" + (barCls ? " " + barCls : "")}>{barCls === "crit" ? "告急" : barCls === "warn" ? "偏高" : "健康"}</span></div>
+    <Box title="CloudBase 监控"
+      extra={<div className="cb-box-extra">
+        <span className="cb-env-chip" title={`采集于 ${collectedAt}`}><i className={"cb-dot" + (stats ? " on" : "")} /><b className="mono">{db?.name ?? "…"}</b><em>采集于 {collectedAt}</em></span>
+        <button className="btn xs" disabled={loading} onClick={() => void load(true)}>{loading ? "读取中…" : "刷新"}</button>
+      </div>} pad>
+      <div className={isCb ? "cb-kpi-grid cb" : "cb-kpi-grid"}>
+        <div className={"cb-kpi span2" + (isCb ? " capacity" : "")}>
+          <div className="cb-kpi-head"><span className="k">{isCb ? "资源点" : "容量"}</span><span className={"cb-chip" + (barCls ? " " + barCls : "") + (isCb && !pointsAvailable ? " muted" : "")}>{isCb && !pointsAvailable ? "数据暂缺" : barCls === "crit" ? "告急" : barCls === "warn" ? "偏高" : "健康"}</span></div>
           <div className="cb-kpi-chart">
             <DonutGauge pct={pct} tone={barCls} />
             <div className="cb-kpi-side">
-              <span className="v">{db && db.sizeGb > 0 ? <>{db.sizeGb.toFixed(3)}<span className="cb-unit">GB</span></> : "—"}</span>
-              <span className="s">上限 {db?.limitGb ?? "…"} GB · {isCb ? "近 50 行均值 × 行数 × 1.25" : "pg_database_size 实测"}</span>
+              {isCb ? <>
+                <span className="v">{points?.used != null ? <>{fmtNum(points.used)}<span className="cb-unit">{points.total != null ? `/ ${points.total >= 10_000 ? `${fmtNum(points.total / 10_000)}万` : fmtNum(points.total)}点` : "点"}</span></> : "—"}</span>
+                <span className="s"><span>数据库使用大小 {db && db.sizeGb > 0 ? `${db.sizeGb.toFixed(3)} GB` : "—"}</span><span title={points?.error ?? undefined}>行体积采样估算</span></span>
+              </> : <>
+                <span className="v">{db && db.sizeGb > 0 ? <>{db.sizeGb.toFixed(3)}<span className="cb-unit">GB</span></> : "—"}</span>
+                <span className="s"><span>上限 {db?.limitGb ?? "…"} GB</span><span>pg_database_size 实测</span></span>
+              </>}
             </div>
           </div>
-        </div>
-        <div className="cb-kpi">
-          <div className="cb-kpi-head"><span className="k">总行数</span><span className="cb-chip">{stats?.tables.length ?? "…"} 表</span></div>
-          <span className="v">{stats ? fmtNum(totalRows) : "…"}</span>
-          <MiniBars items={topTables} />
-          <span className="s">近 24h 新增 {fmtNum(growthRows)} 行 · 缓存 {stats?.cacheSeconds ?? 60}s</span>
         </div>
         <div className="cb-kpi">
           <div className="cb-kpi-head"><span className="k">请求日志</span><span className="cb-chip">{stats?.retention.days ?? 7} 天</span></div>
@@ -208,23 +330,24 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
             <ShareDonut part={db?.dialogRows ?? 0} total={db?.requestLogs ?? 0} />
             <div className="cb-kpi-side">
               <span className="v">{fmtNum(db?.requestLogs)}</span>
-              <span className="s">近 24h 新增约 {bytes(growthBytes)} · 含对话 {fmtNum(db?.dialogRows)}</span>
+              <span className="s"><span>近 24h 增长约 {bytes(growthBytes)}</span></span>
             </div>
           </div>
+        </div>
+        <div className={"cb-kpi" + (isCb ? " total-rows" : "")}>
+          <div className="cb-kpi-head"><span className="k">总行数</span></div>
+          <span className="v">{stats ? fmtNum(totalRows) : "…"}</span>
+          <MiniArea items={growthSeries} />
+          <span className="s"><span>近 24h 新增 {fmtNum(growthRows)} 行</span><span>每小时新增 · 缓存 {stats?.cacheSeconds ?? 60} 秒</span></span>
         </div>
         {!isCb && <div className="cb-kpi">
           <div className="cb-kpi-head"><span className="k">活动连接</span></div>
           <span className="v">{db?.activeConnections ?? "—"}<span className="cb-unit">/ {db?.maxConnections ?? "—"}</span></span>
           <span className="s">上限 {db?.maxConnections ?? "—"}</span>
         </div>}
-        <div className="cb-kpi">
-          <div className="cb-kpi-head"><span className="k">{isCb ? "环境" : "数据库"}</span><span className={"cb-dot" + (stats ? " on" : "")} /></div>
-          <span className="v small mono">{db?.name ?? "…"}</span>
-          <span className="s">采集于 {collectedAt}</span>
-        </div>
       </div>
     </Box>
-    {isCb && <Box title="环境 QPS 趋势" hint="CloudBase 平台 · 最近一小时" extra={<span className={"cb-chip" + (platform?.available ? "" : " muted")}>{platform?.available ? "平台实测" : "待配置"}</span>} pad>
+    {isCb && <Box title="环境 QPS 趋势" hint="CloudBase 平台 · 最近一小时" extra={!platform?.available ? <span className="cb-chip muted">待配置</span> : undefined} pad>
       <div className="cb-qps-summary"><div><span>最新</span><b>{platform?.qps == null ? "—" : fmtNum(platform.qps)}<em> QPS</em></b></div><div><span>小时峰值</span><b>{qpsPeak == null ? "—" : fmtNum(qpsPeak)}<em> QPS</em></b></div><div><span>采样均值</span><b>{qpsAverage == null ? "—" : fmtNum(qpsAverage)}<em> QPS</em></b></div><div><span>配额</span><b>{platform?.qpsQuota == null ? "—" : fmtNum(platform.qpsQuota)}<em> QPS</em></b></div></div>
       <QpsLineChart points={qpsPoints} quota={platform?.qpsQuota ?? null} />
       <div className="dim cb-qps-note">{platform?.available ? `最新采样 ${qpsAt} · 指标为每个 5 分钟窗口内的峰值` : platform?.error || "配置 CAM 密钥后采集"}</div>

@@ -228,7 +228,7 @@ export function AccountsView({ ov, flash, onRefresh }: {
         </div>
         <CtrlHint>
           批量操作异步执行，结果见「运行日志」页；添加账号支持浏览器授权与 JSON 导入两种方式。
-          「扫描模型限流」会真实探测每个模型的 429 / 6004 / 11102 状态，已锁定的模型自动跳过。
+          「扫描模型限流」会探测每个模型的 429 / 6004 / 11102 状态，已锁定的模型自动跳过。
         </CtrlHint>
       </CtrlCard>
 
