@@ -76,6 +76,15 @@ function withUpdateDefaults(table: string, data: Record<string, unknown>): Recor
 // 不依赖 schema 反射（17 张表、列名稳定）。
 
 const DATE_COLS = new Set(["createdAt", "updatedAt", "at", "testedAt", "checkedAt"]);
+
+// CloudBase PostgREST 的 timestamptz 返回无时区 ISO 串（库端会话时区=Asia/Shanghai，
+// 返回的是上海墙钟）。JS 规范规定无时区串按本地时区解析——部署容器 TZ=UTC 时会
+// 把上海墙钟当 UTC 再转回上海，面板时间整体晚 8 小时（11:50 → 19:50）。
+// 修复：无时区后缀的 ISO 串显式补 +08:00，强制按 Asia/Shanghai 墙钟解释；
+// 已带 Z / ±HH:MM 后缀的保持原样。
+function parseDbDate(v: string): Date {
+  return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/.test(v) ? v : v + "+08:00");
+}
 const BIGINT_COLS = new Set([
   "expiresAt", "credits", "creditsTotal", "total", "expiring", "earliestAt",
   "earliestRemain", "disabledAt", "degradeUntil", "cooldownUntil", "breakerUntil",
@@ -95,7 +104,7 @@ function decodeRow(row: Record<string, unknown>): Record<string, unknown> {
         item && typeof item === "object" ? decodeRow(item as Record<string, unknown>) : item,
       );
     } else if (typeof v === "string" && DATE_COLS.has(k) && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
-      out[k] = new Date(v);
+      out[k] = parseDbDate(v);
     } else if (
       // BigInt 列：余额/积分/token 计数等。CloudBase PostgREST 对 int8
       // 在安全范围内返回 number（非字符串），两种形态都要转 BigInt。
@@ -676,3 +685,5 @@ export const dal = new Proxy({} as Record<string, ReturnType<typeof makeDelegate
 });
 
 export type Dal = typeof dal;
+
+

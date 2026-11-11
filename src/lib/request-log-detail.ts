@@ -2,10 +2,16 @@
 
 // 单行日志体积上限：requestMessages + responseMessage 各自受 MAX_MESSAGE_CHARS 约束，
 // errorDetail 受 MAX_VALUE_CHARS 约束。原 320K/80K 会让单行 TOAST 逼近 700KB，
-// 16500 行就能吃掉 1.4GB 磁盘（Supabase 免费档直接触发只读），故收紧到 120K/40K，
-// 面板仍可展开阅读长对话，只是超长部分标注截断。
+// 16500 行就能吃掉 1.4GB 磁盘（Supabase 免费档直接触发只读）。
+//
+// 预算口径（2026-11-11 修正）：
+// - 每条消息有独立上限 PER_MESSAGE_CHARS（60K），长消息不会被共享预算挤掉；
+// - 整个 messages 数组另有总量上限 MAX_MESSAGE_CHARS（160K），但分配从「最新一轮」
+//   往回给：先保住最近的用户提问与助手回复，最早的历史消息先被压缩/丢弃，
+//   并显式插入一条 role:"log" 的占位说明，面板据此区分系统占位与真实 system 消息。
 const MAX_MESSAGE_ITEMS = 200;
-const MAX_MESSAGE_CHARS = 120_000;
+const PER_MESSAGE_CHARS = 60_000;
+const MAX_MESSAGE_CHARS = 160_000;
 const MAX_VALUE_CHARS = 40_000;
 const MAX_OVERRIDE_ITEMS = 200;
 const MAX_OVERRIDE_VALUE_CHARS = 4_000;
@@ -107,6 +113,19 @@ function clippedValue(value: unknown): unknown {
   return state.truncated ? out : out;
 }
 
+// sanitizeOne：用独立状态裁剪单条消息，返回消息与其实际占用的字符数。
+// 上限取 perMessage 与共享池剩余两者的较小值。
+function sanitizeOne(
+  value: unknown,
+  poolRemaining: number,
+  perMessage: number,
+): { out: unknown; used: number; truncated: boolean } {
+  const cap = Math.max(0, Math.min(perMessage, poolRemaining));
+  const state: ClipState = { remaining: cap, truncated: false };
+  const out = sanitizeValue(value, state, new WeakSet());
+  return { out, used: cap - state.remaining, truncated: state.truncated };
+}
+
 function equalValue(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   try {
@@ -117,18 +136,42 @@ function equalValue(a: unknown, b: unknown): boolean {
 }
 
 export function requestMessagesForLog(value: unknown): unknown[] {
-  const state: ClipState = { remaining: MAX_MESSAGE_CHARS, truncated: false };
   if (Array.isArray(value)) {
-    const out = value.slice(0, MAX_MESSAGE_ITEMS).map((message) =>
-      sanitizeValue(message, state, new WeakSet()));
-    if (value.length > MAX_MESSAGE_ITEMS) {
-      out.push({ role: "system", content: `[另有 ${value.length - MAX_MESSAGE_ITEMS} 条消息未记录]` });
+    const items = value.slice(-MAX_MESSAGE_ITEMS); // 保最新 MAX_MESSAGE_ITEMS 条
+    const droppedByCount = value.length - items.length;
+    // 两遍分配：先按原序给每条一个独立上限并累计用量；超出总量时从最早的
+    // 消息开始回收，保证尾部（最近一轮对话）完整。
+    const parts = items.map((m) => sanitizeOne(m, PER_MESSAGE_CHARS, PER_MESSAGE_CHARS));
+    let total = parts.reduce((s, p) => s + p.used, 0);
+    let droppedChars = 0;
+    let startIndex = 0;
+    while (total > MAX_MESSAGE_CHARS && startIndex < parts.length - 1) {
+      total -= parts[startIndex].used;
+      droppedChars += parts[startIndex].used;
+      startIndex++;
     }
-    if (state.truncated) out.push({ role: "system", content: "[对话内容过长，日志已截断]" });
+    const out: unknown[] = [];
+    const droppedMsgs = droppedByCount + startIndex;
+    if (droppedMsgs > 0 || droppedChars > 0) {
+      out.push({
+        role: "log",
+        content: `[日志] 早期 ${droppedMsgs} 条消息未记录` +
+          (droppedChars > 0 ? `（释放 ${droppedChars} 字符预算给最近对话）` : ""),
+      });
+    }
+    let anyTruncated = false;
+    for (let i = startIndex; i < parts.length; i++) {
+      if (parts[i].truncated) anyTruncated = true;
+      out.push(parts[i].out);
+    }
+    if (anyTruncated) {
+      out.push({ role: "log", content: `[日志] 部分消息超过单条 ${PER_MESSAGE_CHARS} 字符上限，正文内已标注截断` });
+    }
     return out;
   }
   if (value === undefined || value === null) return [];
-  return [{ role: "unknown", content: sanitizeValue(value, state, new WeakSet()) }];
+  const one = sanitizeOne(value, MAX_MESSAGE_CHARS, MAX_MESSAGE_CHARS);
+  return [{ role: "unknown", content: one.out }];
 }
 
 export function assistantMessageForLog(input: {

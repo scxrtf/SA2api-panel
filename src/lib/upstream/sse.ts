@@ -128,6 +128,13 @@ function mergeObservedToolCall(merged: Obj, delta: Obj): void {
     const v = delta[k];
     if (typeof v === "string" && v !== "" && !merged[k]) merged[k] = v;
   }
+  // 兼容非流式帧被复用观察时 tool_call 直接携带 name/arguments（无 function 包装）。
+  const directName = delta["name"];
+  if (typeof directName === "string" && directName !== "") {
+    let mf = merged["function"] as Obj | undefined;
+    if (!mf || typeof mf !== "object") { mf = {}; merged["function"] = mf; }
+    if (!mf["name"]) mf["name"] = directName;
+  }
   const df = delta["function"];
   if (!df || typeof df !== "object") return;
   let mf = merged["function"] as Obj | undefined;

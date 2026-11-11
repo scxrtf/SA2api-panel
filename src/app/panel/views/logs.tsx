@@ -222,14 +222,93 @@ function LogSection({ title, empty, emptyText, children }: {
   );
 }
 
-// 把一条对话消息渲染成紧凑块：角色标签 + 正文（多模态/工具调用折叠为 JSON）。
+// 已知角色集中着色；未知角色原样展示但用中性色。
+const ROLE_META: Record<string, { label: string; cls: string }> = {
+  system: { label: "SYSTEM", cls: "role-system" },
+  user: { label: "USER", cls: "role-user" },
+  assistant: { label: "ASSISTANT", cls: "role-assistant" },
+  tool: { label: "TOOL", cls: "role-tool" },
+  log: { label: "日志", cls: "role-log" }, // 日志占位行（截断说明），非真实对话
+};
+
+// 截断标记：正文以「\n…[已截断 N 字符]」结尾时拆出标记单独高亮，
+// 避免长文阅读时看不到它其实被截断了。
+const TRUNC_TAIL = /\n?(…\[已截断 \d+ 字符\])$/;
+
+function splitTruncation(text: string): { body: string; marker: string | null } {
+  const m = TRUNC_TAIL.exec(text);
+  if (!m) return { body: text, marker: null };
+  return { body: text.slice(0, m.index), marker: m[1] };
+}
+
+// 多模态 content（数组）折叠成可读行：text 段直接展开，image_url 等显示摘要。
+function contentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const lines: string[] = [];
+    for (const part of content) {
+      if (part && typeof part === "object" && !Array.isArray(part)) {
+        const p = part as Record<string, unknown>;
+        if (p["type"] === "text" && typeof p["text"] === "string") {
+          lines.push(p["text"] as string);
+        } else if (p["type"] === "image_url") {
+          const url = (p["image_url"] as Record<string, unknown> | undefined)?.["url"];
+          lines.push(`[图片] ${typeof url === "string" ? (url.length > 120 ? url.slice(0, 120) + "…" : url) : ""}`);
+        } else {
+          lines.push(`[${typeof p["type"] === "string" ? p["type"] as string : "part"}]`);
+        }
+      } else if (typeof part === "string") {
+        lines.push(part);
+      }
+    }
+    return lines.join("\n");
+  }
+  if (content === undefined || content === null) return "";
+  return valueText(content);
+}
+
+function toolCallText(tc: Record<string, unknown>): string {
+  const fn = tc["function"];
+  if (fn && typeof fn === "object") {
+    const f = fn as Record<string, unknown>;
+    return `${typeof f["name"] === "string" ? f["name"] : "?"}(${typeof f["arguments"] === "string" ? f["arguments"] : valueText(f["arguments"])})`;
+  }
+  return valueText(tc);
+}
+
+// 把一条对话消息渲染成紧凑块：角色标签 + 正文 + 思维链 + 工具调用。
 function DialogMessage({ msg }: { msg: Record<string, unknown> }) {
-  const role = typeof msg["role"] === "string" ? (msg["role"] as string) : "message";
-  const content = msg["content"];
+  const rawRole = typeof msg["role"] === "string" ? (msg["role"] as string) : "message";
+  const meta = ROLE_META[rawRole];
+  const label = meta?.label ?? rawRole.toUpperCase();
+  const cls = meta?.cls ?? "role-other";
+
+  const reasoning = typeof msg["reasoning_content"] === "string" ? msg["reasoning_content"] as string : "";
+  const toolCalls = recordList(msg["tool_calls"]);
+  const { body, marker } = splitTruncation(contentToText(msg["content"]));
+
   return (
-    <div className={"log-dialog-msg role-" + role}>
-      <span className="log-dialog-role">{role}</span>
-      <pre className="log-dialog-body">{valueText(content)}</pre>
+    <div className={"log-dialog-msg " + cls}>
+      <span className="log-dialog-role">{label}</span>
+      <div className="log-dialog-content">
+        {reasoning && (
+          <details className="log-dialog-reasoning">
+            <summary>思维链（{reasoning.length} 字符）</summary>
+            <pre className="log-dialog-body">{reasoning}</pre>
+          </details>
+        )}
+        {body
+          ? <pre className="log-dialog-body">{body}</pre>
+          : !reasoning && toolCalls.length === 0 && !marker && <pre className="log-dialog-body empty">（空消息）</pre>}
+        {marker && <div className="log-dialog-trunc">{marker}</div>}
+        {toolCalls.length > 0 && (
+          <div className="log-dialog-tools">
+            {toolCalls.map((tc, i) => (
+              <pre key={i} className="log-dialog-tool">{toolCallText(tc)}</pre>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -254,7 +333,7 @@ function RequestLogDetailView({ entry, loading, error }: {
         <div className="log-dialog">
           {recordList(entry.requestMessages).map((m, i) => <DialogMessage key={"q" + i} msg={m} />)}
           {entry.responseMessage && typeof entry.responseMessage === "object" && !Array.isArray(entry.responseMessage)
-            ? <DialogMessage msg={{ role: "assistant", content: (entry.responseMessage as Record<string, unknown>)["content"] ?? entry.responseMessage }} />
+            ? <DialogMessage msg={entry.responseMessage as Record<string, unknown>} />
             : null}
         </div>
       </LogSection>
