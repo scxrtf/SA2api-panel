@@ -1,11 +1,10 @@
 "use client";
-// 管理面板入口（CloseRouter 大改版）：只负责鉴权态 / 视图调度 / overview 轮询，
-// 外壳（机柜+侧边栏+页头）在 components/shell.tsx，登录页在 components/login.tsx。
+// 管理面板入口（CloseRouter 大改版）：负责视图调度 / overview 轮询，
+// 外壳（机柜+侧边栏+页头）在 components/shell.tsx。
 import React, { useCallback, useEffect, useState } from "react";
-import { req, useAutoRefresh, emitPanelRefresh, PanelActivityProvider, PANEL_AUTH_EVENT } from "./lib";
+import { req, useAutoRefresh, emitPanelRefresh, PanelActivityProvider } from "./lib";
 import { LoadingIndicator, type Overview } from "./components/ui";
 import { Shell } from "./components/shell";
-import { LoginScreen } from "./components/login";
 import type { View } from "./nav";
 import { AccountsView } from "./views/accounts";
 import { UsageView } from "./views/usage";
@@ -22,7 +21,6 @@ import { CloudbaseView } from "./views/cloudbase";
 import { LogsView } from "./views/logs";
 
 export default function PanelPage() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [view, setView] = useState<View>("accounts");
   // 首次进入后保持视图挂载：切 tab 只隐藏，不卸载。
   // 这样模型实测、指纹鉴别、任务队列等长时间执行不会被中断，结果也不会随
@@ -43,7 +41,6 @@ export default function PanelPage() {
   }, []);
 
   const flash = useCallback((kind: "ok" | "err", text: string) => {
-    if (text === "__AUTH__") { setAuthed(false); return; }
     setMsg({ kind, text });
     setTimeout(() => setMsg(null), 4200);
   }, []);
@@ -51,21 +48,15 @@ export default function PanelPage() {
   const loadOverview = useCallback(async () => {
     try {
       const r = await req<Overview>("overview");
-      setOv(r); setAuthed(true);
+      setOv(r);
       setSyncAt(Date.now());
     } catch (e) {
-      if (e instanceof Error && e.message === "__AUTH__") setAuthed(false);
-      else flash("err", e instanceof Error ? e.message : String(e));
+      flash("err", e instanceof Error ? e.message : String(e));
     }
   }, [flash]);
 
   useEffect(() => { const t = setTimeout(() => { void loadOverview(); }, 0); return () => clearTimeout(t); }, [loadOverview]);
-  useEffect(() => {
-    const expired = () => setAuthed(false);
-    window.addEventListener(PANEL_AUTH_EVENT, expired);
-    return () => window.removeEventListener(PANEL_AUTH_EVENT, expired);
-  }, []);
-  useAutoRefresh(() => { void loadOverview(); }, 120_000, authed === true);
+  useAutoRefresh(() => { void loadOverview(); }, 120_000);
 
   // 顶栏刷新：先刷 overview（侧边栏统计），再广播事件让当前视图刷自己的数据。
   // 返回 Promise 供按钮进入加载态：转圈持续到 overview 落定，
@@ -74,10 +65,6 @@ export default function PanelPage() {
     emitPanelRefresh();
     return loadOverview();
   }, [loadOverview]);
-
-  if (authed === false) {
-    return <LoginScreen onSubmit={loadOverview} msg={msg} />;
-  }
 
   return (
     <Shell view={view} onSelect={selectView} ov={ov} syncAt={syncAt}

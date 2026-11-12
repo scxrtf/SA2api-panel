@@ -1,7 +1,5 @@
-// 面板 API 公共辅助：主密钥鉴权 + 统一响应形态 + BigInt 序列化兜底。
+// 面板 API 公共辅助：统一响应形态 + BigInt 序列化兜底。
 import { createHash, timingSafeEqual } from "crypto";
-import { verifyBearer } from "./auth-guard";
-import { getConfig } from "./config";
 
 export const ok = (data: Record<string, unknown> = {}) =>
   jsonify({ ok: true, ...data }, 200);
@@ -17,10 +15,8 @@ export function jsonify(v: unknown, status = 200): Response {
   );
 }
 
-// panelAuth 面板鉴权：生产环境主密钥为空时拒绝；仅非生产本地开发允许空密钥。
-export async function panelAuth(req: Request): Promise<Response | null> {
-  const cfg = await getConfig();
-  if (!verifyBearer(req, cfg.api_key)) return fail(401, "invalid_api_key");
+// 面板入口与面板 API 均直接开放；超级密码仍用于指定的二次确认操作。
+export async function panelAuth(_req: Request): Promise<Response | null> {
   return null;
 }
 
