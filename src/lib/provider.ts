@@ -7,7 +7,7 @@ import { idleMonitorBody } from "./upstream/idle";
 import { maybeProbeAfterModelCall } from "./model-health-trigger";
 import { providerEndpoint } from "./provider-endpoint";
 import { ProviderObservation, observeProviderStream } from "./provider-observation";
-import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import { assistantMessageForLog, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, type AttemptDetail } from "./request-log-detail";
+import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import { assistantMessageForLog, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, sanitizeRequestLogData, type AttemptDetail } from "./request-log-detail";
 
 // 供应商表进程内快照。原先每次 providerChat 都 findUnique 一次、每次
 // providerModels / modelhealth 目录刷新都 findMany 一次，是 egress 的固定开销。
@@ -110,7 +110,7 @@ export async function providerChat(
       reasoningContent: stats.responseReasoning,
       toolCalls: stats.responseToolCalls,
     });
-    const requestLogTask = Promise.resolve().then(() => prisma.requestLog.create({ data: {
+    const requestLogTask = Promise.resolve().then(() => prisma.requestLog.create({ data: sanitizeRequestLogData({
       ...common, uid: "", slot: attempts ? name : "", machineId: "",
       requestMessages: logDialogEnabled() ? requestMessagesForLog(requestMessages) as Prisma.InputJsonValue : undefined,
       responseMessage: logDialogEnabled() ? responseMessage as Prisma.InputJsonValue | undefined : undefined,
@@ -123,7 +123,7 @@ export async function providerChat(
         ? outboundOverrides as unknown as Prisma.InputJsonValue : undefined,
       attemptDetails: attemptDetails.length
         ? attemptDetails as unknown as Prisma.InputJsonValue : undefined,
-    } }));
+    }) as never }));
     const tasks: Promise<unknown>[] = [requestLogTask];
     if (attempts) tasks.push(Promise.resolve().then(() => prisma.usageEvent.create({ data: {
       ...common, uid: name, ok, latencyMs: durationMs,

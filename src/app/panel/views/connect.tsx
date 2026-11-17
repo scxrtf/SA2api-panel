@@ -2,7 +2,7 @@
 // 接入引导视图：把「取模型 → 选模型 → 发对话」三步完整摊开。
 // 地址按当前访问域名自动生成：本机访问显示 127.0.0.1，线上域名访问显示线上域名。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { getKey, req } from "../lib";
+import { req } from "../lib";
 import { Box, ButtonLoadingContent, LoadingIndicator } from "../components/ui";
 import { CtrlHint } from "../components/ctrl";
 
@@ -140,7 +140,6 @@ function capsOf(m: ModelRow | undefined): string {
 
 export function ConnectView() {
   const [origin, setOrigin] = useState("");
-  const [key, setKey] = useState("");
   const [models, setModels] = useState<ModelRow[]>([]);
   const [modelErr, setModelErr] = useState("");
   const [loadingModels, setLoadingModels] = useState(false);
@@ -153,7 +152,6 @@ export function ConnectView() {
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setOrigin(window.location.origin);
-    setKey(getKey());
     try {
       const saved = localStorage.getItem(MODEL_STORE);
       if (saved) setSelected(saved);
@@ -175,7 +173,7 @@ export function ConnectView() {
       setSelected((prev) => prev || pickDefault(list));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setModelErr(msg === "__AUTH__" ? "面板登录已失效，请重新输入密钥" : msg);
+      setModelErr(msg);
       setModels([]);
     } finally {
       setLoadingModels(false);
@@ -191,7 +189,6 @@ export function ConnectView() {
   const modelsUrl = openaiBase + "/models";
   const chatUrl = openaiBase + "/chat/completions";
   const messagesUrl = anthropicBase + "/v1/messages";
-  const k = key || "<面板主密钥或网关子密钥>";
   const model = selected || pickDefault(models) || "cn:glm-5.2";
 
   const modelOptions = useMemo(
@@ -238,19 +235,15 @@ export function ConnectView() {
     }).catch(() => {});
   }, []);
 
-  const curlModels =
-`curl ${modelsUrl} \\
-  -H "Authorization: Bearer ${k}"`;
+  const curlModels = `curl ${modelsUrl}`;
 
   const curlChat =
 `curl ${chatUrl} \\
-  -H "Authorization: Bearer ${k}" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"${model}","messages":[{"role":"user","content":"你好"}]}'`;
 
   const httpMessages =
 `POST ${messagesUrl}
-x-api-key: ${k}
 anthropic-version: 2023-06-01
 Content-Type: application/json
 
@@ -270,12 +263,6 @@ Content-Type: application/json
         </button>}
         pad
       >
-        {!key && (
-          <div className="msg err" style={{ marginBottom: 12 }}>
-            未读取到面板密钥：下方示例里的 <code>{k}</code> 需要替换成你自己的 WB2A_API_KEY 或网关子密钥。
-          </div>
-        )}
-
         <div className="connect-flow">
           <b>01 取模型</b><i>→</i><b>02 选模型</b><i>→</i><b>03 发对话</b>
           <span style={{ marginLeft: "auto" }}>
@@ -289,14 +276,11 @@ Content-Type: application/json
             <div className="url-label">请求地址</div>
             <UrlLine value={modelsUrl} copied={copied} onCopy={copy} />
             <CtrlHint>
-              鉴权头：<code>Authorization: Bearer &lt;Key&gt;</code>。
               返回 <code>{"{ object: \"list\", data: [...] }"}</code>，其中
               <code>data[].id</code> 就是下一步要填的 <code>model</code>。
             </CtrlHint>
             <pre>{curlModels}</pre>
-            <CtrlHint>
-              未带鉴权头直接打开会返回 401。模型列表页也可查看完整能力与倍率。
-            </CtrlHint>
+            <CtrlHint>模型列表页也可查看完整能力与倍率。</CtrlHint>
           </StepCard>
 
           {/* ② 发起对话 */}
@@ -420,15 +404,13 @@ Content-Type: application/json
         )}
       </Box>
 
-      <Box title="客户端怎么填" hint="只认 Base URL + API Key + 模型名三样" pad>
+      <Box title="客户端怎么填" hint="只填 Base URL + 模型名" pad>
         <div className="connect-grid">
           <div className="connect-card">
             <h4>OpenAI 兼容客户端</h4>
             <CopyRow label="BASE URL" value={openaiBase} tip="Cherry Studio / LobeChat" copied={copied} onCopy={copy} />
-            <CopyRow label="API KEY" value={k} copied={copied} onCopy={copy} />
             <CopyRow label="MODEL" value={model} copied={copied} onCopy={copy} />
             <pre>{`base_url: ${openaiBase}
-api_key:  ${k}
 model:    ${model}`}</pre>
             <CtrlHint>
               服务商类型选「OpenAI 兼容 / 自定义」。Base URL 只填到
@@ -439,16 +421,12 @@ model:    ${model}`}</pre>
           <div className="connect-card">
             <h4>Anthropic / Claude Code</h4>
             <CopyRow label="BASE URL" value={anthropicBase} tip="会拼 /v1/messages" copied={copied} onCopy={copy} />
-            <CopyRow label="AUTH TOKEN" value={k} copied={copied} onCopy={copy} />
             <CopyRow label="MODEL" value={model} copied={copied} onCopy={copy} />
             <pre>{`ANTHROPIC_BASE_URL=${anthropicBase}
-ANTHROPIC_AUTH_TOKEN=${k}
 ANTHROPIC_MODEL=${model}`}</pre>
             <CtrlHint>
               Base URL 只填到 <code>{anthropicBase}</code>；SDK/CLI 自己拼
-              <code>/v1/messages</code>，填完整端点会 404。只认
-              <code>ANTHROPIC_API_KEY</code> 的客户端也可以改用该变量（网关同时接受
-              <code>x-api-key</code>）。
+              <code>/v1/messages</code>，填完整端点会 404。
             </CtrlHint>
           </div>
 
@@ -458,7 +436,6 @@ ANTHROPIC_MODEL=${model}`}</pre>
 
 client = OpenAI(
     base_url="${openaiBase}",
-    api_key="${k}",
 )
 
 resp = client.chat.completions.create(
@@ -479,7 +456,7 @@ resp = client.chat.completions.create(
         </div>
 
         <div className="msg ok" style={{ marginTop: 14 }}>
-          密钥即面板登录密钥（WB2A_API_KEY）；网关子密钥在「供应商与密钥」页创建，供分发给他人使用。
+          接入时只需填写地址与模型名，不配置访问令牌。
           模型别名/前缀由网关路由：<code>cn:</code> 走国区账号池，<code>global:</code> 走国际版，
           <code>名称:</code> 走对应聚合供应商。
         </div>
@@ -490,7 +467,6 @@ resp = client.chat.completions.create(
           <div className="connect-card">
             <h4>① 添加供应商</h4>
             <pre>{`curl -X POST ${origin}/api/panel/providers \\
-  -H "Authorization: Bearer ${k}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "name": "myvendor",
@@ -508,7 +484,6 @@ resp = client.chat.completions.create(
           <div className="connect-card">
             <h4>② 用供应商前缀调用</h4>
             <pre>{`curl ${chatUrl} \\
-  -H "Authorization: Bearer ${k}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "myvendor:模型名",
@@ -524,7 +499,6 @@ resp = client.chat.completions.create(
           <div className="connect-card">
             <h4>③ 实测与子密钥授权</h4>
             <pre>{`curl -X POST ${origin}/api/panel/models/test \\
-  -H "Authorization: Bearer ${k}" \\
   -H "Content-Type: application/json" \\
   -d '{"model": "myvendor:模型名"}'`}</pre>
             <CtrlHint>
@@ -550,8 +524,7 @@ resp = client.chat.completions.create(
             <div>
               <b>invalid or missing api key</b>
               <p>
-                没带鉴权头或 Key 不正确。OpenAI 风格用 <code>Authorization: Bearer &lt;Key&gt;</code>，
-                Anthropic 风格用 <code>x-api-key: &lt;Key&gt;</code>；粘贴时不要带引号和空格。
+                网关鉴权已配置。请按部署环境核对网关设置；本页接入配置只需 Base URL 和模型名。
               </p>
             </div>
           </div>

@@ -255,19 +255,40 @@ try {
   };
   db.requestLog.findUnique = async ({ where, select }: any) => {
     if (where.id !== detailEntry.id) return null;
-    assert.equal(select.requestMessages, true);
-    assert.equal(select.responseMessage, true);
     return Object.fromEntries(Object.keys(select).map((key) => [key, (detailEntry as any)[key]]));
   };
   const { GET: getLogDetail } = await import(
     "../src/app/api/panel/request_logs/[id]/route.ts"
   );
+  process.env.WB2A_SUPER_PASSWORD = "detail-test-password";
   let detailResp = await getLogDetail(
     new Request("https://gateway.invalid/api/panel/request_logs/log-detail-1"),
     { params: Promise.resolve({ id: detailEntry.id }) },
   );
+  assert.equal(detailResp.status, 200, "普通详情无需超级密码");
+  let detailBody = await detailResp.json() as any;
+  assert.equal(detailBody.ok, true);
+  assert.equal("requestMessages" in detailBody.entry, false, "普通详情不得返回请求对话");
+  assert.equal("responseMessage" in detailBody.entry, false, "普通详情不得返回回复对话");
+  assert.equal(detailBody.entry.errorDetail, detailEntry.errorDetail);
+  assert.deepEqual(detailBody.entry.parameterOverrides, detailEntry.parameterOverrides);
+  assert.deepEqual(detailBody.entry.attemptDetails, detailEntry.attemptDetails);
+  detailResp = await getLogDetail(
+    new Request("https://gateway.invalid/api/panel/request_logs/log-detail-1?dialog=1"),
+    { params: Promise.resolve({ id: detailEntry.id }) },
+  );
+  assert.equal(detailResp.status, 403, "查看对话未提供超级密码时必须拒绝");
+  detailResp = await getLogDetail(
+    new Request("https://gateway.invalid/api/panel/request_logs/log-detail-1?dialog=1&super_password=wrong"),
+    { params: Promise.resolve({ id: detailEntry.id }) },
+  );
+  assert.equal(detailResp.status, 403, "错误超级密码必须拒绝");
+  detailResp = await getLogDetail(
+    new Request("https://gateway.invalid/api/panel/request_logs/log-detail-1?dialog=1&super_password=detail-test-password"),
+    { params: Promise.resolve({ id: detailEntry.id }) },
+  );
   assert.equal(detailResp.status, 200);
-  const detailBody = await detailResp.json() as any;
+  detailBody = await detailResp.json() as any;
   assert.equal(detailBody.ok, true);
   assert.deepEqual(detailBody.entry.requestMessages, detailEntry.requestMessages);
   assert.deepEqual(detailBody.entry.responseMessage, detailEntry.responseMessage);
@@ -282,7 +303,7 @@ try {
   const { POST: createProvider } = await import("../src/app/api/panel/providers/route.ts");
   for (const name of ["cn", "global"]) {
     const resp = await createProvider(new Request("https://gateway.invalid/api/panel/providers", {
-      method: "POST", body: JSON.stringify({ name, base_url: "https://example.invalid", key: "fake" }),
+      method: "POST", body: JSON.stringify({ name, base_url: "https://example.invalid", key: "fake", super_password: "detail-test-password" }),
     }));
     assert.equal(resp.status, 400);
   }
@@ -298,5 +319,6 @@ try {
   globalThis.fetch = oldFetch;
   if (oldKey === undefined) delete process.env.WB2A_API_KEY;
   else process.env.WB2A_API_KEY = oldKey;
+  delete process.env.WB2A_SUPER_PASSWORD;
   delete (globalThis as any).prisma;
 }

@@ -252,7 +252,9 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
   const [healthDays, setHealthDays] = useState(3);
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
-    try { setStats(await reqCached<Stats>("database", { force: refresh })); }
+    // QPS 趋势 5 分钟一个采样点，前端 1 小时缓存会让曲线滞后近一小时。
+    // 页面打开/手动刷新时短缓存（60s）拉新，表格静态指标仍走服务端 1h 缓存。
+    try { setStats(await reqCached<Stats>("database", { force: refresh, ttlMs: 60_000 })); }
     catch (e) { flash("err", e instanceof Error ? e.message : String(e)); }
     finally { setLoading(false); }
   }, [flash]);

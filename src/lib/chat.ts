@@ -44,7 +44,7 @@ import { tokensPerSecond } from "./upstream/usage";
 import { currentModelRate } from "./upstream/modelCatalog";
 import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
-import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import { assistantMessageForLog, errorText, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, responseMessageFromObject, type AttemptDetail } from "./request-log-detail";
+import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import { assistantMessageForLog, errorText, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, responseMessageFromObject, sanitizeRequestLogData, type AttemptDetail } from "./request-log-detail";
 
 import { sleepAbortable } from "./backoff";
 
@@ -242,8 +242,11 @@ async function recordRequestLog(r: {
   attemptDetails?: unknown;
 }, logRef = ""): Promise<boolean> {
   try {
+    const data = logDialogEnabled()
+      ? r
+      : { ...r, requestMessages: undefined, responseMessage: undefined };
     const row = await prisma.requestLog.create({
-      data: (logDialogEnabled() ? r : { ...r, requestMessages: undefined, responseMessage: undefined }) as never,
+      data: sanitizeRequestLogData(data) as never,
       select: { id: true },
     });
     markRunlogPersisted(logRef, row.id);

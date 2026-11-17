@@ -3,7 +3,17 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { req, fmtNum, fmtClock, fmtDateTime, useAutoRefresh, usePanelRefresh } from "../lib";
 import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
+import { SuperPasswordModal } from "../components/superPassword";
 import { errKindLabel, knownText, uaDisplay } from "@/lib/logfmt";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 
 interface LogEntry {
   id?: string;
@@ -191,6 +201,74 @@ function mergeRequests(prev: ReqLog[], next: ReqLog[]): ReqLog[] {
   out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.id.localeCompare(a.id));
   return out.slice(0, REQUEST_PAGE);
 }
+interface LogPageResponse<T> {
+  entries: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  mode?: string;
+}
+
+function pageItems(page: number, totalPages: number): (number | "ellipsis")[] {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1);
+  const candidates = [1, page - 1, page, page + 1, totalPages]
+    .filter((value) => value >= 1 && value <= totalPages);
+  const pages = [...new Set(candidates)].sort((a, b) => a - b);
+  const items: (number | "ellipsis")[] = [];
+  pages.forEach((value, index) => {
+    if (index > 0 && value - pages[index - 1] > 1) items.push("ellipsis");
+    items.push(value);
+  });
+  return items;
+}
+
+function LogPagination({ page, total, totalPages, loading, onPageChange }: {
+  page: number;
+  total: number;
+  totalPages: number;
+  loading: boolean;
+  onPageChange: (page: number) => void;
+}) {
+  const go = (event: React.SyntheticEvent<HTMLAnchorElement>, next: number) => {
+    event.preventDefault();
+    if (!loading && next >= 1 && next <= totalPages && next !== page) onPageChange(next);
+  };
+  const keyGo = (event: React.KeyboardEvent<HTMLAnchorElement>, next: number) => {
+    if (event.key === "Enter" || event.key === " ") go(event, next);
+  };
+  return (
+    <div className="log-pagination">
+      <span className="dim">共 {total.toLocaleString("zh-CN")} 条 · 第 {page} / {totalPages} 页</span>
+      <Pagination aria-label="日志分页">
+        <PaginationContent>
+          <PaginationItem>
+            <PaginationPrevious text="上一页" href="#" aria-label="上一页"
+              aria-disabled={loading || page <= 1} tabIndex={loading || page <= 1 ? -1 : 0}
+              onClick={(event) => go(event, page - 1)}
+              onKeyDown={(event) => keyGo(event, page - 1)} />
+          </PaginationItem>
+          {pageItems(page, totalPages).map((item, index) => (
+            <PaginationItem key={item === "ellipsis" ? `ellipsis-${index}` : item}>
+              {item === "ellipsis" ? <PaginationEllipsis /> : (
+                <PaginationLink href="#" isActive={item === page} aria-label={`第 ${item} 页`}
+                  aria-disabled={loading} tabIndex={loading ? -1 : 0}
+                  onClick={(event) => go(event, item)}
+                  onKeyDown={(event) => keyGo(event, item)}>{item}</PaginationLink>
+              )}
+            </PaginationItem>
+          ))}
+          <PaginationItem>
+            <PaginationNext text="下一页" href="#" aria-label="下一页"
+              aria-disabled={loading || page >= totalPages} tabIndex={loading || page >= totalPages ? -1 : 0}
+              onClick={(event) => go(event, page + 1)}
+              onKeyDown={(event) => keyGo(event, page + 1)} />
+          </PaginationItem>
+        </PaginationContent>
+      </Pagination>
+    </div>
+  );
+}
 
 function recordList(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
@@ -313,29 +391,61 @@ function DialogMessage({ msg }: { msg: Record<string, unknown> }) {
   );
 }
 
-function RequestLogDetailView({ entry, loading, error }: {
+function RequestLogDetailView({ entry, loading, error, onRequestDialog }: {
   entry?: ReqLogDetail;
   loading: boolean;
   error?: string;
+  onRequestDialog: () => void;
 }) {
+  const [roleFilter, setRoleFilter] = useState("all");
   if (loading) return <div className="log-detail-state"><LoadingIndicator inline label="正在加载详情…" /></div>;
   if (error) return <div className="log-detail-state err">{error}</div>;
   if (!entry) return <div className="log-detail-state">暂无详情</div>;
 
   const overrides = recordList(entry.parameterOverrides);
   const attempts = recordList(entry.attemptDetails);
+  const messages = [
+    ...recordList(entry.requestMessages),
+    ...(entry.responseMessage && typeof entry.responseMessage === "object" && !Array.isArray(entry.responseMessage)
+      ? [entry.responseMessage as Record<string, unknown>] : []),
+  ];
+  const roles = [...new Set(messages.map((m) => typeof m["role"] === "string" && m["role"] ? m["role"] as string : "message"))];
+  const visibleMessages = roleFilter === "all"
+    ? messages
+    : messages.filter((m) => (typeof m["role"] === "string" && m["role"] ? m["role"] : "message") === roleFilter);
+  const dialogLoaded = entry.requestMessages !== undefined || entry.responseMessage !== undefined;
+  const hasDialog = Array.isArray(entry.requestMessages) || entry.responseMessage != null;
 
   return (
     <div className="log-detail">
       <LogSection title="对话记录"
-        empty={!Array.isArray(entry.requestMessages) && entry.responseMessage == null}
+        empty={dialogLoaded && !hasDialog}
         emptyText="未记录（旧日志或已按保留策略清理）">
-        <div className="log-dialog">
-          {recordList(entry.requestMessages).map((m, i) => <DialogMessage key={"q" + i} msg={m} />)}
-          {entry.responseMessage && typeof entry.responseMessage === "object" && !Array.isArray(entry.responseMessage)
-            ? <DialogMessage msg={entry.responseMessage as Record<string, unknown>} />
-            : null}
-        </div>
+        {!dialogLoaded ? (
+          <div className="log-detail-state">
+            <div style={{ marginBottom: 10 }}>对话内容受超级密码保护，普通日志详情可直接查看。</div>
+            <button type="button" className="btn xs" onClick={(event) => {
+              event.stopPropagation();
+              onRequestDialog();
+            }}>验证并查看对话记录</button>
+          </div>
+        ) : <>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <label className="dim" htmlFor={`dialog-role-${entry.id}`} style={{ fontSize: 12 }}>角色筛选</label>
+            <select id={`dialog-role-${entry.id}`} className="select" style={{ width: 150 }} value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}>
+              <option value="all">全部角色（{messages.length}）</option>
+              {roles.map((role) => <option key={role} value={role}>
+                {ROLE_META[role]?.label ?? role}（{messages.filter((m) => (m["role"] || "message") === role).length}）
+              </option>)}
+            </select>
+          </div>
+          {visibleMessages.length === 0
+            ? <div className="log-detail-empty">当前角色暂无对话内容</div>
+            : <div className="log-dialog">
+              {visibleMessages.map((m, i) => <DialogMessage key={"m" + i} msg={m} />)}
+            </div>}
+        </>}
       </LogSection>
 
       <LogSection title="失败详情" empty={!entry.errorDetail}>
@@ -415,6 +525,9 @@ export function LogsView({ flash }: { flash: Flash }) {
   const [details, setDetails] = useState<Record<string, ReqLogDetail>>({});
   const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
+  const [detailAuthId, setDetailAuthId] = useState<string | null>(null);
+  const [detailAuthBusy, setDetailAuthBusy] = useState(false);
+  const [detailAuthError, setDetailAuthError] = useState("");
   const [loading, setLoading] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -425,6 +538,12 @@ export function LogsView({ flash }: { flash: Flash }) {
   const reqSinceRef = useRef(0);
   const requestSeqRef = useRef(0);
   const [cacheStats, setCacheStats] = useState<CacheStatsResp | null>(null);
+  const [pagination, setPagination] = useState({
+    runtime: { page: 1, total: 0, totalPages: 1 },
+    requests: { page: 1, total: 0, totalPages: 1 },
+  });
+  const runtimePage = pagination.runtime.page;
+  const requestPage = pagination.requests.page;
 
   const load = useCallback(async (delta = false) => {
     const seq = ++requestSeqRef.current;
@@ -436,12 +555,28 @@ export function LogsView({ flash }: { flash: Flash }) {
         if (seq !== requestSeqRef.current) return;
         setCacheStats(r);
       } else if (mode === "runtime") {
-        const since = delta ? runtimeSinceRef.current : 0;
-        const r = await req<{ entries: LogEntry[]; mode?: string }>("logs" + (since ? "?since=" + since : ""));
+        const since = delta && runtimePage === 1 ? runtimeSinceRef.current : 0;
+        const q = new URLSearchParams({ limit: String(RUNTIME_PAGE) });
+        if (since) q.set("since", String(since));
+        else {
+          q.set("page", String(runtimePage));
+          q.set("channel", ch);
+        }
+        const r = await req<LogPageResponse<LogEntry>>("logs?" + q.toString());
         if (seq !== requestSeqRef.current) return;
-        const incoming = r.entries.filter((e) => ch === "all" || e.ch === ch);
-        if (since && r.mode === "delta") setLogs((prev) => mergeRuntime(prev, incoming));
-        else setLogs(incoming);
+        if (since && r.mode === "delta") {
+          setLogs((prev) => mergeRuntime(prev, r.entries));
+          setPagination((prev) => ({
+            ...prev,
+            runtime: { ...prev.runtime, total: prev.runtime.total + r.entries.length },
+          }));
+        } else {
+          setLogs(r.entries);
+          setPagination((prev) => ({
+            ...prev,
+            runtime: { page: r.page, total: r.total, totalPages: r.totalPages },
+          }));
+        }
         const maxTs = r.entries.reduce((m, e) => (e.ts > m ? e.ts : m), 0);
         if (maxTs > runtimeSinceRef.current) runtimeSinceRef.current = maxTs;
       } else {
@@ -456,12 +591,27 @@ export function LogsView({ flash }: { flash: Flash }) {
         // 否则会把「旧页里不满足新条件下拉」的行继续留在表上。
         const filtered = !!(filter.account || filter.model || filter.outcome ||
           filter.key || filter.err || ipFilter);
-        const useDelta = delta && !filtered && reqSinceRef.current > 0;
+        const useDelta = delta && !filtered && requestPage === 1 && reqSinceRef.current > 0;
         if (useDelta) q.set("since", String(reqSinceRef.current));
-        const r = await req<{ entries: ReqLog[]; mode?: string }>("request_logs?" + q.toString());
+        else {
+          q.set("page", String(requestPage));
+          q.set("limit", String(REQUEST_PAGE));
+        }
+        const r = await req<LogPageResponse<ReqLog>>("request_logs?" + q.toString());
         if (seq !== requestSeqRef.current) return;
-        if (useDelta && r.mode === "delta") setReqs((prev) => mergeRequests(prev, r.entries));
-        else setReqs(r.entries);
+        if (useDelta && r.mode === "delta") {
+          setReqs((prev) => mergeRequests(prev, r.entries));
+          setPagination((prev) => ({
+            ...prev,
+            requests: { ...prev.requests, total: prev.requests.total + r.entries.length },
+          }));
+        } else {
+          setReqs(r.entries);
+          setPagination((prev) => ({
+            ...prev,
+            requests: { page: r.page, total: r.total, totalPages: r.totalPages },
+          }));
+        }
         const maxAt = r.entries.reduce((m, e) => {
           const t = Date.parse(e.at);
           return t > m ? t : m;
@@ -477,7 +627,7 @@ export function LogsView({ flash }: { flash: Flash }) {
     } finally {
       if (seq === requestSeqRef.current) setLoading(false);
     }
-  }, [mode, filter, ch, ipFilter, flash]);
+  }, [mode, filter, ch, ipFilter, runtimePage, requestPage, flash]);
   useEffect(() => {
     runtimeSinceRef.current = 0;
     reqSinceRef.current = 0;
@@ -487,6 +637,13 @@ export function LogsView({ flash }: { flash: Flash }) {
   useAutoRefresh(() => { void load(true); }, 30_000);
   usePanelRefresh(() => { void load(false); });
 
+  const resetRuntimePage = () => setPagination((prev) => ({
+    ...prev, runtime: { ...prev.runtime, page: 1 },
+  }));
+  const resetRequestPage = () => setPagination((prev) => ({
+    ...prev, requests: { ...prev.requests, page: 1 },
+  }));
+
   useEffect(() => {
     const view = logViewRef.current;
     if (mode === "runtime" && followLogs && view) {
@@ -494,27 +651,25 @@ export function LogsView({ flash }: { flash: Flash }) {
     }
   }, [logs, mode, followLogs]);
 
-  const loadDetail = useCallback((id: string) => {
+  const loadDetail = useCallback(async (id: string): Promise<boolean> => {
     setDetailLoading((prev) => ({ ...prev, [id]: true }));
     setDetailErrors((prev) => ({ ...prev, [id]: "" }));
-    req<{ entry: ReqLogDetail }>("request_logs/" + encodeURIComponent(id))
-      .then((r) => {
-        setDetails((prev) => ({ ...prev, [id]: r.entry }));
-      })
-      .catch((e) => {
-        const raw = e instanceof Error ? e.message : String(e);
-        // 详情为空时保留当前日志行与展开状态，仅展示空状态文案。
-        if (raw === "request_log_not_found") {
-          setDetailErrors((prev) => ({ ...prev, [id]: "暂无相关" }));
-        } else {
-          setDetailErrors((prev) => ({ ...prev, [id]: raw }));
-          flash("err", raw);
-        }
-      })
-      .finally(() => {
-        setDetailLoading((prev) => ({ ...prev, [id]: false }));
-      });
-  }, [flash]);
+    try {
+      const r = await req<{ entry: ReqLogDetail }>("request_logs/" + encodeURIComponent(id));
+      setDetails((prev) => ({ ...prev, [id]: r.entry }));
+      return true;
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      if (raw === "request_log_not_found") {
+        setDetailErrors((prev) => ({ ...prev, [id]: "暂无相关" }));
+        return true;
+      }
+      setDetailErrors((prev) => ({ ...prev, [id]: raw }));
+      return false;
+    } finally {
+      setDetailLoading((prev) => ({ ...prev, [id]: false }));
+    }
+  }, []);
 
   const toggleDetail = (id: string) => {
     if (expanded === id) {
@@ -522,30 +677,63 @@ export function LogsView({ flash }: { flash: Flash }) {
       return;
     }
     setExpanded(id);
-    if (!details[id] && !detailLoading[id]) loadDetail(id);
+    if (!details[id] && !detailLoading[id]) {
+      void loadDetail(id);
+    }
+  };
+
+  const requestDialog = (id: string) => {
+    setDetailAuthError("");
+    setDetailAuthId(id);
+  };
+
+  const confirmDetailAuth = async (password: string) => {
+    if (!detailAuthId) return;
+    setDetailAuthBusy(true);
+    setDetailAuthError("");
+    try {
+      const q = new URLSearchParams({ dialog: "1", super_password: password });
+      const r = await req<{ entry: ReqLogDetail }>(
+        "request_logs/" + encodeURIComponent(detailAuthId) + "?" + q);
+      // 只合并受保护的对话字段，保留已显示的普通诊断详情。
+      setDetails((prev) => ({
+        ...prev,
+        [detailAuthId]: {
+          ...prev[detailAuthId],
+          ...r.entry,
+          requestMessages: r.entry.requestMessages,
+          responseMessage: r.entry.responseMessage,
+        },
+      }));
+      setDetailAuthId(null);
+    } catch {
+      setDetailAuthError("验证失败，请检查超级密码后重试");
+    } finally {
+      setDetailAuthBusy(false);
+    }
   };
 
   return (
     <Box title={mode === "requests" ? "请求日志" : mode === "cache" ? "缓存详细" : "运行日志"} busy={loading} extra={<>
-      <button className={"btn xs" + (mode === "requests" ? " primary" : "")} onClick={() => setMode("requests")}>请求日志</button>
-      <button className={"btn xs" + (mode === "runtime" ? " primary" : "")} onClick={() => setMode("runtime")}>运行日志</button>
+      <button className={"btn xs" + (mode === "requests" ? " primary" : "")} onClick={() => { resetRequestPage(); setMode("requests"); }}>请求日志</button>
+      <button className={"btn xs" + (mode === "runtime" ? " primary" : "")} onClick={() => { resetRuntimePage(); setMode("runtime"); }}>运行日志</button>
       <button className={"btn xs" + (mode === "cache" ? " primary" : "")} onClick={() => setMode("cache")}>缓存详细</button>
       {mode === "requests" && <>
         <input className="input" style={{ width: 130 }} placeholder="账号过滤" value={filter.account}
-          onChange={(e) => setFilter({ ...filter, account: e.target.value })} />
+          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, account: e.target.value }); }} />
         <input className="input" style={{ width: 130 }} placeholder="模型过滤" value={filter.model}
-          onChange={(e) => setFilter({ ...filter, model: e.target.value })} />
+          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, model: e.target.value }); }} />
         <select className="select" style={{ width: 104 }} value={filter.outcome}
-          onChange={(e) => setFilter({ ...filter, outcome: e.target.value })}>
+          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, outcome: e.target.value }); }}>
           <option value="">全部结果</option><option value="ok">仅成功</option><option value="error">仅失败</option>
         </select>
         <input className="input" style={{ width: 110 }} placeholder="IP 过滤" value={ipFilter}
-          onChange={(e) => setIpFilter(e.target.value)} />
+          onChange={(e) => { resetRequestPage(); setIpFilter(e.target.value); }} />
         <input className="input" style={{ width: 110 }} placeholder="Key 过滤" value={filter.key}
-          onChange={(e) => setFilter({ ...filter, key: e.target.value })} />
+          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, key: e.target.value }); }} />
         <input className="input" style={{ width: 150 }} placeholder="报错内容过滤" value={filter.err}
           title="按上游报错正文检索，如 12153 / rate limit / WAF"
-          onChange={(e) => setFilter({ ...filter, err: e.target.value })} />
+          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, err: e.target.value }); }} />
       </>}
       <span className="dim" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
         {loading ? <LoadingIndicator inline label="正在刷新…" /> : loadError ? "刷新失败，请重试" : lastLoadedAt
@@ -557,7 +745,7 @@ export function LogsView({ flash }: { flash: Flash }) {
       </button>
       {mode === "runtime" && <>
         <select className="select" style={{ width: 104 }} value={ch}
-          onChange={(e) => setCh(e.target.value as typeof ch)}>
+          onChange={(e) => { resetRuntimePage(); setCh(e.target.value as typeof ch); }}>
           <option value="all">全部频道</option><option value="task">任务</option>
           <option value="call">调用</option><option value="probe">探测</option>
           <option value="sys">系统</option>
@@ -585,6 +773,10 @@ export function LogsView({ flash }: { flash: Flash }) {
               }</span> {l.text}</div>
             ))}
           </div>
+          <LogPagination {...pagination.runtime} loading={loading}
+            onPageChange={(page) => setPagination((prev) => ({
+              ...prev, runtime: { ...prev.runtime, page },
+            }))} />
         </div>
       ) : (
         <div className="tbl-wrap">
@@ -680,6 +872,7 @@ export function LogsView({ flash }: { flash: Flash }) {
                             entry={details[r.id]}
                             loading={!!detailLoading[r.id]}
                             error={detailErrors[r.id] || undefined}
+                            onRequestDialog={() => requestDialog(r.id)}
                           />
                         </td>
                       </tr>
@@ -689,8 +882,21 @@ export function LogsView({ flash }: { flash: Flash }) {
               })}
             </tbody>
           </table>
+          <LogPagination {...pagination.requests} loading={loading}
+            onPageChange={(page) => setPagination((prev) => ({
+              ...prev, requests: { ...prev.requests, page },
+            }))} />
         </div>
       )}
+      {detailAuthId && <SuperPasswordModal
+        title="查看对话记录"
+        description="验证超级密码后查看本次请求与回复的对话内容。密码仅用于本次请求，不会保存。"
+        confirmText="验证并查看"
+        busy={detailAuthBusy}
+        error={detailAuthError}
+        onCancel={() => { if (!detailAuthBusy) { setDetailAuthId(null); setDetailAuthError(""); } }}
+        onConfirm={confirmDetailAuth}
+      />}
     </Box>
   );
 }

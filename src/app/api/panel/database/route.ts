@@ -15,6 +15,17 @@ export const maxDuration = 300;
 const CACHE_MS = 3_600_000;
 const LIMIT_GB = Number(process.env.DB_SIZE_LIMIT_GB || 5);
 let cache: { at: number; data: Record<string, unknown> } | null = null;
+// QPS 趋势是 5 分钟粒度的实时指标：1 小时的整体缓存会让面板看到滞后近一小时的曲线。
+// 单独给它开短 TTL 缓存，主接口每次刷新时按需拉新并只替换 platform 字段。
+const QPS_CACHE_MS = 60_000;
+let qpsCache: { at: number; platform: Record<string, unknown> | null } | null = null;
+
+async function platformStatsFresh(): Promise<Record<string, unknown> | null> {
+  if (qpsCache && Date.now() - qpsCache.at < QPS_CACHE_MS) return qpsCache.platform;
+  const platform = await getCloudbasePlatformStats();
+  qpsCache = { at: Date.now(), platform: platform as Record<string, unknown> | null };
+  return qpsCache.platform;
+}
 
 // 缓存快照（供面板「缓存详细」页展示）：是否命中、剩余 TTL。
 export function databaseCacheStats(): { cached: boolean; ttlMs: number; cacheMs: number } {
@@ -105,7 +116,12 @@ function mergeGrowthSeries(series: GrowthSeries[]): GrowthSeries {
 // CloudBase PostgREST 没有 pg_catalog 访问权限：库大小/连接数/版本拿不到，
 // 业务行数走 DAL 主键分页计数；旧容量字段保留采样估算，资源点与 QPS 走 CAM 接口。
 async function readStatsDal(): Promise<Record<string, unknown>> {
-  if (cache && Date.now() - cache.at < CACHE_MS) return cache.data;
+  if (cache && Date.now() - cache.at < CACHE_MS) {
+    // 主缓存命中时单独刷新 QPS：表格行数/体积这类静态指标走 1h 缓存，
+    // QPS 曲线每次按 60s 短缓存拉新，保证趋势图与上游采样同步。
+    const platform = await platformStatsFresh();
+    return { ...cache.data, platform };
+  }
   const TABLES: { name: string; model: keyof typeof dal }[] = [
     { name: "Account", model: "account" },
     { name: "AccountState", model: "accountState" },
@@ -159,7 +175,7 @@ async function readStatsDal(): Promise<Record<string, unknown>> {
   }).catch(() => 0);
   const requestLogs = tables.find((t) => t.name === "RequestLog")?.rows ?? 0;
   const totalBytes = tables.reduce((s, t) => s + t.totalBytes, 0);
-  const platform = await getCloudbasePlatformStats();
+  const platform = await platformStatsFresh();
   let host = "";
   try { host = new URL(process.env.CLOUDBASE_POSTGREST_URL || "").hostname; } catch { /* ignore */ }
   const data = {

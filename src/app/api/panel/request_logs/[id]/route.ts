@@ -1,5 +1,5 @@
 // GET /api/panel/request_logs/[id] — 按需读取诊断详情与对话正文（受裁剪上限约束）。
-import { fail, ok, panelAuth } from "@/lib/panel-auth";
+import { fail, ok, panelAuth, verifySuperPassword } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -44,6 +44,9 @@ const DETAIL_SELECT = {
   errorDetail: true,
   parameterOverrides: true,
   attemptDetails: true,
+} as const;
+
+const DIALOG_SELECT = {
   requestMessages: true,
   responseMessage: true,
 } as const;
@@ -91,6 +94,12 @@ export async function GET(
 ) {
   const auth = await panelAuth(req);
   if (auth) return auth;
+  const search = new URL(req.url).searchParams;
+  const includeDialog = search.get("dialog") === "1";
+  // 普通诊断详情直接可读；仅对话正文需要超级密码。
+  if (includeDialog && !verifySuperPassword(search.get("super_password"))) {
+    return fail(403, "超级密码错误");
+  }
 
   const { id } = await ctx.params;
   if (!id) return fail(404, "request_log_not_found");
@@ -102,15 +111,23 @@ export async function GET(
   // 行已被保留期整行删除（默认 7 天）时列表缓存里可能还留着旧行；
   // 错误码保持稳定，由前端映射为可读提示并从列表移除该死行。
   if (!entry) return fail(404, "request_log_not_found");
-  return ok({
-    entry: {
-      ...entry,
-      errMsg: clipText(entry.errMsg, MAX_TEXT),
-      errorDetail: clipText(entry.errorDetail, MAX_ERROR_DETAIL),
-      parameterOverrides: clipJson(entry.parameterOverrides),
-      attemptDetails: clipAttempts(entry.attemptDetails),
-      requestMessages: clipJson(entry.requestMessages),
-      responseMessage: clipJson(entry.responseMessage),
-    },
-  });
+  const detail = {
+    ...entry,
+    errMsg: clipText(entry.errMsg, MAX_TEXT),
+    errorDetail: clipText(entry.errorDetail, MAX_ERROR_DETAIL),
+    parameterOverrides: clipJson(entry.parameterOverrides),
+    attemptDetails: clipAttempts(entry.attemptDetails),
+  };
+  if (includeDialog) {
+    const dialog = await prisma.requestLog.findUnique({
+      where: { id },
+      select: DIALOG_SELECT,
+    });
+    return ok({ entry: {
+      ...detail,
+      requestMessages: clipJson(dialog?.requestMessages),
+      responseMessage: clipJson(dialog?.responseMessage),
+    } });
+  }
+  return ok({ entry: detail });
 }

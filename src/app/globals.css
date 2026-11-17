@@ -999,6 +999,26 @@ body {
 .logview .ln.e { color: #fca5a5; }
 .logview .ln.w { color: #fcd34d; }
 
+/* 数字页码：保留管理台密度，窄屏允许横向滚动而不挤压日志表格。 */
+.log-pagination {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 8px 4px; font-size: 12px; min-width: 0;
+}
+.log-pagination > span { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.log-pagination nav { width: auto; margin: 0; overflow-x: auto; }
+.log-pagination [data-slot="pagination-content"] { min-width: max-content; }
+.log-pagination [data-slot="button"] { font-family: var(--mono); color: var(--fg); }
+.log-pagination [data-slot="button"][data-active="true"] {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--accent);
+}
+.log-pagination [aria-disabled="true"] { opacity: .45; pointer-events: none; }
+@media (max-width: 720px) {
+  .log-pagination { flex-direction: column; align-items: stretch; gap: 8px; }
+  .log-pagination > span { text-align: center; }
+  .log-pagination nav { width: 100%; }
+  .log-pagination [data-slot="pagination-content"] { justify-content: center; min-width: 100%; }
+}
+
 /* 请求日志详情：大字段按需加载，正文始终在容器内换行/滚动。 */
 .log-detail {
   display: flex; flex-direction: column; gap: 12px; min-width: 0;

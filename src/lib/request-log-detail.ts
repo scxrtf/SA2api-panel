@@ -17,6 +17,24 @@ const MAX_OVERRIDE_ITEMS = 200;
 const MAX_OVERRIDE_VALUE_CHARS = 4_000;
 const MAX_DEPTH = 12;
 
+// PostgreSQL text / jsonb 不接受 NUL（U+0000）。请求正文、工具参数和上游错误
+// 都可能携带它；在 RequestLog 写入边界统一移除，避免 REST DAL 以 22P05 拒绝整行。
+// 只处理 NUL，不改写其他 Unicode、反斜杠或转义序列。
+export function sanitizeRequestLogData<T>(value: T, seen = new WeakSet<object>()): T {
+  if (typeof value === "string") return value.replace(/\0/g, "") as T;
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[循环引用]" as T;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeRequestLogData(item, seen)) as T;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    out[key.replace(/\0/g, "")] = sanitizeRequestLogData(item, seen);
+  }
+  return out as T;
+}
+
 // 对话正文（requestMessages / responseMessage）始终落库：面板「请求日志」对话
 // 记录区块依赖这两列。单行体积已由 MAX_MESSAGE_CHARS（120K）+ 图片脱敏兜底，
 // 保留清理任务（retention）负责按保留期置空旧行控制磁盘。

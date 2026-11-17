@@ -12,7 +12,7 @@ export interface StatusLogEntry {
 
 // 默认返回条数。面板一次刷新取 200 条已足够铺满视口；调大只会线性放大 Egress。
 const DEFAULT_LIMIT = 200;
-// 单次数据库查询上限：与内存环形缓冲（CAP=500）对齐并压低到 200。
+// 增量轮询的单次数据库查询上限。页码模式按实际 skip + pageSize 读取所需窗口。
 const MAX_QUERY_TAKE = 200;
 // 调用日志只看最近 7 天：更老的行走 retention 清理，查询面收窄后扫描堆页更少。
 const CALL_LOG_WINDOW_MS = 7 * 24 * 3600_000;
@@ -115,6 +115,112 @@ export async function listStatusLog(limit = DEFAULT_LIMIT, since?: Date): Promis
 
   entries.sort((a, b) => a.ts - b.ts || a.id.localeCompare(b.id));
   return entries.slice(-take);
+}
+
+export interface StatusLogPage {
+  entries: StatusLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+// listStatusLogPage 在内存行与两张持久化表合并后统一计算页码。
+// 已落库内存行统一由数据库提供，避免同一条记录在不同页重复出现；数据库故障时
+// 对应来源回退到内存，系统/任务行始终保留。channel 在合并前过滤，页码即筛选后页码。
+export async function listStatusLogPage(
+  limit = DEFAULT_LIMIT,
+  page = 1,
+  channel: StatusLogChannel | "all" = "all",
+): Promise<StatusLogPage> {
+  const pageSize = Number.isFinite(limit)
+    ? Math.max(1, Math.min(500, Math.trunc(limit)))
+    : DEFAULT_LIMIT;
+  const requestedPage = Number.isFinite(page) ? Math.max(1, Math.trunc(page)) : 1;
+  const skip = (requestedPage - 1) * pageSize;
+  const required = skip + pageSize;
+  const callSince = new Date(Date.now() - CALL_LOG_WINDOW_MS);
+  const includeProbe = channel === "all" || channel === "probe";
+  const includeCall = channel === "all" || channel === "call";
+
+  const [healthResult, callResult] = await Promise.allSettled([
+    includeProbe ? prisma.modelHealthCheck.findMany({
+      where: { checkedAt: { gte: callSince } },
+      orderBy: [{ checkedAt: "desc" }, { id: "desc" }],
+      take: required,
+      select: {
+        id: true, modelKey: true, ok: true, status: true, latencyMs: true,
+        completionTokens: true, tokensPerSecond: true, errorKind: true,
+        detail: true, source: true, checkedAt: true,
+      },
+    }) : Promise.resolve([]),
+    includeCall ? prisma.requestLog.findMany({
+      where: { at: { gte: callSince } },
+      orderBy: [{ at: "desc" }, { id: "desc" }],
+      take: required,
+      select: {
+        id: true, model: true, realm: true, provider: true, status: true,
+        errKind: true, durationMs: true, completionTok: true, attempts: true,
+        uid: true, slot: true, at: true,
+      },
+    }) : Promise.resolve([]),
+  ]);
+
+  const healthRows = healthResult.status === "fulfilled" ? healthResult.value : null;
+  const callRows = callResult.status === "fulfilled" ? callResult.value : null;
+  const [healthCount, callCount] = await Promise.all([
+    includeProbe && healthRows !== null
+      ? prisma.modelHealthCheck.count({ where: { checkedAt: { gte: callSince } } })
+      : Promise.resolve(0),
+    includeCall && callRows !== null
+      ? prisma.requestLog.count({ where: { at: { gte: callSince } } })
+      : Promise.resolve(0),
+  ]);
+
+  const entries: StatusLogEntry[] = [];
+  // 某个来源读取失败时不计入其数据库总数，内存副本继续作为降级数据源。
+  const memory = runlogSnapshot();
+  let unpersistedMemory = 0;
+
+  memory.forEach((entry, index) => {
+    const ch: StatusLogChannel = entry.ch === "chat" ? "call" : entry.ch;
+    if (channel !== "all" && ch !== channel) return;
+    const persisted = ch === "probe" ? healthRows : ch === "call" ? callRows : undefined;
+    if (entry.persistedId && persisted !== undefined) return;
+    unpersistedMemory++;
+    entries.push({
+      id: "memory:" + entry.ts + ":" + index,
+      ts: entry.ts,
+      ch,
+      text: entry.text,
+    });
+  });
+
+  for (const row of healthRows ?? []) {
+    entries.push({
+      id: "probe:" + row.id,
+      ts: row.checkedAt.getTime(),
+      ch: "probe",
+      text: probeText(row),
+    });
+  }
+  for (const row of callRows ?? []) {
+    entries.push({
+      id: "call:" + row.id,
+      ts: row.at.getTime(),
+      ch: "call",
+      text: callText(row),
+    });
+  }
+
+  const total = healthCount + callCount + unpersistedMemory;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(requestedPage, totalPages);
+  const start = (currentPage - 1) * pageSize;
+  entries.sort((a, b) => b.ts - a.ts || b.id.localeCompare(a.id));
+  const current = entries.slice(start, start + pageSize);
+  current.reverse();
+  return { entries: current, total, page: currentPage, pageSize, totalPages };
 }
 
 function probeText(row: {

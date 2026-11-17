@@ -83,6 +83,30 @@ export async function GET(req: Request) {
   if (to) at["lte"] = to;
   where["at"] = at;
 
+  const requestedPage = parseInt(q.get("page") ?? "", 10);
+  if (q.has("page")) {
+    const pageSize = limit;
+    const page = Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1;
+    const [total, rows] = await Promise.all([
+      prisma.requestLog.count({ where }),
+      prisma.requestLog.findMany({
+        where,
+        select: listSelect,
+        orderBy: [{ at: "desc" }, { id: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const entries = rows.map((row) => ({
+      ...row,
+      errMsg: row.errMsg.length > LIST_ERR_MSG_MAX
+        ? row.errMsg.slice(0, LIST_ERR_MSG_MAX) + "…（详情页看全文）"
+        : row.errMsg,
+    }));
+    return ok({ entries, total, page, pageSize, totalPages, limit, mode: "page" });
+  }
+
   const rows = await prisma.requestLog.findMany({
     where,
     select: listSelect,
