@@ -39,6 +39,8 @@ requires_openai_auth = false
 supports_websockets = false
 ```
 
+如果工作在 WorkBuddy / Chat 兼容通道，Codex 自动声明的可选网页搜索工具会被忽略，普通请求与其他函数工具可继续使用。网关通过 `X-WB2A-Omitted-Tools: web_search` 表明本次没有启用托管搜索。显式指定必须搜索，或重放 `web_search_call`，仍需原生 Responses 模型；关闭 Codex 网页搜索后请开启不含这类历史项的新会话。
+
 ## 能力对照
 
 | HTTP 路径 / 功能 | WorkBuddy / Chat 兼容层 | 原生 Responses 上游 |

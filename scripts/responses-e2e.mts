@@ -152,8 +152,12 @@ try {
   assert.equal((await deleted.json()).deleted, true);
   assert.equal((await send(`/v1/responses/${result.id}`)).status, 404);
   assert.equal(rows.size, 0);
-  const stream = await send("/api/v1/responses/responses", "POST", { model: modelId, input: "stream smoke", stream: true, store: false });
+  const stream = await send("/api/v1/responses/responses", "POST", {
+    model: modelId, input: "stream smoke", stream: true, store: false,
+    tool_choice: "auto", tools: [{ type: "web_search" }], include: ["web_search_call.action.sources"],
+  });
   assert.equal(stream.status, 200);
+  assert.equal(stream.headers.get("x-wb2a-omitted-tools"), "web_search");
   assert.match(await stream.text(), /response\.output_text\.delta.*responses e2e ok.*response\.completed/s);
   console.log(`PASS Next ${development ? "development" : "production"} Responses 405 regressions, HTTP aliases, auth, storage, retrieve/list/delete, and SSE`);
 
@@ -165,7 +169,7 @@ try {
     const cwd = join(home, "project");
     await mkdir(cwd);
     await writeFile(join(home, "config.toml"), [
-      `model = "${modelId}"`, 'model_provider = "fixture"', 'web_search = "disabled"',
+      `model = "${modelId}"`, 'model_provider = "fixture"', 'web_search = "cached"',
       'sandbox_mode = "read-only"', 'approval_policy = "never"',
       // Deliberately paste the full endpoint: the real CLI appends /responses.
       "[model_providers.fixture]", 'name = "Local gateway QA"', `base_url = "${gateway}/v1/responses"`, 'wire_api = "responses"',

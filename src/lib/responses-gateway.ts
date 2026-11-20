@@ -126,11 +126,13 @@ async function dispatch(req: Request, operation: ResponsesOperation, id?: string
     const result = await handleChat({ body: input.chat, sessionBody: local, req,
       inboundHeaders: req.headers, clientIP: (req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "").split(",", 1)[0].trim(),
       ua: req.headers.get("user-agent") ?? "", path: operation === "compact" ? "/v1/responses/compact" : "/v1/responses" });
-    const converted = await bridgeChatResponse(result, operation === "compact" ? { model, store: false } : local, input.aliases, codec, async (response) => {
+    const responseBody = operation === "compact" ? { model, store: false } : input.effectiveBody;
+    const converted = await bridgeChatResponse(result, responseBody, input.aliases, codec, async (response) => {
       if (operation !== "compact" && body.store !== false) {
         await rememberResponse(owner, responseText(response.id), bridgeBackend, model, { response, input: input.input, offset: input.offset });
       }
     });
+    if (input.omittedWebSearch) converted.headers.set("X-WB2A-Omitted-Tools", "web_search");
     if (operation !== "compact" || !converted.ok) return converted;
     const completion = await converted.json() as Obj;
     const summary = responseArray(completion.output).flatMap((item) => responseArray(responseObject(item).content))

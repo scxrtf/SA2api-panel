@@ -13,6 +13,31 @@ const selectedFields = ["temperature", "top_p", "top_logprobs", "parallel_tool_c
   "prompt_cache_retention", "safety_identifier", "user"] as const;
 
 const specified = (value: unknown) => value !== undefined && value !== null;
+const hostedWebSearchTypes = new Set<unknown>(["web_search", "web_search_preview", "web_search_preview_2025_03_11"]);
+const hostedWebSearchIncludes = new Set<unknown>(["web_search_call.action.sources", "web_search_call.results"]);
+
+function requireNativeWebSearch(param: string, reason: string): never {
+  throw new ResponsesError(
+    400, "unsupported_parameter",
+    `${reason} requires a native Responses model. For WorkBuddy, set Codex web_search = "disabled" at the top level and start a new turn without hosted search items.`,
+    param,
+  );
+}
+
+function omitOptionalWebSearch(request: Obj) {
+  if (hostedWebSearchTypes.has(responseObject(request.tool_choice).type)) {
+    requireNativeWebSearch("tool_choice", "Forcing hosted web search");
+  }
+  if (!Array.isArray(request.tools)) return { body: request, omittedWebSearch: false };
+  const tools = request.tools.filter((tool) => !hostedWebSearchTypes.has(responseObject(tool).type));
+  if (tools.length === request.tools.length) return { body: request, omittedWebSearch: false };
+  // Codex advertises this hosted capability even on ordinary coding turns.
+  // The Chat bridge cannot execute it; keep the real client tools and don't
+  // forward the declaration or advertise it back in Responses metadata.
+  const body: Obj = { ...request, tools };
+  if (Array.isArray(request.include)) body.include = request.include.filter((key) => !hostedWebSearchIncludes.has(key));
+  return { body, omittedWebSearch: true };
+}
 
 export function normalizeResponseInput(input: unknown, previous: Obj[]): Obj[] {
   if (input == null) return [];
@@ -24,6 +49,7 @@ export function normalizeResponseInput(input: unknown, previous: Obj[]): Obj[] {
     const param = `input[${index}]`;
     if (!isJSONObject(raw)) invalidResponseRequest("Each input item must be an object.", param);
     const type = raw.type ?? (raw.role ? "message" : "");
+    if (type === "web_search_call") requireNativeWebSearch(`${param}.type`, "Replaying a hosted web search call");
     if (type === "item_reference") {
       const item = known.get(raw.id);
       if (!item) invalidResponseRequest("The referenced item was not found in this response chain.", `${param}.id`);
@@ -108,6 +134,7 @@ function toolDefinitions(raw: unknown) {
   for (const [i, rawTool] of responseArray(raw).entries()) {
     const tool = responseObject(rawTool);
     const path = `tools[${i}]`;
+    if (hostedWebSearchTypes.has(tool.type)) continue;
     if (tool.type === "namespace") {
       const namespace = toolName(tool.name, `${path}.name`);
       if (!Array.isArray(tool.tools)) invalidResponseRequest("Namespace tools must be an array.", `${path}.tools`);
@@ -196,7 +223,8 @@ function chatMessages(input: Obj[], instructions: string, codec: ResponsesCodec)
   return { messages, pending };
 }
 
-export function prepareBridgeInput(body: Obj, history: Obj[], codec: ResponsesCodec, compact = false) {
+export function prepareBridgeInput(request: Obj, history: Obj[], codec: ResponsesCodec, compact = false) {
+  const { body, omittedWebSearch } = omitOptionalWebSearch(request);
   for (const key of ["conversation", "prompt", "context_management", "max_tool_calls", "background_options", "moderation", "personality"]) {
     if (specified(body[key]) && !(Array.isArray(body[key]) && body[key].length === 0)) unsupportedResponseParam(key);
   }
@@ -215,13 +243,14 @@ export function prepareBridgeInput(body: Obj, history: Obj[], codec: ResponsesCo
   if (pending.size) invalidResponseRequest("A tool call is missing its output.", "input");
   if (!messages.length) invalidResponseRequest("An input item or instructions is required.", "input");
   const chat: Obj = { model: body.model, messages, stream: !compact && body.stream === true };
-  const { chat: tools, aliases } = toolDefinitions(compact ? undefined : body.tools);
+  const { chat: tools, aliases } = toolDefinitions(compact ? undefined : request.tools);
+  const result = { chat, aliases, input, offset: history.length, effectiveBody: body, omittedWebSearch };
   if (compact) {
     const task = "Summarize the conversation for another assistant continuing it. Keep key decisions, current state, user constraints, relevant tool findings and remaining work. Write only the handoff summary.";
     messages.unshift({ role: "system", content: instructions ? task + "\nAdditional summary instructions:\n" + instructions : task });
     messages.push({ role: "user", content: "Produce the handoff summary now." });
     chat.max_completion_tokens = 3072;
-    return { chat, aliases, input, offset: history.length };
+    return result;
   }
   for (const key of selectedFields) if (specified(body[key])) chat[key] = body[key];
   if (specified(body.max_output_tokens)) {
@@ -234,8 +263,15 @@ export function prepareBridgeInput(body: Obj, history: Obj[], codec: ResponsesCo
   if (outputText.format != null) chat.response_format = toChatFormat(outputText.format);
   if (typeof outputText.verbosity === "string") chat.verbosity = outputText.verbosity;
   if (tools.length) chat.tools = tools;
-  if (specified(body.tool_choice)) chat.tool_choice = toChatToolChoice(body.tool_choice, aliases);
+  if (omittedWebSearch && !tools.length && body.tool_choice === "required") {
+    requireNativeWebSearch("tool_choice", "Requiring a tool when hosted web search is the only available tool");
+  }
+  if (specified(body.tool_choice)) {
+    const choice = toChatToolChoice(body.tool_choice, aliases);
+    // Chat providers can reject auto/none when no tool definitions accompany it.
+    if (!omittedWebSearch || tools.length || (choice !== "auto" && choice !== "none")) chat.tool_choice = choice;
+  }
   if (include.includes("message.output_text.logprobs") || specified(body.top_logprobs)) chat.logprobs = true;
   if (chat.stream) chat.stream_options = { include_usage: true };
-  return { chat, aliases, input, offset: history.length };
+  return result;
 }
