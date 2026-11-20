@@ -46,20 +46,20 @@ test("chat 请求保持官方头大小写、顺序、baggage 和分域头", () =
   });
   const names = fixture.split("\r\n").slice(1, -1).map((line) => line.split(":")[0]);
   assert.deepEqual(names, [
-    "Accept", "Content-Type", "baggage", "Authorization", "X-Domain",
+    "Accept", "Content-Type", "baggage", "Content-Encoding", "Authorization", "X-Domain",
     "Content-Length", "Accept-Encoding", "Host",
   ]);
   assert.match(fixture, /\r\nAccept-Encoding: gzip, compress, deflate, br\r\n/);
 });
 
-test("chat 大于 1024 字节时 gzip，边界值不压缩", () => {
-  for (const size of [1024, 1025]) {
+test("chat 默认 gzip 覆盖所有非空 POST body，不存在 1024 字节阈值", () => {
+  for (const size of [0, 1, 1024, 1025]) {
     const body = "x".repeat(size);
     const fixture = officialRequestFixture("http://127.0.0.1/v2/chat/completions", {
       method: "POST", body,
     });
-    assert.equal(fixture.includes("Content-Encoding: gzip"), size === 1025);
-    assert.match(fixture, new RegExp(`Content-Length: ${size === 1025 ? "\\d+" : size}`));
+    assert.equal(fixture.includes("Content-Encoding: gzip"), size > 0);
+    assert.match(fixture, new RegExp(`Content-Length: ${size > 0 ? gzipSync(body).length : 0}`));
   }
 });
 
@@ -96,7 +96,7 @@ const officialHeadFixtures = [
   },
 ];
 for (const { path, host, ua, uid, length } of officialHeadFixtures) {
-  test(`真机 report 头严格对拍 ${host}`, () => {
+  test(`固定 report RPC 头契约 ${host}`, () => {
     const fixture = officialRequestFixture(`https://${host}${path}`, {
       method: "POST",
       headers: {
@@ -121,7 +121,7 @@ for (const { path, host, ua, uid, length } of officialHeadFixtures) {
   });
 }
 
-test("真机 global refresh 头严格对拍", () => {
+test("固定 global refresh RPC 头契约", () => {
   const host = "www.workbuddy.ai";
   const fixture = officialRequestFixture(`https://${host}/v2/plugin/auth/token/refresh`, {
     method: "POST",
@@ -154,7 +154,7 @@ test("report ID 是纯随机 32 hex，不使用时间前缀 message ID", () => {
   assert.notEqual(newTraceID(), newTraceID());
 });
 
-test("真实线上的 chat gzip 请求体可由服务端解压", async () => {
+test("本地线缆中的 chat gzip 请求体可由服务端解压", async () => {
   await withServer((req, res) => {
     assert.equal(req.headers["content-encoding"], "gzip");
     const chunks: Buffer[] = [];

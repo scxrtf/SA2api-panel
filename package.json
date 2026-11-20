@@ -11,11 +11,16 @@
     "start": "next start",
     "lint": "eslint",
     "test:keepalive": "tsx --test src/lib/cron.keepalive.test.ts",
-    "test:official-egress": "tsx --test scripts/official-egress.test.mts scripts/official-client-hello.test.mts",
+    "test:official-egress": "tsx --test scripts/official-egress.test.mts scripts/official-egress-security.test.mts scripts/official-client-hello.test.mts",
+    "test:workbuddy-profile": "node scripts/test-offline.mjs scripts/workbuddy-login.test.mts scripts/workbuddy-privacy.test.mts scripts/workbuddy-agenttool.test.mts scripts/official-egress-alignment.test.mts",
     "build:official-tls": "go -C native/official-tls build -trimpath -o bin/ .",
     "test:usage": "tsx --test scripts/usage-aggregation.test.mts",
     "test:dal": "node --import tsx --test scripts/dal-rest.test.mts",
-    "verify:usage": "tsx scripts/verify-usage-parity.mts"
+    "verify:usage": "tsx scripts/verify-usage-parity.mts",
+    "test": "node scripts/test-offline.mjs",
+    "workspace:worker": "node --env-file-if-exists=.env --import tsx workers/workspace/main.ts",
+    "workspace:codex": "node --env-file-if-exists=.env --import tsx workers/workspace/submit.ts",
+    "test:workspace": "node --no-warnings --import tsx --test scripts/workspace.test.mts scripts/workspace-runtime.test.mts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
@@ -25,7 +30,7 @@
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.2",
     "lucide-react": "^1.72.0",
-    "next": "16.4.2",
+    "next": "16.4.6",
     "pg": "^8.13.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
@@ -37,7 +42,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.4.2",
+    "eslint-config-next": "16.4.6",
     "prisma": "^6.0.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",

@@ -9,7 +9,7 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { identifyKeyIdentity, providerAllowlist, verifyAny } from "@/lib/auth-guard";
+import { identifyKeyIdentity, providerAllowlist } from "@/lib/auth-guard";
 import { getConfig } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { authShapeOf } from "@/lib/login";
@@ -23,6 +23,7 @@ import {
 } from "@/lib/upstream/modelCatalog";
 import { effortListing, globalEffortMap } from "@/lib/upstream/payload";
 import { providerModels } from "@/lib/provider";
+import { nativeResponsesModels } from "@/lib/responses-native";
 
 const MODEL_CREATED = 1753600000;
 
@@ -100,7 +101,8 @@ function buildEntry(
 }
 
 export async function GET(req: Request): Promise<Response> {
-  if (!(await verifyAny(req))) {
+  const keyIdentity = await identifyKeyIdentity(req);
+  if (!keyIdentity) {
     return Response.json(
       { error: { message: "invalid or missing api key", type: "invalid_api_key" } },
       { status: 401 },
@@ -108,11 +110,14 @@ export async function GET(req: Request): Promise<Response> {
   }
   const cfg = await getConfig();
   // 供应商模型目录按 key 授权过滤：主线（主密钥 / 未启用鉴权）不限制；
-  // 子密钥只列出已授权供应商；身份缺失按空集合处理（fail closed）。
-  const keyIdentity = await identifyKeyIdentity(req);
+  // 子密钥只列出已授权供应商。
   const providerAllow = providerAllowlist(keyIdentity);
   const data: Record<string, unknown>[] = [];
   const seen = new Set<string>();
+  for (const model of nativeResponsesModels(keyIdentity, !!cfg.api_key)) {
+    data.push(model);
+    seen.add(model.id);
+  }
 
   // 池通道：CN / global 各取一个可用账号探测（某域无账号则整域跳过）。
   // 只取目录探测需要的 9 个认证字段 + 两条状态位。原先 include 会把

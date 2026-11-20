@@ -1,37 +1,36 @@
 "use client";
-// 运行日志视图（对齐 Go view-logs）：请求日志 / 运行日志 / 缓存详细 三模式 + 过滤。
+
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { req, fmtNum, fmtClock, fmtDateTime, useAutoRefresh, usePanelRefresh } from "../lib";
-import { Box, ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
+import { DatabaseIcon, FileTextIcon, RefreshCwIcon, TerminalIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { CacheStatusSnapshot } from "@/lib/cache-status";
+import { summarizeRequestPage } from "@/lib/request-log-metrics";
+import { summarizeRequestSessions, type RequestLogSessionsPage } from "@/lib/request-log-sessions";
+import { fmtClock, req, useAutoRefresh, usePanelRefresh } from "../lib";
+import { ButtonLoadingContent, LoadingIndicator, type Flash } from "../components/ui";
 import { SuperPasswordModal } from "../components/superPassword";
-import { errKindLabel, knownText, uaDisplay } from "@/lib/logfmt";
+import { CacheStatusPanel } from "../components/cache-status-panel";
+import { LogListLoading, LogPagination } from "../components/log-pagination";
+import { RequestLogSessions } from "../components/request-log-sessions";
 import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination";
+  EMPTY_REQUEST_FILTER,
+  fmtLogMs,
+  requestFilterParams,
+  RequestLogFilters,
+  RequestLogSummary,
+  RequestLogTable,
+  type ReqLog,
+} from "../components/request-log-table";
+import "./logs.css";
 
 interface LogEntry {
   id?: string;
   ts: number;
   ch: "task" | "chat" | "call" | "probe" | "sys";
   text: string;
-}
-interface ReqLog {
-  id: string; at: string; uid: string; model: string; status: number;
-  durationMs: number; errKind: string; clientIp: string; ua: string;
-  realm: string; provider: string; stream: boolean;
-  ttfbMs?: number; attempts?: number;
-  promptTokens?: number; completionTok?: number; totalTokens?: number;
-  credit?: number; hasCredit?: boolean;
-  cacheHitTok?: number; cacheMissTok?: number;
-  keyName?: string; slot?: string; machineId?: string; path?: string;
-  // 报错内容：失败请求的上游响应正文摘要（成功请求为空）。
-  errMsg?: string;
 }
 interface ReqLogDetail extends ReqLog {
   errorDetail?: string;
@@ -40,136 +39,12 @@ interface ReqLogDetail extends ReqLog {
   requestMessages?: unknown;
   responseMessage?: unknown;
 }
-
-interface CacheLayer {
-  name: string;
-  scope: string;
-  ttlMs: number;
-  maxEntries?: number;
-  size: number | null;
-  entries: { key: string; ttlMs: number }[];
-  note?: string;
-  visible: boolean;
-  cached?: boolean;
-  remainingMs?: number;
-}
-interface CacheStatsResp {
-  at: number;
-  layers: CacheLayer[];
-}
-
-// fmtTok token 缩写（Go app.js fmtTok 同口径）：1000+ 用 k 缩写避免表列撑宽。
-function fmtTok(n: number): string {
-  if (!n || n <= 0) return "—";
-  return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k" : String(n);
-}
-function fmtMs(n: number | null | undefined): string {
-  return n && n > 0 ? n + "ms" : "—";
-}
-function fmtCredit(v: number | null | undefined, known: boolean | undefined): string {
-  if (!known) return "—";
-  return Number.isFinite(v) ? String(Number((v ?? 0).toFixed(2))) : "—";
-}
-
-// uaSummary UA 指纹摘要（Go app.js:1130 同口径）：解析常见客户端族，
-// 完整 UA 放 title / 展开区，表列只给一眼能扫的短标签。
-function uaSummary(ua: string): string {
-  const s = ua || "";
-  if (!s) return "";
-  const m: [RegExp, string | null][] = [
-    [/Claude\/?(\d[\w.]*)/i, "Claude $1"], [/Claude-Code\/([\w.]+)/i, "Claude Code $1"],
-    [/Codex(?:CLI)?[\/ ]([\w.]+)/i, "Codex $1"], [/CherryStudio\/([\w.]+)/i, "Cherry Studio $1"],
-    [/Cline\/([\w.]+)/i, "Cline $1"], [/OpenAI\/(\w+[\w.]*)/i, "OpenAI $1"],
-    [/python-requests\/([\w.]+)/i, "Python requests $1"], [/Python\/([\w.]+)/i, "Python $1"],
-    [/node(?:-fetch)?\/([\w.]+)/i, "Node $1"], [/curl\/([\w.]+)/i, "curl $1"],
-    [/PostmanRuntime\/([\w.]+)/i, "Postman $1"], [/Go-http-client\/([\w.]+)/i, "Go $1"],
-    [/Mozilla\/[\d.]+\s*\(([^)]+)\)/, null],
-  ];
-  for (const [re, tpl] of m) {
-    const x = s.match(re);
-    if (x) return tpl === null ? x[1].split(/[;)]/)[0].trim() : tpl.replace("$1", x[1]);
-  }
-  return s.split(/[\s;,]/)[0].slice(0, 18);
-}
-
-// 机器码展示：36 位派生值只露前 8 位（面板可扫），完整值在展开区。
-function machineShort(id: string | undefined): string {
-  return id ? id.slice(0, 8) : "";
-}
-
-// ── 缓存详细面板 ────────────────────────────────────────────────────────────
-// 展示进程内各层缓存的实时状态：条目数、剩余 TTL、命中情况。
-// 数据来自 GET /api/panel/cache_stats，不经过 reqCached（这个页面本身就该看实时值）。
-function fmtTtl(ms: number): string {
-  if (ms <= 0) return "已过期";
-  const s = Math.ceil(ms / 1000);
-  if (s < 60) return s + "s";
-  if (s < 3600) return Math.floor(s / 60) + "m" + (s % 60 > 0 ? " " + (s % 60) + "s" : "");
-  return Math.floor(s / 3600) + "h" + (Math.floor((s % 3600) / 60) > 0 ? Math.floor((s % 3600) / 60) + "m" : "");
-}
-
-function CachePanel({ stats, loading }: {
-  stats: CacheStatsResp | null;
-  loading: boolean;
-}) {
-  if (!stats && loading) return <LoadingIndicator label="正在读取缓存状态…" />;
-  if (!stats) return <div className="pad dim">暂无数据</div>;
-  const at = fmtClock(stats.at);
-  return (
-    <div className="pad" style={{ display: "grid", gap: 16 }}>
-      <div className="dim" style={{ fontSize: 12 }}>
-        采集于 {at} · 服务端进程内缓存实时状态（前端 reqCached 为浏览器内存，服务端不可见条目）
-      </div>
-      {stats.layers.map((layer) => (
-        <div key={layer.name} style={{
-          border: "1px solid var(--border)", borderRadius: 10,
-          padding: "14px 16px", background: "var(--bg-soft)",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>{layer.name}</div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span className="tag">{layer.scope}</span>
-              {layer.cached !== undefined && (
-                <span className={"tag " + (layer.cached ? "ok" : "err")}>
-                  {layer.cached ? "已缓存" : "未缓存"}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="kv-grid" style={{ marginBottom: layer.entries.length > 0 ? 10 : 0 }}>
-            <span className="dim">TTL</span><span>{fmtTtl(layer.ttlMs)}</span>
-            {layer.maxEntries !== undefined && <>
-              <span className="dim">容量</span><span>{layer.size ?? 0} / {layer.maxEntries} 条</span>
-            </>}
-            {layer.remainingMs !== undefined && <>
-              <span className="dim">剩余有效期</span><span>{fmtTtl(layer.remainingMs)}</span>
-            </>}
-            {layer.note && <>
-              <span className="dim">说明</span><span style={{ fontSize: 12, lineHeight: 1.5 }}>{layer.note}</span>
-            </>}
-          </div>
-          {layer.entries.length > 0 && (
-            <table className="tbl" style={{ marginTop: 8 }}>
-              <thead><tr><th>缓存键</th><th>剩余 TTL</th></tr></thead>
-              <tbody>
-                {layer.entries.map((e) => (
-                  <tr key={e.key}>
-                    <td className="mono" style={{ wordBreak: "break-all" }}>{e.key}</td>
-                    <td className="mono">{fmtTtl(e.ttlMs)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {layer.visible && layer.entries.length === 0 && (
-            <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>当前无活跃缓存条目</div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
+type LogMode = "requests" | "runtime" | "cache";
+type RequestView = "request" | "session";
+type ActiveLogMode = LogMode | "sessions";
+type LoadReason = "scope" | "page" | "refresh" | "poll";
+type LogScope = { mode: ActiveLogMode; scope: string };
+type LogLoad = LogScope & { reason: LoadReason; page: number };
 
 // ── 增量合并 ────────────────────────────────────────────────────────────────
 // 运行日志保持升序（旧→新，底部跟随最新），请求日志保持降序（新→旧）。
@@ -210,66 +85,6 @@ interface LogPageResponse<T> {
   mode?: string;
 }
 
-function pageItems(page: number, totalPages: number): (number | "ellipsis")[] {
-  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1);
-  const candidates = [1, page - 1, page, page + 1, totalPages]
-    .filter((value) => value >= 1 && value <= totalPages);
-  const pages = [...new Set(candidates)].sort((a, b) => a - b);
-  const items: (number | "ellipsis")[] = [];
-  pages.forEach((value, index) => {
-    if (index > 0 && value - pages[index - 1] > 1) items.push("ellipsis");
-    items.push(value);
-  });
-  return items;
-}
-
-function LogPagination({ page, total, totalPages, loading, onPageChange }: {
-  page: number;
-  total: number;
-  totalPages: number;
-  loading: boolean;
-  onPageChange: (page: number) => void;
-}) {
-  const go = (event: React.SyntheticEvent<HTMLAnchorElement>, next: number) => {
-    event.preventDefault();
-    if (!loading && next >= 1 && next <= totalPages && next !== page) onPageChange(next);
-  };
-  const keyGo = (event: React.KeyboardEvent<HTMLAnchorElement>, next: number) => {
-    if (event.key === "Enter" || event.key === " ") go(event, next);
-  };
-  return (
-    <div className="log-pagination">
-      <span className="dim">共 {total.toLocaleString("zh-CN")} 条 · 第 {page} / {totalPages} 页</span>
-      <Pagination aria-label="日志分页">
-        <PaginationContent>
-          <PaginationItem>
-            <PaginationPrevious text="上一页" href="#" aria-label="上一页"
-              aria-disabled={loading || page <= 1} tabIndex={loading || page <= 1 ? -1 : 0}
-              onClick={(event) => go(event, page - 1)}
-              onKeyDown={(event) => keyGo(event, page - 1)} />
-          </PaginationItem>
-          {pageItems(page, totalPages).map((item, index) => (
-            <PaginationItem key={item === "ellipsis" ? `ellipsis-${index}` : item}>
-              {item === "ellipsis" ? <PaginationEllipsis /> : (
-                <PaginationLink href="#" isActive={item === page} aria-label={`第 ${item} 页`}
-                  aria-disabled={loading} tabIndex={loading ? -1 : 0}
-                  onClick={(event) => go(event, item)}
-                  onKeyDown={(event) => keyGo(event, item)}>{item}</PaginationLink>
-              )}
-            </PaginationItem>
-          ))}
-          <PaginationItem>
-            <PaginationNext text="下一页" href="#" aria-label="下一页"
-              aria-disabled={loading || page >= totalPages} tabIndex={loading || page >= totalPages ? -1 : 0}
-              onClick={(event) => go(event, page + 1)}
-              onKeyDown={(event) => keyGo(event, page + 1)} />
-          </PaginationItem>
-        </PaginationContent>
-      </Pagination>
-    </div>
-  );
-}
-
 function recordList(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is Record<string, unknown> =>
@@ -294,18 +109,18 @@ function LogSection({ title, empty, emptyText, children }: {
 }) {
   return (
     <section className="log-detail-section">
-      <div className="log-detail-title">{title}</div>
+      <h4 className="log-detail-title">{title}</h4>
       {empty ? <div className="log-detail-empty">{emptyText ?? "旧日志未记录此项"}</div> : children}
     </section>
   );
 }
 
-// 已知角色集中着色；未知角色原样展示但用中性色。
+// 未知角色保留原名，日志占位与真实对话区分。
 const ROLE_META: Record<string, { label: string; cls: string }> = {
-  system: { label: "SYSTEM", cls: "role-system" },
-  user: { label: "USER", cls: "role-user" },
-  assistant: { label: "ASSISTANT", cls: "role-assistant" },
-  tool: { label: "TOOL", cls: "role-tool" },
+  system: { label: "系统", cls: "role-system" },
+  user: { label: "用户", cls: "role-user" },
+  assistant: { label: "助手", cls: "role-assistant" },
+  tool: { label: "工具", cls: "role-tool" },
   log: { label: "日志", cls: "role-log" }, // 日志占位行（截断说明），非真实对话
 };
 
@@ -358,7 +173,7 @@ function toolCallText(tc: Record<string, unknown>): string {
 function DialogMessage({ msg }: { msg: Record<string, unknown> }) {
   const rawRole = typeof msg["role"] === "string" ? (msg["role"] as string) : "message";
   const meta = ROLE_META[rawRole];
-  const label = meta?.label ?? rawRole.toUpperCase();
+  const label = meta?.label ?? rawRole;
   const cls = meta?.cls ?? "role-other";
 
   const reasoning = typeof msg["reasoning_content"] === "string" ? msg["reasoning_content"] as string : "";
@@ -423,22 +238,18 @@ function RequestLogDetailView({ entry, loading, error, onRequestDialog }: {
         emptyText="未记录（旧日志或已按保留策略清理）">
         {!dialogLoaded ? (
           <div className="log-detail-state">
-            <div style={{ marginBottom: 10 }}>对话内容受超级密码保护，普通日志详情可直接查看。</div>
-            <button type="button" className="btn xs" onClick={(event) => {
-              event.stopPropagation();
-              onRequestDialog();
-            }}>验证并查看对话记录</button>
+            <Button type="button" variant="outline" onClick={onRequestDialog}>验证后查看对话</Button>
           </div>
         ) : <>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <label className="dim" htmlFor={`dialog-role-${entry.id}`} style={{ fontSize: 12 }}>角色筛选</label>
-            <select id={`dialog-role-${entry.id}`} className="select" style={{ width: 150 }} value={roleFilter}
+          <div className="log-role-filter">
+            <label className="log-subtle" htmlFor={`dialog-role-${entry.id}`}>角色筛选</label>
+            <NativeSelect id={`dialog-role-${entry.id}`} value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}>
-              <option value="all">全部角色（{messages.length}）</option>
-              {roles.map((role) => <option key={role} value={role}>
+              <NativeSelectOption value="all">全部角色（{messages.length}）</NativeSelectOption>
+              {roles.map((role) => <NativeSelectOption key={role} value={role}>
                 {ROLE_META[role]?.label ?? role}（{messages.filter((m) => (m["role"] || "message") === role).length}）
-              </option>)}
-            </select>
+              </NativeSelectOption>)}
+            </NativeSelect>
           </div>
           {visibleMessages.length === 0
             ? <div className="log-detail-empty">当前角色暂无对话内容</div>
@@ -486,17 +297,17 @@ function RequestLogDetailView({ entry, loading, error, onRequestDialog }: {
                   const errKind = typeof item["errKind"] === "string" ? item["errKind"] : "";
                   const ok = item["ok"] === true || (status < 400 && status > 0 && !errKind);
                   const source = [item["provider"], item["uid"]]
-                    .filter((v): v is string => typeof v === "string" && v !== "").join(" · ");
+                    .filter((v): v is string => typeof v === "string" && v !== "").join(" / ");
                   return (
                     <tr key={index}>
                       <td className="mono">{String(item["attempt"] ?? index + 1)}</td>
                       <td className="mono wrap">{source || "—"}</td>
-                      <td><span className={"tag " + (ok ? "ok" : "err")}>
+                      <td><Badge variant={ok ? "secondary" : "destructive"}>
                         {status > 0 ? status : "—"}{ok ? " 成功" : " 失败"}
-                      </span></td>
+                      </Badge></td>
                       <td className="mono wrap">{errKind || "—"}</td>
-                      <td className="mono">{fmtMs(Number(item["durationMs"] ?? 0))}</td>
-                      <td className="mono">{fmtMs(Number(item["ttfbMs"] ?? 0))}</td>
+                      <td className="log-num">{fmtLogMs(Number(item["durationMs"] ?? 0))}</td>
+                      <td className="log-num">{fmtLogMs(Number(item["ttfbMs"] ?? 0))}</td>
                       <td>
                         {typeof item["error"] === "string" && item["error"]
                           ? <pre className="log-attempt-error">{item["error"]}</pre>
@@ -515,12 +326,15 @@ function RequestLogDetailView({ entry, loading, error, onRequestDialog }: {
 }
 
 export function LogsView({ flash }: { flash: Flash }) {
-  const [mode, setMode] = useState<"runtime" | "requests" | "cache">("runtime");
+  const [tab, setTab] = useState<LogMode>("requests");
+  const [requestView, setRequestView] = useState<RequestView>("request");
+  const mode: ActiveLogMode = tab === "requests" && requestView === "session" ? "sessions" : tab;
   const [ch, setCh] = useState<"all" | "task" | "call" | "probe" | "sys">("all");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [reqs, setReqs] = useState<ReqLog[]>([]);
-  const [filter, setFilter] = useState({ account: "", model: "", outcome: "", key: "", err: "" });
-  const [ipFilter, setIpFilter] = useState("");
+  const [sessions, setSessions] = useState<RequestLogSessionsPage | null>(null);
+  const [filter, setFilter] = useState(EMPTY_REQUEST_FILTER);
+  const filterQuery = requestFilterParams(filter);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, ReqLogDetail>>({});
   const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
@@ -528,85 +342,127 @@ export function LogsView({ flash }: { flash: Flash }) {
   const [detailAuthId, setDetailAuthId] = useState<string | null>(null);
   const [detailAuthBusy, setDetailAuthBusy] = useState(false);
   const [detailAuthError, setDetailAuthError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
-  const [loadError, setLoadError] = useState("");
+  const [activity, setActivity] = useState<LogLoad | null>(null);
+  const [loaded, setLoaded] = useState<Partial<Record<ActiveLogMode, { scope: string; at: number }>>>({});
+  const [failure, setFailure] = useState<(LogLoad & { message: string }) | null>(null);
   const logViewRef = useRef<HTMLDivElement>(null);
   const [followLogs, setFollowLogs] = useState(true);
-  // 增量游标（ms）：轮询只取游标之后的新行；手动刷新 / 改过滤 / 切模式时归零全量重拉。
+  // 增量只在第一页且无过滤时启用，全量读取会重新建立游标。
   const runtimeSinceRef = useRef(0);
-  const reqSinceRef = useRef(0);
-  const requestSeqRef = useRef(0);
-  const [cacheStats, setCacheStats] = useState<CacheStatsResp | null>(null);
+  const requestCursorRef = useRef({ at: 0, ids: new Set<string>() });
+  const inFlight = useRef<(LogLoad & { controller: AbortController }) | null>(null);
+  const previousScope = useRef<LogScope | null>(null);
+  const lastPages = useRef<Partial<Record<Exclude<ActiveLogMode, "cache">, { scope: string; page: number }>>>({});
+  const [cacheStats, setCacheStats] = useState<CacheStatusSnapshot | null>(null);
   const [pagination, setPagination] = useState({
     runtime: { page: 1, total: 0, totalPages: 1 },
     requests: { page: 1, total: 0, totalPages: 1 },
+    sessions: { page: 1, total: 0, totalPages: 1 },
   });
   const runtimePage = pagination.runtime.page;
-  const requestPage = pagination.requests.page;
+  const scope = mode === "runtime" ? ch : mode === "cache" ? "" : filterQuery;
+  const lastLoadedAt = loaded[mode]?.scope === scope ? loaded[mode]?.at : undefined;
+  const currentPage = mode !== "cache" && lastLoadedAt ? pagination[mode].page : 1;
+  const currentIssue = failure?.mode === mode && failure.scope === scope ? failure : null;
+  const pageFailure = currentIssue?.reason === "page" ? currentIssue : undefined;
+  const loadError = currentIssue && !pageFailure ? currentIssue.message : "";
+  const foreground = activity?.mode === mode && activity.scope === scope && activity.reason !== "poll" ? activity : null;
+  const pendingPage = foreground?.reason === "page" ? foreground.page : undefined;
+  const refreshing = foreground?.reason === "refresh";
+  const initial = !lastLoadedAt && !loadError;
 
-  const load = useCallback(async (delta = false) => {
-    const seq = ++requestSeqRef.current;
-    setLoading(true);
-    setLoadError("");
+  const load = useCallback(async (reason: LoadReason, page: number) => {
+    const active = inFlight.current;
+    if (active && (reason === "poll" || (active.mode === mode && active.scope === scope && active.reason !== "poll"))) return;
+    const job = { mode, scope, reason, page, controller: new AbortController() };
+    inFlight.current = job;
+    active?.controller.abort();
+    setActivity(job);
+    if (reason !== "poll") setFailure(null);
+    const current = () => inFlight.current === job;
+    const options = { signal: job.controller.signal };
     try {
+      let sampledAt: number | undefined;
       if (mode === "cache") {
-        const r = await req<CacheStatsResp>("cache_stats");
-        if (seq !== requestSeqRef.current) return;
+        const r = await req<CacheStatusSnapshot>("cache_stats", options);
+        if (!current()) return;
+        sampledAt = r.at;
         setCacheStats(r);
       } else if (mode === "runtime") {
-        const since = delta && runtimePage === 1 ? runtimeSinceRef.current : 0;
+        const since = reason === "poll" && page === 1 && scope === "all" ? runtimeSinceRef.current : 0;
         const q = new URLSearchParams({ limit: String(RUNTIME_PAGE) });
         if (since) q.set("since", String(since));
         else {
-          q.set("page", String(runtimePage));
-          q.set("channel", ch);
+          q.set("page", String(page));
+          q.set("channel", scope);
         }
-        const r = await req<LogPageResponse<LogEntry>>("logs?" + q.toString());
-        if (seq !== requestSeqRef.current) return;
-        if (since && r.mode === "delta") {
+        const r = await req<LogPageResponse<LogEntry>>("logs?" + q.toString(), options);
+        if (!current()) return;
+        const isDelta = Boolean(since) && r.mode === "delta";
+        if (isDelta) {
           setLogs((prev) => mergeRuntime(prev, r.entries));
-          setPagination((prev) => ({
-            ...prev,
-            runtime: { ...prev.runtime, total: prev.runtime.total + r.entries.length },
-          }));
+          if (r.entries.length > 0) setPagination((prev) => {
+            const total = prev.runtime.total + r.entries.length;
+            return { ...prev, runtime: { ...prev.runtime, total, totalPages: Math.max(1, Math.ceil(total / RUNTIME_PAGE)) } };
+          });
         } else {
           setLogs(r.entries);
+          lastPages.current.runtime = { scope, page: r.page };
           setPagination((prev) => ({
             ...prev,
             runtime: { page: r.page, total: r.total, totalPages: r.totalPages },
           }));
         }
         const maxTs = r.entries.reduce((m, e) => (e.ts > m ? e.ts : m), 0);
-        if (maxTs > runtimeSinceRef.current) runtimeSinceRef.current = maxTs;
-      } else {
-        const q = new URLSearchParams();
-        if (filter.account) q.set("account", filter.account);
-        if (filter.model) q.set("model", filter.model);
-        if (filter.outcome) q.set("outcome", filter.outcome);
-        if (filter.key) q.set("key", filter.key);
-        if (filter.err) q.set("err", filter.err);
-        if (ipFilter) q.set("client_ip", ipFilter);
-        // 只有无过滤且已有游标时才走增量：过滤条件变化必须全量重查，
-        // 否则会把「旧页里不满足新条件下拉」的行继续留在表上。
-        const filtered = !!(filter.account || filter.model || filter.outcome ||
-          filter.key || filter.err || ipFilter);
-        const useDelta = delta && !filtered && requestPage === 1 && reqSinceRef.current > 0;
-        if (useDelta) q.set("since", String(reqSinceRef.current));
-        else {
-          q.set("page", String(requestPage));
+        runtimeSinceRef.current = isDelta ? Math.max(since, maxTs) : maxTs;
+      } else if (mode === "sessions") {
+        const fetchPage = (target: number) => {
+          const q = new URLSearchParams(scope);
+          q.set("view", "sessions");
+          q.set("page", String(target));
           q.set("limit", String(REQUEST_PAGE));
-        }
-        const r = await req<LogPageResponse<ReqLog>>("request_logs?" + q.toString());
-        if (seq !== requestSeqRef.current) return;
-        if (useDelta && r.mode === "delta") {
+          return req<RequestLogSessionsPage>("request_logs?" + q.toString(), options);
+        };
+        let r = await fetchPage(page);
+        if (!current()) return;
+        if (r.page > r.totalPages) r = await fetchPage(r.totalPages);
+        if (!current()) return;
+        if (r.page > r.totalPages) throw new Error("日志范围已变化，请重试");
+        if (reason === "page" || r.page !== page) setExpanded(null);
+        setSessions(r);
+        lastPages.current.sessions = { scope, page: r.page };
+        setPagination((prev) => ({ ...prev, sessions: { page: r.page, total: r.total, totalPages: r.totalPages } }));
+      } else {
+        const cursor = requestCursorRef.current;
+        const useDelta = reason === "poll" && !scope && page === 1 && cursor.at > 0;
+        const fetchPage = (target = page) => {
+          const q = new URLSearchParams(scope);
+          q.set("page", String(target));
+          q.set("limit", String(REQUEST_PAGE));
+          return req<LogPageResponse<ReqLog>>("request_logs?" + q.toString(), options);
+        };
+        const deltaQuery = new URLSearchParams({ since: String(cursor.at), limit: String(REQUEST_PAGE) });
+        let r = await (useDelta ? req<LogPageResponse<ReqLog>>("request_logs?" + deltaQuery.toString(), options) : fetchPage());
+        if (!current()) return;
+        // 增量按时间升序返回；达到上限时重取最新一页，避免在高峰期显示落后的日志。
+        if (useDelta && r.mode === "delta" && r.entries.length >= REQUEST_PAGE) r = await fetchPage();
+        if (!current()) return;
+        // 保留策略可能让末页消失，改读现在存在的最后一页。
+        if (r.mode === "page" && r.page > r.totalPages) r = await fetchPage(r.totalPages);
+        if (!current()) return;
+        if (r.mode === "page" && r.page > r.totalPages) throw new Error("日志范围已变化，请重试");
+        const isDelta = useDelta && r.mode === "delta";
+        if (isDelta) {
+          const added = r.entries.filter((entry) => !cursor.ids.has(entry.id)).length;
           setReqs((prev) => mergeRequests(prev, r.entries));
-          setPagination((prev) => ({
-            ...prev,
-            requests: { ...prev.requests, total: prev.requests.total + r.entries.length },
-          }));
+          if (added > 0) setPagination((prev) => {
+            const total = prev.requests.total + added;
+            return { ...prev, requests: { ...prev.requests, total, totalPages: Math.max(1, Math.ceil(total / REQUEST_PAGE)) } };
+          });
         } else {
           setReqs(r.entries);
+          if (reason === "page" || r.page !== page) setExpanded(null);
+          lastPages.current.requests = { scope, page: r.page };
           setPagination((prev) => ({
             ...prev,
             requests: { page: r.page, total: r.total, totalPages: r.totalPages },
@@ -616,40 +472,55 @@ export function LogsView({ flash }: { flash: Flash }) {
           const t = Date.parse(e.at);
           return t > m ? t : m;
         }, 0);
-        if (maxAt > reqSinceRef.current) reqSinceRef.current = maxAt;
+        const at = isDelta ? Math.max(cursor.at, maxAt) : maxAt;
+        const ids = new Set(isDelta && at === cursor.at ? cursor.ids : []);
+        for (const entry of r.entries) if (Date.parse(entry.at) === at) ids.add(entry.id);
+        requestCursorRef.current = { at, ids };
       }
-      setLastLoadedAt(Date.now());
+      const finishedAt = sampledAt ?? Date.now();
+      setLoaded((prev) => ({ ...prev, [mode]: { scope, at: finishedAt } }));
     } catch (e) {
-      if (seq !== requestSeqRef.current) return;
+      if (!current() || reason === "poll") return;
       const msg = e instanceof Error ? e.message : String(e);
-      setLoadError(msg);
-      flash("err", msg);
+      setFailure({ mode, scope, reason, page, message: msg });
+      if (reason !== "page" && (mode !== "sessions" || reason === "refresh")) flash("err", msg);
     } finally {
-      if (seq === requestSeqRef.current) setLoading(false);
+      if (current()) {
+        inFlight.current = null;
+        setActivity(null);
+      }
     }
-  }, [mode, filter, ch, ipFilter, runtimePage, requestPage, flash]);
+  }, [mode, scope, flash]);
   useEffect(() => {
-    runtimeSinceRef.current = 0;
-    reqSinceRef.current = 0;
-    const t = setTimeout(() => { void load(false); }, 0);
-    return () => clearTimeout(t);
-  }, [load]);
-  useAutoRefresh(() => { void load(true); }, 30_000);
-  usePanelRefresh(() => { void load(false); });
+    const previous = previousScope.current;
+    previousScope.current = { mode, scope };
+    const remembered = mode === "cache" ? undefined : lastPages.current[mode];
+    const page = remembered?.scope === scope ? remembered.page : 1;
+    // 分页直接加载，仅输入筛选词时防抖。
+    const debounce = (mode === "requests" || mode === "sessions") && previous?.mode === mode && previous.scope !== scope;
+    const t = setTimeout(() => { void load("scope", page); }, debounce ? 220 : 0);
+    return () => {
+      clearTimeout(t);
+      const active = inFlight.current;
+      if (active?.mode === mode && active.scope === scope) {
+        inFlight.current = null;
+        active.controller.abort();
+      }
+    };
+  }, [load, mode, scope]);
+  const refresh = useCallback(() => { void load("refresh", currentPage); }, [load, currentPage]);
+  const poll = useCallback(() => { void load("poll", currentPage); }, [load, currentPage]);
+  useAutoRefresh(poll, 60_000, Boolean(lastLoadedAt && !currentIssue) && currentPage === 1);
+  usePanelRefresh(refresh);
 
-  const resetRuntimePage = () => setPagination((prev) => ({
-    ...prev, runtime: { ...prev.runtime, page: 1 },
-  }));
-  const resetRequestPage = () => setPagination((prev) => ({
-    ...prev, requests: { ...prev.requests, page: 1 },
-  }));
+  const changePage = (page: number) => { void load("page", page); };
 
   useEffect(() => {
     const view = logViewRef.current;
-    if (mode === "runtime" && followLogs && view) {
+    if (mode === "runtime" && followLogs && runtimePage === 1 && view) {
       view.scrollTop = view.scrollHeight;
     }
-  }, [logs, mode, followLogs]);
+  }, [logs, mode, followLogs, runtimePage]);
 
   const loadDetail = useCallback(async (id: string): Promise<boolean> => {
     setDetailLoading((prev) => ({ ...prev, [id]: true }));
@@ -661,7 +532,7 @@ export function LogsView({ flash }: { flash: Flash }) {
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
       if (raw === "request_log_not_found") {
-        setDetailErrors((prev) => ({ ...prev, [id]: "暂无相关" }));
+        setDetailErrors((prev) => ({ ...prev, [id]: "该日志已不存在，或已超过保留期。" }));
         return true;
       }
       setDetailErrors((prev) => ({ ...prev, [id]: raw }));
@@ -713,59 +584,97 @@ export function LogsView({ flash }: { flash: Flash }) {
     }
   };
 
+  const closeRequest = () => setExpanded(null);
+  const detail = {
+    expanded,
+    onToggle: toggleDetail,
+    renderDetail: (id: string) => <RequestLogDetailView
+      entry={details[id]}
+      loading={!!detailLoading[id]}
+      error={detailErrors[id] || undefined}
+      onRequestDialog={() => requestDialog(id)}
+    />,
+  };
+  const switchRequestView = (next: RequestView) => {
+    if (next === requestView) return;
+    closeRequest();
+    setRequestView(next);
+  };
+  const requestListing = requestView === "request" ? pagination.requests : pagination.sessions;
+
   return (
-    <Box title={mode === "requests" ? "请求日志" : mode === "cache" ? "缓存详细" : "运行日志"} busy={loading} extra={<>
-      <button className={"btn xs" + (mode === "requests" ? " primary" : "")} onClick={() => { resetRequestPage(); setMode("requests"); }}>请求日志</button>
-      <button className={"btn xs" + (mode === "runtime" ? " primary" : "")} onClick={() => { resetRuntimePage(); setMode("runtime"); }}>运行日志</button>
-      <button className={"btn xs" + (mode === "cache" ? " primary" : "")} onClick={() => setMode("cache")}>缓存详细</button>
-      {mode === "requests" && <>
-        <input className="input" style={{ width: 130 }} placeholder="账号过滤" value={filter.account}
-          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, account: e.target.value }); }} />
-        <input className="input" style={{ width: 130 }} placeholder="模型过滤" value={filter.model}
-          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, model: e.target.value }); }} />
-        <select className="select" style={{ width: 104 }} value={filter.outcome}
-          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, outcome: e.target.value }); }}>
-          <option value="">全部结果</option><option value="ok">仅成功</option><option value="error">仅失败</option>
-        </select>
-        <input className="input" style={{ width: 110 }} placeholder="IP 过滤" value={ipFilter}
-          onChange={(e) => { resetRequestPage(); setIpFilter(e.target.value); }} />
-        <input className="input" style={{ width: 110 }} placeholder="Key 过滤" value={filter.key}
-          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, key: e.target.value }); }} />
-        <input className="input" style={{ width: 150 }} placeholder="报错内容过滤" value={filter.err}
-          title="按上游报错正文检索，如 12153 / rate limit / WAF"
-          onChange={(e) => { resetRequestPage(); setFilter({ ...filter, err: e.target.value }); }} />
-      </>}
-      <span className="dim" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-        {loading ? <LoadingIndicator inline label="正在刷新…" /> : loadError ? "刷新失败，请重试" : lastLoadedAt
-          ? `更新于 ${fmtClock(lastLoadedAt)}`
-          : "等待加载"}
-      </span>
-      <button className="btn xs" disabled={loading} aria-busy={loading} onClick={() => { void load(false); }}>
-        <ButtonLoadingContent loading={loading} loadingChildren="刷新中…">刷新</ButtonLoadingContent>
-      </button>
-      {mode === "runtime" && <>
-        <select className="select" style={{ width: 104 }} value={ch}
-          onChange={(e) => { resetRuntimePage(); setCh(e.target.value as typeof ch); }}>
-          <option value="all">全部频道</option><option value="task">任务</option>
-          <option value="call">调用</option><option value="probe">探测</option>
-          <option value="sys">系统</option>
-        </select>
-      </>}
-    </>}>
-      {mode === "cache" ? (
-        <CachePanel stats={cacheStats} loading={loading} />
-      ) : mode === "runtime" ? (
-        <div className="pad">
-          <div
-            ref={logViewRef}
-            className="logview"
-            onScroll={(e) => {
-              const view = e.currentTarget;
-              const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 36;
-              setFollowLogs(atBottom);
-            }}>
-            {loading && !lastLoadedAt ? <LoadingIndicator label="正在加载运行日志…" /> : logs.length === 0 && <div style={{ color: "#64748b" }}>暂无运行日志</div>}
-            {logs.map((l, i) => (
+    <>
+      <Tabs className="logs-console" value={tab} onValueChange={(value) => {
+        if (value === "requests" || value === "runtime" || value === "cache") {
+          closeRequest();
+          setTab(value);
+        }
+      }}>
+        <header className="log-toolbar">
+          <TabsList variant="line" aria-label="日志类别" className="log-mode-tabs">
+            <TabsTrigger value="requests"><FileTextIcon />请求日志</TabsTrigger>
+            <TabsTrigger value="runtime"><TerminalIcon />运行日志</TabsTrigger>
+            <TabsTrigger value="cache"><DatabaseIcon />缓存状态</TabsTrigger>
+          </TabsList>
+          <div className="log-toolbar-actions">
+            <span className="log-subtle log-num" role="status" title={loadError || undefined}>
+              {loadError ? "刷新失败" : lastLoadedAt ? `${mode === "cache" ? "采集于" : "更新于"} ${fmtClock(lastLoadedAt)}` : ""}
+            </span>
+            <Button type="button" variant="outline" disabled={initial || Boolean(foreground)} aria-busy={refreshing} onClick={refresh}>
+              {!refreshing && <RefreshCwIcon data-icon="inline-start" />}
+              <ButtonLoadingContent loading={refreshing} loadingChildren="刷新中…">刷新</ButtonLoadingContent>
+            </Button>
+          </div>
+        </header>
+
+        <TabsContent value="requests">
+          <RequestLogFilters filter={filter} onChange={(next) => {
+            if (requestFilterParams(next) !== filterQuery) closeRequest();
+            setFilter(next);
+          }} />
+          <div className="log-summary-bar">
+            <RequestLogSummary summary={!lastLoadedAt ? null : requestView === "request"
+              ? summarizeRequestPage(reqs) : summarizeRequestSessions(sessions?.entries ?? [])} />
+            <div className="log-request-switch" role="group" aria-label="请求日志视图">
+              <Button type="button" variant="ghost" size="sm" aria-pressed={requestView === "request"}
+                onClick={() => switchRequestView("request")}>请求</Button>
+              <Button type="button" variant="ghost" size="sm" aria-pressed={requestView === "session"}
+                onClick={() => switchRequestView("session")}>会话</Button>
+            </div>
+          </div>
+          <div aria-busy={Boolean(lastLoadedAt && foreground)}>
+            {requestView === "request"
+              ? <RequestLogTable {...detail} rows={lastLoadedAt ? reqs : []}
+                filtered={Boolean(filterQuery)} initial={initial} error={loadError} />
+              : <RequestLogSessions key={currentPage + ":" + filterQuery}
+                entries={lastLoadedAt ? sessions?.entries ?? [] : []} scope={lastLoadedAt ? sessions?.scope : undefined}
+                filterQuery={filterQuery} initial={initial} error={loadError}
+                detail={detail} onCloseRequest={closeRequest} />}
+          </div>
+          {lastLoadedAt && requestListing.total > 0 && (
+            <LogPagination {...requestListing} unit={requestView === "session" ? "组" : "条"} pageSize={REQUEST_PAGE} pendingPage={pendingPage}
+              blocked={Boolean(foreground)} failure={pageFailure} onPageChange={changePage} />
+          )}
+        </TabsContent>
+
+        <TabsContent value="runtime" className="log-runtime">
+          <div className="log-runtime-controls">
+            <NativeSelect aria-label="运行日志频道" value={ch} onChange={(e) => setCh(e.target.value as typeof ch)}>
+              <NativeSelectOption value="all">全部频道</NativeSelectOption>
+              <NativeSelectOption value="task">任务</NativeSelectOption>
+              <NativeSelectOption value="call">调用</NativeSelectOption>
+              <NativeSelectOption value="probe">探测</NativeSelectOption>
+              <NativeSelectOption value="sys">系统</NativeSelectOption>
+            </NativeSelect>
+          </div>
+          <div ref={logViewRef} className="logview" dir="ltr" aria-busy={Boolean(lastLoadedAt && foreground)} onScroll={(e) => {
+            const view = e.currentTarget;
+            setFollowLogs(view.scrollHeight - view.scrollTop - view.clientHeight < 36);
+          }}>
+            {initial ? <LogListLoading label="正在加载运行日志…" terminal /> : (!lastLoadedAt || logs.length === 0) && (
+              <div className="log-runtime-empty" role={loadError ? "alert" : undefined}>{loadError || "暂无运行日志"}</div>
+            )}
+            {lastLoadedAt && logs.map((l, i) => (
               <div key={l.id ?? i} className={"ln" + (/error|失败|错误/.test(l.text) ? " e" : /warn|冷却|熔断/.test(l.text) ? " w" : "")}>{
                 fmtClock(l.ts)
               } <span className={"lch c-" + l.ch}>{
@@ -773,121 +682,17 @@ export function LogsView({ flash }: { flash: Flash }) {
               }</span> {l.text}</div>
             ))}
           </div>
-          <LogPagination {...pagination.runtime} loading={loading}
-            onPageChange={(page) => setPagination((prev) => ({
-              ...prev, runtime: { ...prev.runtime, page },
-            }))} />
-        </div>
-      ) : (
-        <div className="tbl-wrap">
-          <table className="tbl tbl-logs">
-            {/* 列结构对齐 Go index.html:1253 的请求日志 13 列，另加机器码列（本版采集维度）。 */}
-            <thead><tr>
-              <th>时间</th><th>结果</th><th>模型</th><th>账号</th><th>来源 IP</th><th>User-Agent</th>
-              <th>机器码</th><th>Key 归属</th><th>供应商槽位</th><th>耗时</th><th>TTFB</th>
-              <th>Token</th><th>积分</th><th>请求 ID</th><th style={{ width: 1 }}></th>
-            </tr></thead>
-            <tbody>
-              {loading && !lastLoadedAt ? <tr><td colSpan={15}><LoadingIndicator label="正在加载请求日志…" /></td></tr> : reqs.length === 0 && <tr><td colSpan={15} className="dim" style={{ textAlign: "center", padding: 20 }}>暂无请求日志</td></tr>}
-              {reqs.map((r) => {
-                const open = expanded === r.id;
-                const total = r.totalTokens || ((r.promptTokens ?? 0) + (r.completionTok ?? 0));
-                // 展示层先折叠上游/客户端发来的占位值（unknown/null/…），DB 原文不动。
-                const uaText = uaDisplay(knownText(r.ua));
-                const uaS = uaSummary(uaText);
-                const mid = machineShort(knownText(r.machineId));
-                const modelText = knownText(r.model);
-                const uidText = knownText(r.uid);
-                const ipText = knownText(r.clientIp);
-                const keyText = knownText(r.keyName);
-                const providerText = knownText(r.provider);
-                const slotText = knownText(r.slot);
-                const realmText = knownText(r.realm);
-                const errText = knownText(r.errMsg);
-                const kindLabel = errKindLabel(r.errKind);
-                return (
-                  <React.Fragment key={r.id}>
-                    <tr onClick={() => toggleDetail(r.id)}
-                      aria-expanded={open}
-                      style={{ cursor: "pointer", ...(open ? { background: "var(--bg-soft)" } : {}) }}>
-                      <td className="dim mono">{fmtClock(r.at)}</td>
-                      <td><span className={"tag " + (r.status < 400 && !kindLabel ? "ok" : "err")}
-                        title={errText || undefined}>
-                        {r.status}{kindLabel ? " " + kindLabel : r.status < 400 ? " 成功" : " 错误"}
-                        {errText ? " · 报错" : ""}</span></td>
-                      <td className="mono">{modelText || <span className="dim">—</span>}</td>
-                      <td className="mono">{uidText || <span className="dim">—</span>}</td>
-                      <td className="mono">{ipText || <span className="dim">—</span>}</td>
-                      <td title={uaText || undefined} style={{ maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {uaS || <span className="dim">—</span>}
-                      </td>
-                      <td className="mono" title={knownText(r.machineId) || undefined}>{mid || <span className="dim">—</span>}</td>
-                      <td>{keyText ? <span className="tag">{keyText}</span> : <span className="dim">—</span>}</td>
-                      <td>{providerText
-                        ? <span className="mono" title={providerText + (slotText ? " · " + slotText : "")}>
-                          {providerText}{slotText ? " · " + slotText : ""}</span>
-                        : (realmText ? <span className="tag">{realmText === "global" ? "国际版池" : "国内版池"}</span> : <span className="dim">—</span>)}</td>
-                      <td className="mono">{fmtMs(r.durationMs)}</td>
-                      <td className="mono">{r.stream ? fmtMs(r.ttfbMs) : <span className="dim">—</span>}</td>
-                      <td className="mono" title={r.totalTokens
-                        ? String(r.totalTokens)
-                        : ((r.promptTokens ?? 0) > 0 || (r.completionTok ?? 0) > 0
-                          ? `${r.promptTokens} + ${r.completionTok}` : undefined)}>
-                        {total > 0 ? fmtTok(total) : <span className="dim">—</span>}</td>
-                      <td className="mono">{fmtCredit(r.credit, r.hasCredit)}</td>
-                      <td className="mono" title={r.id} style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {r.id.slice(0, 10) + "…"}
-                      </td>
-                      <td><span className="dim" style={{ fontSize: 12 }}>{open ? "▲" : "▼"}</span></td>
-                    </tr>
-                    {open && (
-                      <tr>
-                        <td colSpan={15} style={{ background: "var(--bg-soft)", padding: "10px 16px" }}>
-                          <div className="kv-grid">
-                            <span className="dim">请求 ID</span><span className="mono">{r.id}</span>
-                            <span className="dim">时间</span><span>{fmtDateTime(r.at)}</span>
-                            <span className="dim">状态 / 结果</span><span>{r.status}{kindLabel ? " · " + kindLabel : r.status < 400 ? " · 成功" : " · 错误"}</span>
-                            <span className="dim">流式</span><span>{r.stream ? "SSE" : "一次性"}</span>
-                            <span className="dim">账号 UID</span><span className="mono">{uidText || "—"}</span>
-                            <span className="dim">机器码（完整）</span><span className="mono">{knownText(r.machineId) || "—"}</span>
-                            <span className="dim">Key 归属</span><span>{keyText || "—"}</span>
-                            <span className="dim">供应商槽位</span><span>{providerText ? providerText + (slotText ? " · " + slotText : "") : (realmText || "—")}</span>
-                            <span className="dim">模型</span><span className="mono">{modelText || "—"}</span>
-                            <span className="dim">路径</span><span className="mono">{knownText(r.path) || "—"}</span>
-                            <span className="dim">轮转尝试</span><span>{r.attempts ? r.attempts + " 次" : "—"}</span>
-                            <span className="dim">运行时长 / TTFB</span><span>{fmtMs(r.durationMs)}{r.stream ? " / " + fmtMs(r.ttfbMs) : ""}</span>
-                            <span className="dim">Token</span><span>{total > 0
-                              ? `${fmtNum(total)}（in ${fmtNum(r.promptTokens ?? 0)} · out ${fmtNum(r.completionTok ?? 0)}）` : "—"}</span>
-                            <span className="dim">积分</span><span>{fmtCredit(r.credit, r.hasCredit)}{r.hasCredit ? " pts" : ""}</span>
-                            <span className="dim">缓存命中</span><span>{(r.cacheHitTok ?? 0) > 0 || (r.cacheMissTok ?? 0) > 0
-                              ? `hit ${fmtNum(r.cacheHitTok ?? 0)} · miss ${fmtNum(r.cacheMissTok ?? 0)}` : "—"}</span>
-                            {errText && <>
-                              <span className="dim">报错内容</span>
-                              <span className="mono" style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{errText}</span>
-                            </>}
-                            <span className="dim">客户端 IP</span><span className="mono">{ipText || "—"}</span>
-                            <span className="dim">User-Agent</span><span style={{ wordBreak: "break-all" }}>{uaText || "—"}</span>
-                          </div>
-                          <RequestLogDetailView
-                            entry={details[r.id]}
-                            loading={!!detailLoading[r.id]}
-                            error={detailErrors[r.id] || undefined}
-                            onRequestDialog={() => requestDialog(r.id)}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-          <LogPagination {...pagination.requests} loading={loading}
-            onPageChange={(page) => setPagination((prev) => ({
-              ...prev, requests: { ...prev.requests, page },
-            }))} />
-        </div>
-      )}
+          {lastLoadedAt && pagination.runtime.total > 0 && (
+            <LogPagination {...pagination.runtime} pageSize={RUNTIME_PAGE} pendingPage={pendingPage}
+              blocked={Boolean(foreground)} failure={pageFailure} onPageChange={changePage} />
+          )}
+        </TabsContent>
+
+        <TabsContent value="cache" aria-busy={Boolean(foreground)}>
+          <CacheStatusPanel stats={cacheStats} initial={initial} error={loadError} />
+        </TabsContent>
+      </Tabs>
+
       {detailAuthId && <SuperPasswordModal
         title="查看对话记录"
         description="验证超级密码后查看本次请求与回复的对话内容。密码仅用于本次请求，不会保存。"
@@ -897,6 +702,6 @@ export function LogsView({ flash }: { flash: Flash }) {
         onCancel={() => { if (!detailAuthBusy) { setDetailAuthId(null); setDetailAuthError(""); } }}
         onConfirm={confirmDetailAuth}
       />}
-    </Box>
+    </>
   );
 }

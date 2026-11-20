@@ -1,0 +1,765 @@
+{
+  "schema": "review.changes.v1",
+  "created_at": "2026-11-20T02:57:41.267Z",
+  "workspace": "C:\\Users\\16321\\Downloads\\workbuddy2api-panel-main\\wb2api-next",
+  "backup": ".codex-backup/review-20261120-095054",
+  "files": [
+    {
+      "path": ".dockerignore",
+      "kind": "modified",
+      "before_sha256": "514a44cebcdda662d606fd01138d09c8c0ac8d9df8f5df2074fce72b766dae7c",
+      "after_sha256": "55a10f287229d5ac87b37dd1aad8cec3e706e0e1229060293897688de0e02927",
+      "before_bytes": 290,
+      "after_bytes": 387,
+      "backup": ".dockerignore"
+    },
+    {
+      "path": ".gitignore",
+      "kind": "modified",
+      "before_sha256": "9002191cab4b79b33f48f621ffa62313d6a978a3f1fcf56a7f4202004975023f",
+      "after_sha256": "e42212aee2998df6b8f088a7682ead95a2029a59255a6c53c64a9a3886af6258",
+      "before_bytes": 767,
+      "after_bytes": 909,
+      "backup": ".gitignore"
+    },
+    {
+      "path": ".env.example",
+      "kind": "modified",
+      "before_sha256": "5f0f895feeeb4ed5d3e0f05cb197c29094c95ccf1fab461be7b3296106fe9719",
+      "after_sha256": "78b89ef5797d41f4c7c7ef1ed64db8dddba50bcb5afcf056e4d94203af150461",
+      "before_bytes": 1272,
+      "after_bytes": 1548,
+      "backup": ".env.example"
+    },
+    {
+      "path": "README.md",
+      "kind": "modified",
+      "before_sha256": "b21541f808f137941575d5b596e4d02fcc3e9faad2215e72a50158c8fc864e2e",
+      "after_sha256": "81f66a6fd8dc649251bcec2291b79c77538f08ba63fe6652e99b11bc928d61d2",
+      "before_bytes": 8781,
+      "after_bytes": 9258,
+      "backup": "README.md"
+    },
+    {
+      "path": "eslint.config.mjs",
+      "kind": "modified",
+      "before_sha256": "754bb9510c291c39839a535cfa482644ee66696f23bd1925380d5c91b110c1af",
+      "after_sha256": "2e687e5ab18f378d8b1c03d482f68e04df4f0114cea2b32eba64c1be56dcde3c",
+      "before_bytes": 522,
+      "after_bytes": 1062,
+      "backup": "eslint.config.mjs"
+    },
+    {
+      "path": "package.json",
+      "kind": "modified",
+      "before_sha256": "ae60e080e9c76a4a99f0089fc6e0bf45c8522d53629ccfb7ab230903d2eddc2e",
+      "after_sha256": "f83669e3df03304b0ea8a942801ae7fc5b4166c7ddebbbcadefaaefda6c555ad",
+      "before_bytes": 1407,
+      "after_bytes": 1692,
+      "backup": "package.json"
+    },
+    {
+      "path": "package-lock.json",
+      "kind": "modified",
+      "before_sha256": "ca431d08870c0826d679590f4141be5e1349dd86a95ea73c569a4b2c67b594e0",
+      "after_sha256": "0bee89edefc96965c1169afecef055e3e02006a2dba5bf4d8731163b2bc67114",
+      "before_bytes": 304959,
+      "after_bytes": 305602,
+      "backup": "package-lock.json"
+    },
+    {
+      "path": "next.config.ts",
+      "kind": "modified",
+      "before_sha256": "e629d3b8561e34f2b97e8cffd8080f3010a09bfe1d154b70ed33836332daa1a7",
+      "after_sha256": "18d60d90d707fa4e156f258b319d0fe0619df1c5d5616963391c84e53f7a24cd",
+      "before_bytes": 830,
+      "after_bytes": 1125,
+      "backup": "next.config.ts"
+    },
+    {
+      "path": "src/instrumentation.ts",
+      "kind": "modified",
+      "before_sha256": "d7fd73d15c688dafdf0e5a6235388a235f6985381e6c6e37d44260dc53a0d2b5",
+      "after_sha256": "712359d6382110eae9b61316cd0751236d690d0b65a77b764d86eb1fe78d0303",
+      "before_bytes": 473,
+      "after_bytes": 519,
+      "backup": "src/instrumentation.ts"
+    },
+    {
+      "path": "src/lib/panel-auth.ts",
+      "kind": "modified",
+      "before_sha256": "3543d5342ecd9cc238db6ec36aa2606c5a3598ead83356e979fe20cf16ae4987",
+      "after_sha256": "01c7bf07b99e23432ce58acea84a1a0980b65b70c49c5650dcfcc19db5cdde2a",
+      "before_bytes": 1413,
+      "after_bytes": 1752,
+      "backup": "src/lib/panel-auth.ts"
+    },
+    {
+      "path": "src/lib/auth-guard.ts",
+      "kind": "modified",
+      "before_sha256": "bf81bf286a780393503aa42498c2b3c74006caa6bf370a10bcf853cb204a85cd",
+      "after_sha256": "8b227cfb8652e0cd9ef743fda8bd887eae8055d92c5ad84200feb992eb16bd8c",
+      "before_bytes": 6532,
+      "after_bytes": 6760,
+      "backup": "src/lib/auth-guard.ts"
+    },
+    {
+      "path": "src/lib/balance.ts",
+      "kind": "modified",
+      "before_sha256": "05e1aceb8d06c07bfc659766c4266e55756b6712bd86825b1b0d64d885c0bf7c",
+      "after_sha256": "51323f109985acb34977e845bbe3dc5d750df3007e14516cae4bd37859af3a06",
+      "before_bytes": 8927,
+      "after_bytes": 9317,
+      "backup": "src/lib/balance.ts"
+    },
+    {
+      "path": "src/lib/cron.ts",
+      "kind": "modified",
+      "before_sha256": "ce10d117e3712d86dbcddee048afbd7a6c65959488a6a57221a3dd614d21dfce",
+      "after_sha256": "9c4de53e50e409dd8edb8ff218b7d42f75a0a6aff4bb598774fb215803b019c3",
+      "before_bytes": 31180,
+      "after_bytes": 32101,
+      "backup": "src/lib/cron.ts"
+    },
+    {
+      "path": "src/lib/pool.ts",
+      "kind": "modified",
+      "before_sha256": "9009ebb3dc3235d48b845a0c82439d83ac69ae66db328041f8f2589f47cd30df",
+      "after_sha256": "a637c83af5bf31e1b9291dd8f6d368de1cf691d05f89e786132bf6bbe9eb24c5",
+      "before_bytes": 50046,
+      "after_bytes": 51522,
+      "backup": "src/lib/pool.ts"
+    },
+    {
+      "path": "src/lib/provider.ts",
+      "kind": "modified",
+      "before_sha256": "04431549a28dc821f89d9143862863b85344e8815567303c5311dc536d329fc3",
+      "after_sha256": "03ac1b9a7cddc855d67a2705b992b8918b03adbcbda866b0a829d8c48c4c1909",
+      "before_bytes": 12602,
+      "after_bytes": 13340,
+      "backup": "src/lib/provider.ts"
+    },
+    {
+      "path": "src/lib/provider-observation.ts",
+      "kind": "modified",
+      "before_sha256": "0e1e0ca70d5a934c8b3000cd15a04fe47552ce951806b333ca845384de57f1f0",
+      "after_sha256": "e7a4d6156be66f42692183eb3e21cd3d097c5ede7faefb38e20d8e0e3db3c389",
+      "before_bytes": 8488,
+      "after_bytes": 8788,
+      "backup": "src/lib/provider-observation.ts"
+    },
+    {
+      "path": "src/lib/scheduler.ts",
+      "kind": "modified",
+      "before_sha256": "c72830ee06c83c4c1e6e7e2c0f3fdcda95c75f9765e891e14152acd881ec37ac",
+      "after_sha256": "dbf3544b9c7539248f6ecb8867f4a7262ce48a95495faf7da2d085f5f12133d1",
+      "before_bytes": 17852,
+      "after_bytes": 18299,
+      "backup": "src/lib/scheduler.ts"
+    },
+    {
+      "path": "src/lib/usage-query.ts",
+      "kind": "modified",
+      "before_sha256": "6f17516f2900173363ac553c03d3295374fc1fa9055074e8d40fa747f1a1e52c",
+      "after_sha256": "72672022d576c7481a884a353a645153f12093a61830ffd2496e98c1461a3892",
+      "before_bytes": 15217,
+      "after_bytes": 15400,
+      "backup": "src/lib/usage-query.ts"
+    },
+    {
+      "path": "src/lib/upstream/client.ts",
+      "kind": "modified",
+      "before_sha256": "2990b2472c92217930664f9d7882a857bf64bd0ab6e0c3f135b45e3a83c4cb61",
+      "after_sha256": "b2848f65618356c5b0632dcfe59c24b72f6dfab4861c60562257ee1190b6b247",
+      "before_bytes": 39292,
+      "after_bytes": 40002,
+      "backup": "src/lib/upstream/client.ts"
+    },
+    {
+      "path": "src/lib/upstream/official-egress.ts",
+      "kind": "modified",
+      "before_sha256": "d53682ae035aad6adedae1317c6360265745e6d4c2981a7267be5404115222cd",
+      "after_sha256": "7989411df38796d58866907b9beda57f2f9fce8e806a83a231701db7bafe6bf4",
+      "before_bytes": 27006,
+      "after_bytes": 31816,
+      "backup": "src/lib/upstream/official-egress.ts"
+    },
+    {
+      "path": "src/lib/upstream/sse.ts",
+      "kind": "modified",
+      "before_sha256": "34f9057391729c84b8b26aaff1508c331e3963239cc0d1fdeb34b94c7a295429",
+      "after_sha256": "d0a59465b1cb59c46d37b4bfe4377d2b16d5b3b4cab59cf04630e2b00ed80026",
+      "before_bytes": 24575,
+      "after_bytes": 26559,
+      "backup": "src/lib/upstream/sse.ts"
+    },
+    {
+      "path": "src/app/panel/page.tsx",
+      "kind": "modified",
+      "before_sha256": "45df198f1000f91cfd772dbf9d36ff01f164634b774857d547d41bad332d4366",
+      "after_sha256": "859ab43e5d29732aed6f13dc03af3e82a5fbdb1135ad2d8d96c96e97731bb247",
+      "before_bytes": 5194,
+      "after_bytes": 6354,
+      "backup": "src/app/panel/page.tsx"
+    },
+    {
+      "path": "src/app/panel/lib.ts",
+      "kind": "modified",
+      "before_sha256": "0ac0cd0db40323f4edace8a88d78c089a8e150691b6b405ff1a944e994c4513f",
+      "after_sha256": "9efcd56e480eda773f69c27d4757ee813a6f29a5a1e232a341a66ed5f3b34636",
+      "before_bytes": 7048,
+      "after_bytes": 8103,
+      "backup": "src/app/panel/lib.ts"
+    },
+    {
+      "path": "src/app/panel/components/login.tsx",
+      "kind": "modified",
+      "before_sha256": "ed7775e14da472799e08db716a7be69d6fa4a2ca48e213e64feeaf7631cccde4",
+      "after_sha256": "64419cf03924fa0b1c3f485b8571829505e7fbdc25c8af1cf73a5ae70a6980ce",
+      "before_bytes": 1755,
+      "after_bytes": 1919,
+      "backup": "src/app/panel/components/login.tsx"
+    },
+    {
+      "path": "src/app/panel/views/config.tsx",
+      "kind": "modified",
+      "before_sha256": "3dc72a1d3f6cd859312bbdad415d0841cf025190a7e0d2b168c5c7eb6756c1ad",
+      "after_sha256": "335dcbdf6d9fbc0d94f0a81a00d7a90ea01ca17b67e8f09df9a2c69bf9deb7f4",
+      "before_bytes": 15832,
+      "after_bytes": 15851,
+      "backup": "src/app/panel/views/config.tsx"
+    },
+    {
+      "path": "src/app/api/panel/balance_history/route.ts",
+      "kind": "modified",
+      "before_sha256": "10d1d985c2f1f84d9918efe38ba2757f9e0f3ac854b6915be65a6548bc7a0d09",
+      "after_sha256": "2b0df94b51ebc8135faaebb9b75d2d9a7731fc68cfd64811fcc663ebe4c45531",
+      "before_bytes": 3707,
+      "after_bytes": 2772,
+      "backup": "src/app/api/panel/balance_history/route.ts"
+    },
+    {
+      "path": "src/app/api/panel/import/cockpit/route.ts",
+      "kind": "modified",
+      "before_sha256": "2d8ca06395b9ab8d804b7c336dd2ae89899423d2a032af3c645f3c5859b49778",
+      "after_sha256": "18c7e3101bdc7d3f2a297427505e743afb112b6b8422301215b76b8662a1f78a",
+      "before_bytes": 5444,
+      "after_bytes": 6078,
+      "backup": "src/app/api/panel/import/cockpit/route.ts"
+    },
+    {
+      "path": "src/app/api/panel/keys/route.ts",
+      "kind": "modified",
+      "before_sha256": "135d57ca4a5d280a85a5cf599560a7a764b319de100843e5fe30b6fd71467dcc",
+      "after_sha256": "b118591f866280066d0468cb00033208959729252b3cd176ecf993470fb14360",
+      "before_bytes": 2138,
+      "after_bytes": 2323,
+      "backup": "src/app/api/panel/keys/route.ts"
+    },
+    {
+      "path": "src/app/api/v1/chat/completions/route.ts",
+      "kind": "modified",
+      "before_sha256": "a309168b5bff611dda0d852c04bf0667baaaded5ac9e57604a63261ebdee4878",
+      "after_sha256": "e5e1166a456af3c048dc38a4f4887c2b10057c4bb5838b96bdb1fc271745191f",
+      "before_bytes": 1069,
+      "after_bytes": 1396,
+      "backup": "src/app/api/v1/chat/completions/route.ts"
+    },
+    {
+      "path": "src/app/api/v1/fetch/route.ts",
+      "kind": "modified",
+      "before_sha256": "090640cdf58ea9fda43e7f92840e93e233e4154fd3b63ec29788fbb4343bb9bc",
+      "after_sha256": "87d002108b603032963426843bb98431665af0e49c5caa4dd3a18227594826c4",
+      "before_bytes": 3221,
+      "after_bytes": 3391,
+      "backup": "src/app/api/v1/fetch/route.ts"
+    },
+    {
+      "path": "src/app/api/v1/messages/route.ts",
+      "kind": "modified",
+      "before_sha256": "d6152eadfad378eefb0226ce3b12fed8553696dfe076c3d19fa6f1da49ecaa24",
+      "after_sha256": "fa5f46966183e97b2eeb42048bbaf22824314df2207d2280b5d49238b108d868",
+      "before_bytes": 3263,
+      "after_bytes": 3806,
+      "backup": "src/app/api/v1/messages/route.ts"
+    },
+    {
+      "path": "src/app/api/v1/search/route.ts",
+      "kind": "modified",
+      "before_sha256": "3a066cbc0fa65a44ad902d22659b296bee62f1c7434617a332f6680894bbf1a8",
+      "after_sha256": "13cbde180e76ccb5f4050387c5adcfae415756152d333027d8578bc6ff974dba",
+      "before_bytes": 2566,
+      "after_bytes": 2736,
+      "backup": "src/app/api/v1/search/route.ts"
+    },
+    {
+      "path": "scripts/auth-401.test.mts",
+      "kind": "modified",
+      "before_sha256": "091fb49184c880c7ac2c3f6542d369844099eadd293ab35a3e9b451bad238118",
+      "after_sha256": "36e2cc735f5b5d7d21f37e6932c18bdfdc79f7c8eb7fa4a03413ad87ecb4ae29",
+      "before_bytes": 2495,
+      "after_bytes": 2469,
+      "backup": "scripts/auth-401.test.mts"
+    },
+    {
+      "path": "scripts/capacity-wait.test.mts",
+      "kind": "modified",
+      "before_sha256": "574e7a6f059542e857ebb4ee92a2ffe7fd1a719d921fd01c27145c4717d566f5",
+      "after_sha256": "d2bf09faf29f133f794ea7bbdac06ba3ef17ed4f778674fbffa46fac7442c591",
+      "before_bytes": 5740,
+      "after_bytes": 5828,
+      "backup": "scripts/capacity-wait.test.mts"
+    },
+    {
+      "path": "scripts/dsml.test.mts",
+      "kind": "modified",
+      "before_sha256": "d94725cdfeff4efe66a2a3496a9eb3f9141ad6cbe3fa435b3ba64f5ea6f244f3",
+      "after_sha256": "67989dcd56678b401c18316bea4325bcdfd9ab1f2604456b3a9abb547d12a197",
+      "before_bytes": 14864,
+      "after_bytes": 15017,
+      "backup": "scripts/dsml.test.mts"
+    },
+    {
+      "path": "scripts/global-cache-uid.test.mts",
+      "kind": "modified",
+      "before_sha256": "5332eb64f13c17a7e3829c774754bcbb54a602156263c7da2ef65bd3b967fdc2",
+      "after_sha256": "869f70d18e5d64224143b939ebc9c7b2359cd4603c99eb893782370c8796cd2e",
+      "before_bytes": 3011,
+      "after_bytes": 2961,
+      "backup": "scripts/global-cache-uid.test.mts"
+    },
+    {
+      "path": "scripts/model-json.test.mts",
+      "kind": "modified",
+      "before_sha256": "234cd4f82e7d2a8c398254db093966567b1dc07c2b70febf7f84570e8513f079",
+      "after_sha256": "1de3401acd66e652d1b93c4089b18ab7162c6737340f150b9b1dee2409177147",
+      "before_bytes": 6595,
+      "after_bytes": 7247,
+      "backup": "scripts/model-json.test.mts"
+    },
+    {
+      "path": "scripts/modelview.test.mts",
+      "kind": "modified",
+      "before_sha256": "1a0ba258a0bdd827edde772edfc6159a0d979d618e6e75fd3c75372068395e79",
+      "after_sha256": "78a9ee2110cad86604cbba90390ab8eb2d73351b5df8bd8c8abafd6eb913838f",
+      "before_bytes": 5160,
+      "after_bytes": 5230,
+      "backup": "scripts/modelview.test.mts"
+    },
+    {
+      "path": "scripts/provider-routing-log.test.mts",
+      "kind": "modified",
+      "before_sha256": "ce0e14de87df9c429d20860b492ee68d189ac2c7a6d77ddf69d9bff04c56d1cf",
+      "after_sha256": "dc3d1e83f222f732df880235fd939b5c025b8546637acbe9a995b28adc2cab28",
+      "before_bytes": 17287,
+      "after_bytes": 18654,
+      "backup": "scripts/provider-routing-log.test.mts"
+    },
+    {
+      "path": "scripts/queue-6020.test.mts",
+      "kind": "modified",
+      "before_sha256": "480e2077358c02c1853a8fd379fef8e964644ad4338e0ebbd7687c2232e02c16",
+      "after_sha256": "e86b945ffb109ff40209e949476743aeb95c1a252d2bcaa43054bf1dc319eddc",
+      "before_bytes": 4036,
+      "after_bytes": 4036,
+      "backup": "scripts/queue-6020.test.mts"
+    },
+    {
+      "path": "scripts/routing-429.test.mts",
+      "kind": "modified",
+      "before_sha256": "b5ce44cdc82d55a4e5bb70752ee33e83488573fcf293907dd1d60c7cddd4cee7",
+      "after_sha256": "d893092976dce3709574277990ec3a388ef5f4fbbf8a957fa9214e149f8e9531",
+      "before_bytes": 16702,
+      "after_bytes": 17274,
+      "backup": "scripts/routing-429.test.mts"
+    },
+    {
+      "path": "scripts/sse-repair.test.mts",
+      "kind": "modified",
+      "before_sha256": "5fc41a586a94378385c442569771d3f42eeb86dfe41390458b5f8147c307df93",
+      "after_sha256": "54b5db0ca8c8c131d10b6c1d64d8d9dc320246ffaf8b8fdb7c714668137a3a25",
+      "before_bytes": 7198,
+      "after_bytes": 7204,
+      "backup": "scripts/sse-repair.test.mts"
+    },
+    {
+      "path": "scripts/official-client-hello.test.mts",
+      "kind": "modified",
+      "before_sha256": "f6388ef9de5c9d69600872a972c7a15586a256b01ecc6bcf5ee5c0235c66b78e",
+      "after_sha256": "5297ced8b62c0d07597ace76fbee196e4f2296f082b643f540057bc82d0ab1f3",
+      "before_bytes": 7161,
+      "after_bytes": 7711,
+      "backup": "scripts/official-client-hello.test.mts"
+    },
+    {
+      "path": "scripts/official-egress.test.mts",
+      "kind": "modified",
+      "before_sha256": "0a4ce92a0a8b447ec6b5ff4a2c2f52134e814a9990b8184b95a6b85cca1dd817",
+      "after_sha256": "94f4d935c769f49add6e213bd9ad95e15e0d7a3e7e11df4220eec7f0b4a4d431",
+      "before_bytes": 12766,
+      "after_bytes": 13146,
+      "backup": "scripts/official-egress.test.mts"
+    },
+    {
+      "path": "scripts/cloudbase-migrate/03-import.cjs",
+      "kind": "modified",
+      "before_sha256": "bc6dfa3664dc3505f1863f3fd13275ce587e89377e63c684de0089c33e5e6734",
+      "after_sha256": "1d3da4b7f7745091cfed5cb4ad6560fd1769003aec6b4e2043745a1fbf607b32",
+      "before_bytes": 6030,
+      "after_bytes": 6026,
+      "backup": "scripts/cloudbase-migrate/03-import.cjs"
+    },
+    {
+      "path": "scripts/cloudbase-migrate/04-import-migrations.cjs",
+      "kind": "modified",
+      "before_sha256": "b0461f886f440ace42d28971036938b930411d516f3451fa6c826ed39611952c",
+      "after_sha256": "240581bdae345c30a961ead02a58618434fef46178c5f7b51c1a170bed4ed469",
+      "before_bytes": 793,
+      "after_bytes": 745,
+      "backup": "scripts/cloudbase-migrate/04-import-migrations.cjs"
+    },
+    {
+      "path": "scripts/db-restore.mjs",
+      "kind": "modified",
+      "before_sha256": "93db3beb75abe4b0af7a6a977c1af81f315b3ce00ba80e1ae242f284af77ae29",
+      "after_sha256": "e54ecca23c2fd2501b417bcc17496883a54a3a05a05d0a4b75ad6bb2321c03de",
+      "before_bytes": 3878,
+      "after_bytes": 3874,
+      "backup": "scripts/db-restore.mjs"
+    },
+    {
+      "path": "scripts/egress-audit.cjs",
+      "kind": "modified",
+      "before_sha256": "febf9350850edee21d2c270ebe589ec79f72fe11ce5c0e5e9c80dd85de43a9ca",
+      "after_sha256": "2db1e3d961f193c42a49a7e4664671d7028d348321be2450d52719eddb13fabc",
+      "before_bytes": 8646,
+      "after_bytes": 8385,
+      "backup": "scripts/egress-audit.cjs"
+    },
+    {
+      "path": "workers/workspace/files.ts",
+      "kind": "modified",
+      "before_sha256": "fdcc7e7f11d1560e6a7edda720f319ed1c8d5a5b8cc653421c3f1e39241e3561",
+      "after_sha256": "ac0d50eac564f7efc4b9973a8e82220a5cef6432ba1f34d746856cf44770fb8f",
+      "before_bytes": 7034,
+      "after_bytes": 7130,
+      "backup": "concurrent-preimages/workers/workspace/files.ts"
+    },
+    {
+      "path": "workers/workspace/pi.ts",
+      "kind": "modified",
+      "before_sha256": "7856f8151aa838c7a53914c8153b685e7d8386e639b29737c745b1d6d265dc01",
+      "after_sha256": "460ce59f56d212d6e09f14c866e9ca02750efb527be5bf9b15855012c3006411",
+      "before_bytes": 7974,
+      "after_bytes": 8224,
+      "backup": "concurrent-preimages/workers/workspace/pi.ts"
+    },
+    {
+      "path": "src/lib/workspace/settings.ts",
+      "kind": "modified",
+      "before_sha256": "8b3e3fc998c045eb363d1ee60fa563a3ca7fa699ef4e25a5ea48505b4e72ef37",
+      "after_sha256": "27bd6c1d47d870597e1bcdec8e1bbadda3ee93fbead5d6f67653a077d333075a",
+      "before_bytes": 454,
+      "after_bytes": 596,
+      "backup": "concurrent-preimages/src/lib/workspace/settings.ts"
+    },
+    {
+      "path": "src/lib/workspace/store.ts",
+      "kind": "modified",
+      "before_sha256": "43c9f85aaed63cd88a275e908387859398430b908739b2a6c8aeccba8270b6a5",
+      "after_sha256": "b12a607363b5bf21a9ba8b933b37c962e0931189925a69f7f818164e21f5c48d",
+      "before_bytes": 22639,
+      "after_bytes": 26366,
+      "backup": "concurrent-preimages/src/lib/workspace/store.ts"
+    },
+    {
+      "path": "src/features/agent-workspace/workspace.css",
+      "kind": "modified",
+      "before_sha256": "9feea21a9e886a096ff0efe4028480624c8413ddb168e961b027c348724993a8",
+      "after_sha256": "e87d9842cff79515e5bac48c881b839a64a6a02fa4bda9fa89de3291022a4a72",
+      "before_bytes": 8103,
+      "after_bytes": 8211,
+      "backup": "concurrent-preimages/src/features/agent-workspace/workspace.css"
+    },
+    {
+      "path": "REVIEW.md",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "5532013e22e84f3578239803c71571d563e9a00ad43db1638c83afeda8ded644",
+      "before_bytes": 0,
+      "after_bytes": 14930,
+      "backup": null
+    },
+    {
+      "path": "src/lib/request-validation.ts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "be03788d1b73cef72eb5a6f3b2dd6a9bf8d8d0c43e142cfb1584dce0ad247e17",
+      "before_bytes": 0,
+      "after_bytes": 836,
+      "backup": null
+    },
+    {
+      "path": "scripts/auth-boundary.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "42c160a3329d6a0e7aa95abee989c0e55e47ec0f762d8a741a0e1f2f7f58304d",
+      "before_bytes": 0,
+      "after_bytes": 4162,
+      "backup": null
+    },
+    {
+      "path": "scripts/request-validation.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "d51dec9c5efc238d5121ae7cf95a524d9645a939797f285247b3dbb702bca702",
+      "before_bytes": 0,
+      "after_bytes": 3423,
+      "backup": null
+    },
+    {
+      "path": "scripts/panel-auth-client.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "ef20592d78cc622be4abed0bac33af20f8e9686dd22e7ec74857a49a2ca098d5",
+      "before_bytes": 0,
+      "after_bytes": 3566,
+      "backup": null
+    },
+    {
+      "path": "scripts/import-validation.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "cefbe6078695feaf668024fb17bc65e43a3956baa6ce6fcc1e46afd100882486",
+      "before_bytes": 0,
+      "after_bytes": 2728,
+      "backup": null
+    },
+    {
+      "path": "scripts/balance-aggregation.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "31a70a56b071494e63d19471518927005cc99575838b5784e52185c69c77280b",
+      "before_bytes": 0,
+      "after_bytes": 2246,
+      "backup": null
+    },
+    {
+      "path": "scripts/keepalive-concurrency.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "733ce1657b626b1cd97c586ff78a9c982e50778767aa44245744ee7c52ae33ab",
+      "before_bytes": 0,
+      "after_bytes": 2112,
+      "backup": null
+    },
+    {
+      "path": "scripts/provider-body-timeout.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "f298c6a1282b2a8de4f697591f330441b0fda3069f90cec8b5621004d43861d6",
+      "before_bytes": 0,
+      "after_bytes": 3782,
+      "backup": null
+    },
+    {
+      "path": "scripts/balance-history-pagination.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "379f46a7809d532d85be7e33f46f62de7e9e2f92909ff80e5db70774e42ceb76",
+      "before_bytes": 0,
+      "after_bytes": 2123,
+      "backup": null
+    },
+    {
+      "path": "scripts/usage-dal-parity.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "696507b89fd1b74b8e1e8cda277df2c7f8e06e6901f861054b52967f3d5f71c1",
+      "before_bytes": 0,
+      "after_bytes": 1346,
+      "backup": null
+    },
+    {
+      "path": "scripts/scheduler-health-cadence.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "452e3dac62eb48a15e253cfa86f77fd6e095630a725048183a9323d4b3a0bac4",
+      "before_bytes": 0,
+      "after_bytes": 1822,
+      "backup": null
+    },
+    {
+      "path": "scripts/pool-settlement-concurrency.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "1340166345287458d916e0ce0c60bd30790ec470248100f2a2e0cf7d2e272a81",
+      "before_bytes": 0,
+      "after_bytes": 4511,
+      "backup": null
+    },
+    {
+      "path": "scripts/sse-safety.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "13c924c2df1ec8d055d7c72c058c2b7aa6aeb844bdeeb25ce29f9695e0b76d42",
+      "before_bytes": 0,
+      "after_bytes": 4822,
+      "backup": null
+    },
+    {
+      "path": "scripts/official-egress-security.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "75e1a3007424b127006be91e104a33bab37e36423419282f3006c128f3345ebd",
+      "before_bytes": 0,
+      "after_bytes": 6377,
+      "backup": null
+    },
+    {
+      "path": "scripts/client-profile.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "e89662e35e0ff13b622a30b55407502bebbac8e32fb59e0f816be93bb0a8c147",
+      "before_bytes": 0,
+      "after_bytes": 2543,
+      "backup": null
+    },
+    {
+      "path": "scripts/next-config.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "14c969591ae4e94f8145a1fa2969bd4a5c3180078dc57b5ad0464809fb0cc4bd",
+      "before_bytes": 0,
+      "after_bytes": 926,
+      "backup": null
+    },
+    {
+      "path": "scripts/instrumentation.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "9a5469b6f7f0aace200a65fae78aa91c28d4d0e513bda48e494b496543d14fdb",
+      "before_bytes": 0,
+      "after_bytes": 1141,
+      "backup": null
+    },
+    {
+      "path": "scripts/offline-isolation.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "a033013d81cc32d0d7eb817072d1ee0388e6a6bec6fe0b6bd95f6821fafdfd29",
+      "before_bytes": 0,
+      "after_bytes": 1065,
+      "backup": null
+    },
+    {
+      "path": "scripts/test-offline.mjs",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "4604b445cab9cf4f7870d6010f144623a480f143606125018150422ff3fb7c2d",
+      "before_bytes": 0,
+      "after_bytes": 2959,
+      "backup": null
+    },
+    {
+      "path": "scripts/test-offline-setup.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "0142bb15067728eb39df49546e6f52d1339ba15c8350998cff6555a5dc5516cf",
+      "before_bytes": 0,
+      "after_bytes": 4138,
+      "backup": null
+    },
+    {
+      "path": "scripts/fixtures/leaked-markup.txt",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "3a8d975906310b558d2fd8708bfac3e3f92557ec8fb7b402cb64091847e74559",
+      "before_bytes": 0,
+      "after_bytes": 482,
+      "backup": null
+    },
+    {
+      "path": "scripts/audit-workbuddy-runtime.mjs",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "05f67741cee803b93c74d9893570f634a0d8e2d980884c2a1ff52210973d97e0",
+      "before_bytes": 0,
+      "after_bytes": 5736,
+      "backup": null
+    },
+    {
+      "path": "docs/review-2026-11-20/workbuddy-runtime.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "04e055f18cacc17a99146f82635463db087e829bd82926012789e3e23b5bde18",
+      "before_bytes": 0,
+      "after_bytes": 1118,
+      "backup": null
+    },
+    {
+      "path": "docs/review-2026-11-20/workbuddy-profile.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "ccee51fb02a012323841aa8e149147f2f309cf000c8f0a9ce7e624813a00350c",
+      "before_bytes": 0,
+      "after_bytes": 40937,
+      "backup": null
+    },
+    {
+      "path": "docs/review-2026-11-20/artifact-summary.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "5c4ee37c0afb3ce242e292cd077d5bc56f0b509929aafec0b4659e5c67c3a17f",
+      "before_bytes": 0,
+      "after_bytes": 7029,
+      "backup": null
+    },
+    {
+      "path": "docs/review-2026-11-20/npm-audit.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "9aca47b16abcc812747dbbb7d322df2ae2533a7ead09592530ddd2ad98d8d70a",
+      "before_bytes": 0,
+      "after_bytes": 2686,
+      "backup": null
+    },
+    {
+      "path": "docs/review-2026-11-20/panel-smoke.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "ae58f8f4fb0ae44afd24754b92876a2fe8f50b03939a7ec44da7e3787e1d6ae5",
+      "before_bytes": 0,
+      "after_bytes": 1863,
+      "backup": null
+    },
+    {
+      "path": "docs/review-2026-11-20/login.png",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "ec8e7e9fc4a388715f9fcd7f1ad3f08264dadf1266328af6b24dca8ed3768def",
+      "before_bytes": 0,
+      "after_bytes": 24296,
+      "backup": null
+    },
+    {
+      "path": "docs/review-2026-11-20/accounts-empty.png",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "56a5ebcf8e46ae2dda27f261a82883ce4a538efffd17ed54c87df95497b3c4d0",
+      "before_bytes": 0,
+      "after_bytes": 114915,
+      "backup": null
+    },
+    {
+      "path": "docs/review-2026-11-20/verification.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "5d0d37b0adb3910ae25dad1262678e8ba326de738e5846514ce38af926547696",
+      "before_bytes": 0,
+      "after_bytes": 1524,
+      "backup": null
+    }
+  ],
+  "note": "This manifest does not include its own self-hash; the local restore manifest does."
+}

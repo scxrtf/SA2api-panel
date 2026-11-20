@@ -7,7 +7,8 @@ import { idleMonitorBody } from "./upstream/idle";
 import { maybeProbeAfterModelCall } from "./model-health-trigger";
 import { providerEndpoint } from "./provider-endpoint";
 import { ProviderObservation, observeProviderStream } from "./provider-observation";
-import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import { assistantMessageForLog, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, sanitizeRequestLogData, type AttemptDetail } from "./request-log-detail";
+import { markRunlogPersisted, runlog } from "./runlog"; import { clipLogText } from "./logfmt"; import { assistantMessageForLog, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, type AttemptDetail } from "./request-log-detail";
+import { createRequestLog } from "./request-log-write";
 
 // 供应商表进程内快照。原先每次 providerChat 都 findUnique 一次、每次
 // providerModels / modelhealth 目录刷新都 findMany 一次，是 egress 的固定开销。
@@ -46,6 +47,7 @@ interface ProviderRequestContext {
   clientIP: string;
   ua: string;
   path: string;
+  sessionId?: string;
   signal?: AbortSignal;
 }
 
@@ -110,8 +112,9 @@ export async function providerChat(
       reasoningContent: stats.responseReasoning,
       toolCalls: stats.responseToolCalls,
     });
-    const requestLogTask = Promise.resolve().then(() => prisma.requestLog.create({ data: sanitizeRequestLogData({
+    const requestLogTask = createRequestLog({
       ...common, uid: "", slot: attempts ? name : "", machineId: "",
+      sessionId: context?.sessionId,
       requestMessages: logDialogEnabled() ? requestMessagesForLog(requestMessages) as Prisma.InputJsonValue : undefined,
       responseMessage: logDialogEnabled() ? responseMessage as Prisma.InputJsonValue | undefined : undefined,
       errMsg: errText,
@@ -123,15 +126,15 @@ export async function providerChat(
         ? outboundOverrides as unknown as Prisma.InputJsonValue : undefined,
       attemptDetails: attemptDetails.length
         ? attemptDetails as unknown as Prisma.InputJsonValue : undefined,
-    }) as never }));
+    });
     const tasks: Promise<unknown>[] = [requestLogTask];
     if (attempts) tasks.push(Promise.resolve().then(() => prisma.usageEvent.create({ data: {
       ...common, uid: name, ok, latencyMs: durationMs,
     } })));
     const results = await Promise.allSettled(tasks);
     if (results[0]?.status === "fulfilled") {
-      const created = results[0].value as { id?: string };
-      if (created.id) markRunlogPersisted(logRef, created.id);
+      const created = results[0].value as { id?: string } | undefined;
+      if (created?.id) markRunlogPersisted(logRef, created.id);
     }
     for (const result of results) {
       if (result.status === "rejected") {
@@ -225,7 +228,7 @@ export async function providerChat(
   const contentType = resp.headers.get("content-type") ?? "application/json";
   if (stream && resp.ok && resp.body && /text\/event-stream/i.test(contentType)) {
     const cfgIdle = cfg.stream_idle_ms;
-    const monitored = idleMonitorBody(resp.body, cfgIdle > 0 ? cfgIdle : 300_000,
+    const monitored = idleMonitorBody(resp.body, cfgIdle,
       () => {
         stats.errKind ||= "provider_stream_timeout";
         stats.errorBody ||= "provider stream idle timeout";
@@ -237,10 +240,25 @@ export async function providerChat(
   }
   // stream=true 也可能收到 JSON 错误信封；按实际 Content-Type 观测并透传。
   let raw: string;
-  try { raw = await resp.text(); }
+  let bodyTimedOut = false;
+  try {
+    // 头到达后仍可能只返回部分 JSON/错误正文并永久挂起。正文同样需要空闲监控，
+    // 且取消后的短读不能当成功响应；stream_idle_ms=0 保留显式关闭监控语义。
+    const monitored = resp.body
+      ? idleMonitorBody(resp.body, cfg.stream_idle_ms, () => { bodyTimedOut = true; })
+      : null;
+    raw = monitored ? await new Response(monitored).text() : "";
+  }
   catch (e) {
+    if (context?.signal?.aborted) {
+      return fail(499, "client_cancelled", "client cancelled request",
+        e instanceof Error ? e.stack || e.message : String(e), "provider_read");
+    }
     return fail(502, "provider_read_error", "provider response body read failed",
       e instanceof Error ? e.stack || e.message : String(e), "provider_read");
+  }
+  if (bodyTimedOut) {
+    return fail(504, "provider_body_timeout", "provider response body idle timeout", raw, "provider_read");
   }
   stats.rawBody = raw;
   if (!resp.ok) {

@@ -24,3 +24,11 @@ scripts-*.cjs
 *.log
 scripts/_probe-*
 scripts/_smoke-*
+.codex
+.mirasim
+.workbuddy
+backup-*
+.drill-save-*
+**/*.bak*
+data/upstream-dumps
+scripts/*.ndjson

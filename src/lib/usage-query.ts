@@ -115,10 +115,14 @@ async function queryUsageAggregateDal(q: UsageQuery): Promise<UsageAggRow[]> {
   grp(r => norm(r).key, () => true, "by_key", r => [norm(r).key, norm(r).realm, ""]);
   grp(r => norm(r).model, r => !norm(r).provider, "by_pool_model", r => [norm(r).model, "", ""]);
   grp(r => norm(r).key, r => !norm(r).provider, "by_pool_key", r => [norm(r).key, "", ""]);
-  grp(r => norm(r).key + "" + norm(r).model, r => !norm(r).provider, "by_pool_key_model", r => [norm(r).key + "" + norm(r).model, norm(r).key, norm(r).model]);
+  // 内部分组用结构化键防止 a+bc / ab+c 碰撞；输出与 SQL chr(1) 契约一致。
+  const keyModelGroup = (r: RawUsageRow) => JSON.stringify([norm(r).key, norm(r).model]);
+  const keyModelColumns = (r: RawUsageRow): [string, string, string] =>
+    [norm(r).key + "\x01" + norm(r).model, norm(r).key, norm(r).model];
+  grp(keyModelGroup, r => !norm(r).provider, "by_pool_key_model", keyModelColumns);
   grp(r => norm(r).provider, r => !!norm(r).provider, "by_provider", r => [norm(r).provider, "", ""]);
   grp(r => norm(r).provider + ":" + norm(r).canonical, r => !!norm(r).provider, "by_provider_model", r => [norm(r).provider + ":" + norm(r).canonical, norm(r).provider, norm(r).canonical]);
-  grp(r => norm(r).key + "" + norm(r).model, () => true, "by_key_model", r => [norm(r).key + "" + norm(r).model, norm(r).key, norm(r).model]);
+  grp(keyModelGroup, () => true, "by_key_model", keyModelColumns);
   // credit_by_account / credit_by_model / credit_by_key
   const cred = (dimension: string, fn: (r: RawUsageRow) => string, keyOf: (r: RawUsageRow) => [string, string, string]) => {
     const m = new Map<string, Sums>();

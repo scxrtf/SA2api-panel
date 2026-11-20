@@ -1,8 +1,8 @@
-// 面板视图注册表：九层机柜单元 ↔ 九个功能页，与 CloseRouter 七层机柜同一模型。
+// 侧栏、机柜和页头共用同一份注册表，序号以此处顺序为准。
 import type { ReactNode } from "react";
 import React from "react";
 
-export type View = "accounts" | "usage" | "analytics" | "packages" | "balhist" | "taskscenter" | "models" | "aichecker" | "gateway" | "connect" | "config" | "cloudbase" | "logs";
+export type View = "accounts" | "usage" | "analytics" | "packages" | "balhist" | "taskscenter" | "models" | "aichecker" | "gateway" | "connect" | "config" | "cloudbase" | "logs" | "workspace";
 
 export interface NavItem {
   id: View;
@@ -39,7 +39,7 @@ export const NAV: NavItem[] = [
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M6.5 1.8h3v5.2l3.5 5.6a1.8 1.8 0 0 1-1.6 2.7H4.6a1.8 1.8 0 0 1-1.6-2.7L6.5 7z" }), React.createElement("path", { d: "M5.2 10.5h5.6" })) },
   { id: "gateway", label: "供应商与密钥", code: "GW", title: "供应商与密钥", sub: "聚合供应商与网关子密钥",
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M2.5 8h3M10.5 8h3M8 2.5v3M8 10.5v3" }), React.createElement("circle", { cx: 8, cy: 8, r: 2.2 }), React.createElement("circle", { cx: 4, cy: 8, r: 1.4 }), React.createElement("circle", { cx: 12, cy: 8, r: 1.4 })) },
-  { id: "connect", label: "接入引导", code: "LINK", title: "接入引导", sub: "OpenAI / Anthropic 客户端接入片段",
+  { id: "connect", label: "接入引导", code: "LINK", title: "接入引导", sub: "连接 Codex、OpenAI SDK 与 Anthropic 客户端",
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M6.5 9.5 9.5 6.5" }), React.createElement("path", { d: "M3 10.5c.8.8 2 .8 2.8 0L7 9.3M13 5.5c-.8-.8-2-.8-2.8 0L9 6.7" }), React.createElement("circle", { cx: 3.5, cy: 10.5, r: 1.2 }), React.createElement("circle", { cx: 12.5, cy: 5.5, r: 1.2 })) },
   { id: "config", label: "配置", code: "CFG", title: "配置", sub: "运行与调度参数，保存即热生效",
     icon: React.createElement("svg", svgProps, React.createElement("circle", { cx: 8, cy: 8, r: 2.2 }), React.createElement("path", { d: "M8 1.6v1.9M8 12.5v1.9M1.6 8h1.9M12.5 8h1.9M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3" })) },
@@ -47,6 +47,25 @@ export const NAV: NavItem[] = [
     icon: React.createElement("svg", svgProps, React.createElement("ellipse", { cx: 8, cy: 4, rx: 5.5, ry: 2 }), React.createElement("path", { d: "M2.5 4v4c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V4M2.5 8v4c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V8" })) },
   { id: "logs", label: "运行日志", code: "LOG", title: "运行日志", sub: "请求日志与运行日志",
     icon: React.createElement("svg", svgProps, React.createElement("path", { d: "M2.5 3.5h11M2.5 8h11M2.5 12.5h7" })) },
+  { id: "workspace", label: "机器会话", code: "TRACE", title: "机器会话", sub: "按机器与会话查看请求、回复和工作树",
+    icon: React.createElement("svg", svgProps,
+      React.createElement("path", { d: "M4 6v4a1 1 0 0 0 1 1h2m5-3V6a2 2 0 0 0-2-2H7" }),
+      React.createElement("rect", { x: 2, y: 2, width: 4, height: 4, rx: 1 }),
+      React.createElement("rect", { x: 8, y: 9, width: 6, height: 5, rx: 1 })) },
 ];
 
 export const pad2 = (n: number) => String(n).padStart(2, "0");
+
+export function isPanelView(value: unknown): value is View {
+  return NAV.some(({ id }) => id === value);
+}
+
+export function panelHref(view: View) {
+  if (view === "workspace") return "/panel/workspace";
+  return view === "accounts" ? "/panel/" : `/panel/?view=${view}`;
+}
+
+export function panelView(pathname: string | null, query: string | null): View {
+  if (pathname?.replace(/\/$/, "") === panelHref("workspace")) return "workspace";
+  return query !== "workspace" && isPanelView(query) ? query : "accounts";
+}

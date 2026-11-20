@@ -46,6 +46,23 @@ let pickSeq = 0;
 const exploreLast = new Map<string, number>();
 let costExploreEvents = 0;
 
+// 余额扣减/权威刷新都是读-改-写。按账号串行化整个结算，避免两个完成的流
+// 同时读取旧余额；globalThis 覆盖 Next 不同路由 bundle，结束后删除空闲队列。
+const balanceGlobals = globalThis as unknown as { __wbBalanceWrites?: Map<string, Promise<void>> };
+const balanceWrites = balanceGlobals.__wbBalanceWrites ?? (balanceGlobals.__wbBalanceWrites = new Map());
+
+function withBalanceWrite<T>(uid: string, action: () => Promise<T>): Promise<T> {
+  const previous = balanceWrites.get(uid) ?? Promise.resolve();
+  const pending = previous.catch(() => undefined).then(action);
+  // 队尾永远履约：失败只传播给自己的调用方，不阻塞后续结算。
+  const tail = pending.then(() => undefined, () => undefined);
+  balanceWrites.set(uid, tail);
+  void tail.then(() => {
+    if (balanceWrites.get(uid) === tail) balanceWrites.delete(uid);
+  });
+  return pending;
+}
+
 // modelCostTTL 成本观测有效期 6h（夜间免费这类时段性优惠不跨时段生效）。
 export const MODEL_COST_TTL_MS = 6 * 3600_000;
 
@@ -837,6 +854,12 @@ export async function noteModelCost(
   tokens: number,
 ): Promise<void> {
   if (!uid || !model || tokens <= 0) return;
+  return withBalanceWrite(uid, () => noteModelCostSerial(uid, model, credit, tokens));
+}
+
+async function noteModelCostSerial(
+  uid: string, model: string, credit: number, tokens: number,
+): Promise<void> {
   let per1k = (credit / tokens) * 1000;
   if (per1k < 0) per1k = 0;
   const now = Date.now();
@@ -954,6 +977,15 @@ export async function setCreditsDetailed(
   expiring: bigint,
   earliestAt: bigint,
   earliestRemain: bigint,
+): Promise<void> {
+  return withBalanceWrite(uid, () => setCreditsDetailedSerial(
+    uid, credits, total, expiring, earliestAt, earliestRemain,
+  ));
+}
+
+async function setCreditsDetailedSerial(
+  uid: string, credits: bigint, total: bigint, expiring: bigint,
+  earliestAt: bigint, earliestRemain: bigint,
 ): Promise<void> {
   if (credits < 0n) credits = 0n;
   if (expiring < 0n) expiring = 0n;

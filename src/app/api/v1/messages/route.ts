@@ -1,8 +1,10 @@
 // POST /api/v1/messages — Anthropic Messages API 兼容端点。
 // 翻译 → 复用 handleChat 全管线（前缀路由/选号/重试/记账）→ 翻译回 Anthropic。
 // 流式：聚合 OpenAI SSE 后重建 Anthropic 事件流（与 Go 同口径，不逐帧转写）。
-import { verifyAny } from "@/lib/auth-guard";
+import { identifyKeyIdentity } from "@/lib/auth-guard";
 import { handleChat } from "@/lib/chat";
+import { isJSONObject } from "@/lib/request-validation";
+import { observeGateway } from "@/lib/workspace/gateway-observer";
 import {
   anthropicError,
   anthropicErrorType,
@@ -20,12 +22,15 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: Request): Promise<Response> {
-  if (!(await verifyAny(req))) {
+  const identity = await identifyKeyIdentity(req);
+  if (!identity) {
     return anthropicError(401, "authentication_error", "invalid api key");
   }
   let parsed: AnthropicRequest;
   try {
-    parsed = (await req.json()) as AnthropicRequest;
+    const body: unknown = await req.json();
+    if (!isJSONObject(body)) return anthropicError(400, "invalid_request_error", "JSON body must be an object");
+    parsed = body as AnthropicRequest;
   } catch (e) {
     return anthropicError(
       400,
@@ -33,8 +38,14 @@ export async function POST(req: Request): Promise<Response> {
       "parse body: " + (e instanceof Error ? e.message : String(e)),
     );
   }
-  if (!parsed.model || typeof parsed.model !== "string") {
+  if (typeof parsed.model !== "string" || !parsed.model.trim()) {
     return anthropicError(400, "invalid_request_error", "model is required");
+  }
+  if (!Array.isArray(parsed.messages) || parsed.messages.length === 0) {
+    return anthropicError(400, "invalid_request_error", "messages must be a non-empty array");
+  }
+  if (parsed.stream !== undefined && typeof parsed.stream !== "boolean") {
+    return anthropicError(400, "invalid_request_error", "stream must be a boolean");
   }
 
   let openaiBody;
@@ -44,13 +55,18 @@ export async function POST(req: Request): Promise<Response> {
     const msg = e instanceof AnthropicTranslateError ? e.message : String(e);
     return anthropicError(400, "invalid_request_error", msg);
   }
+  return observeGateway(req, parsed as unknown as Record<string, unknown>, "anthropic", identity,
+    () => forwardAnthropic(req, parsed, openaiBody));
+}
 
+async function forwardAnthropic(req: Request, parsed: AnthropicRequest, openaiBody: ReturnType<typeof anthropicToOpenAI>) {
   const clientIP =
     (req.headers.get("x-forwarded-for") ?? "").split(",")[0]?.trim() ?? "";
   const ua = req.headers.get("user-agent") ?? "";
 
   const resp = await handleChat({
     body: openaiBody,
+    sessionBody: parsed as unknown as Record<string, unknown>,
     clientIP,
     inboundHeaders: req.headers,
     ua,

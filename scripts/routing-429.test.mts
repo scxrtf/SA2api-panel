@@ -64,6 +64,7 @@ try {
   console.log("PASS healthy account wins over a cooling account");
 
   globalWithDb.prisma = { account: { findMany: async () => [cooling] } };
+  invalidateEntries();
   assert.equal(await pick(DEFAULT_CONFIG, { model: "test-model", realm: "cn" }), null);
   assert.equal(await pick(DEFAULT_CONFIG, {
     model: "test-model", realm: "cn", tried: new Set(["cooling"]),
@@ -74,6 +75,7 @@ try {
   const late = account("late", now + 30_000);
   const modelCooling = account("model", 0, now + 60_000);
   globalWithDb.prisma = { account: { findMany: async () => [late, soon, modelCooling] } };
+  invalidateEntries();
   const status = await retryStatus("test-model", "cn");
   assert.ok(status.retryAfterMs > 0 && status.retryAfterMs <= 5_000,
     `expected earliest recovery <=5s, got ${status.retryAfterMs}ms`);
@@ -87,6 +89,7 @@ try {
   const hardCooling = account("hard-cooling", now + 60_000);
   hardCooling.state.cooldownReason = "hard_credit";
   globalWithDb.prisma = { account: { findMany: async () => [hardCooling] } };
+  invalidateEntries();
   assert.equal((await retryStatus("test-model", "cn")).cooling, 0);
   hardCooling.state.cooldownUntil = BigInt(now - 1);
   hardCooling.state.breakerUntil = BigInt(now + 5_000);
@@ -97,6 +100,7 @@ try {
 
   const globalHealthy = { ...account("global-healthy"), realm: "global" };
   globalWithDb.prisma = { account: { findMany: async () => [modelCooling, globalHealthy] } };
+  invalidateEntries();
   const cnBlock = await modelBlocked("test-model", "cn");
   assert.equal(cnBlock.blocked, true);
   const globalBlock = await modelBlocked("test-model", "global");
@@ -146,6 +150,7 @@ try {
     requestLog: { create: async () => ({}) },
   };
   globalWithDb.prisma = db;
+  invalidateEntries();
   const request = (conversationId = "offline") => handleChat({
     body: {
       model: "cn:test-model", conversation_id: conversationId,
@@ -271,7 +276,7 @@ try {
   invalidateEntries();
   // getConfig 有 5 秒缓存；独立进程避免本文件先前场景缓存默认值干扰测试。
   const exhaustedOutput = execFileSync(process.execPath, [
-    "--import", "tsx", "--require", process.env.TEMP + "\\wb2api-offline-register.cjs", "--eval", String.raw`
+    "--experimental-test-module-mocks", "--import", "tsx", "--import", new URL("./test-offline-setup.mts", import.meta.url).href, "--input-type=module", "--eval", String.raw`
       process.env.USE_CLOUDBASE_REST = "0";
       const { getConfig } = await import("./src/lib/config.ts");
       const { handleChat } = await import("./src/lib/chat.ts");

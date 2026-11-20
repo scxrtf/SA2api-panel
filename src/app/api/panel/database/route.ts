@@ -2,41 +2,19 @@
 import { fail, ok, panelAuth, verifySuperPassword } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { dal } from "@/lib/dal";
-import { cbSelect } from "@/lib/cloudbase-rest";
+import { cbSelect, isCloudbaseRestEnabled } from "@/lib/cloudbase-rest";
 import { getCloudbasePlatformStats } from "@/lib/cloudbase-monitor";
+import { databaseCache } from "@/lib/database-cache";
 import { clearRequestLogDetails, clearRequestLogDialog, pruneModelHealth, pruneRequestLogs, retentionConfig, runRetention } from "@/lib/retention";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// CloudBase 监控数据变化频率低，与面板其它视图统一缓存 1 小时；
-// 手动刷新（前端 force 会带 ?refresh=1）与 POST 清理动作立即失效重拉。
-const CACHE_MS = 3_600_000;
+// 容量与行数缓存 1 小时；平台趋势独立缓存 60 秒，避免表统计拖慢实时指标更新。
 const LIMIT_GB = Number(process.env.DB_SIZE_LIMIT_GB || 5);
-let cache: { at: number; data: Record<string, unknown> } | null = null;
-// QPS 趋势是 5 分钟粒度的实时指标：1 小时的整体缓存会让面板看到滞后近一小时的曲线。
-// 单独给它开短 TTL 缓存，主接口每次刷新时按需拉新并只替换 platform 字段。
-const QPS_CACHE_MS = 60_000;
-let qpsCache: { at: number; platform: Record<string, unknown> | null } | null = null;
-
-async function platformStatsFresh(): Promise<Record<string, unknown> | null> {
-  if (qpsCache && Date.now() - qpsCache.at < QPS_CACHE_MS) return qpsCache.platform;
-  const platform = await getCloudbasePlatformStats();
-  qpsCache = { at: Date.now(), platform: platform as Record<string, unknown> | null };
-  return qpsCache.platform;
-}
-
-// 缓存快照（供面板「缓存详细」页展示）：是否命中、剩余 TTL。
-export function databaseCacheStats(): { cached: boolean; ttlMs: number; cacheMs: number } {
-  const snapshot = cache;
-  const hit = snapshot !== null && Date.now() - snapshot.at < CACHE_MS;
-  return {
-    cached: !!hit,
-    ttlMs: hit && snapshot ? CACHE_MS - (Date.now() - snapshot.at) : 0,
-    cacheMs: CACHE_MS,
-  };
-}
+const { stats: statsCache, platform: qpsCache } = databaseCache;
+const CACHE_MS = statsCache.ttlMs;
 
 interface StatsRow {
   database_name: string;
@@ -47,11 +25,6 @@ interface StatsRow {
   max_connections: string;
   server_version: string;
   tables: { name: string; rows: number; totalBytes: number; dataBytes: number; indexBytes: number }[];
-}
-
-function cloudbaseRestEnabled(): boolean {
-  const v = (process.env.USE_CLOUDBASE_REST ?? "").toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
 }
 
 // 行大小采样：按主键倒序取最近 50 行，序列化字节数均值作为行长估计。
@@ -115,13 +88,7 @@ function mergeGrowthSeries(series: GrowthSeries[]): GrowthSeries {
 
 // CloudBase PostgREST 没有 pg_catalog 访问权限：库大小/连接数/版本拿不到，
 // 业务行数走 DAL 主键分页计数；旧容量字段保留采样估算，资源点与 QPS 走 CAM 接口。
-async function readStatsDal(): Promise<Record<string, unknown>> {
-  if (cache && Date.now() - cache.at < CACHE_MS) {
-    // 主缓存命中时单独刷新 QPS：表格行数/体积这类静态指标走 1h 缓存，
-    // QPS 曲线每次按 60s 短缓存拉新，保证趋势图与上游采样同步。
-    const platform = await platformStatsFresh();
-    return { ...cache.data, platform };
-  }
+async function loadStatsDal(): Promise<Record<string, unknown>> {
   const TABLES: { name: string; model: keyof typeof dal }[] = [
     { name: "Account", model: "account" },
     { name: "AccountState", model: "accountState" },
@@ -175,10 +142,9 @@ async function readStatsDal(): Promise<Record<string, unknown>> {
   }).catch(() => 0);
   const requestLogs = tables.find((t) => t.name === "RequestLog")?.rows ?? 0;
   const totalBytes = tables.reduce((s, t) => s + t.totalBytes, 0);
-  const platform = await platformStatsFresh();
   let host = "";
   try { host = new URL(process.env.CLOUDBASE_POSTGREST_URL || "").hostname; } catch { /* ignore */ }
-  const data = {
+  return {
     measuredAt: new Date().toISOString(),
     cacheSeconds: CACHE_MS / 1000,
     mode: "cloudbase",
@@ -197,19 +163,14 @@ async function readStatsDal(): Promise<Record<string, unknown>> {
       maxConnections: 0,
     },
     tables,
-    platform,
     growthSeries,
     growth: Object.fromEntries(growthEntries.map(([name, growth]) => [name, growth?.total ?? null])),
     growthBasis: "24h",
     retention: retentionConfig(),
   };
-  cache = { at: Date.now(), data };
-  return data;
 }
 
-async function readStats(): Promise<Record<string, unknown>> {
-  if (cloudbaseRestEnabled()) return readStatsDal();
-  if (cache && Date.now() - cache.at < CACHE_MS) return cache.data;
+async function loadStatsDirect(): Promise<Record<string, unknown>> {
   const rows = await prisma.$queryRaw<StatsRow[]>`
     with table_stats as (
       select c.relname as name,
@@ -243,7 +204,7 @@ async function readStats(): Promise<Record<string, unknown>> {
   const bytes = Number(row.database_bytes);
   let host = "";
   try { host = new URL(process.env.DATABASE_URL || "").hostname; } catch { /* ignore */ }
-  const data = {
+  return {
     measuredAt: new Date().toISOString(),
     cacheSeconds: CACHE_MS / 1000,
     mode: "direct",
@@ -263,16 +224,23 @@ async function readStats(): Promise<Record<string, unknown>> {
     tables: row.tables,
     retention: retentionConfig(),
   };
-  cache = { at: Date.now(), data };
-  return data;
+}
+
+async function readStats(refresh = false): Promise<Record<string, unknown>> {
+  if (!isCloudbaseRestEnabled()) return statsCache.load(loadStatsDirect, refresh);
+  const [stats, platform] = await Promise.all([
+    statsCache.load(loadStatsDal, refresh),
+    qpsCache.load(getCloudbasePlatformStats, refresh),
+  ]);
+  return { ...stats, platform };
 }
 
 export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   try {
-    if (new URL(req.url).searchParams.get("refresh") === "1") cache = null;
-    return ok(await readStats());
+    const refresh = new URL(req.url).searchParams.get("refresh") === "1";
+    return ok(await readStats(refresh));
   } catch (e) {
     return fail(500, e instanceof Error ? e.message : String(e));
   }
@@ -286,19 +254,19 @@ export async function POST(req: Request) {
     if (!verifySuperPassword(body.super_password)) return fail(403, "超级密码错误");
     if (body.action === "clear_dialog") {
       const cleared = await clearRequestLogDialog();
-      cache = null;
+      statsCache.clear();
       return ok({ action: body.action, cleared, stats: await readStats() });
     }
     if (body.action === "run_retention") {
       const result = await runRetention();
-      cache = null;
+      statsCache.clear();
       return ok({ action: body.action, result, stats: await readStats() });
     }
     if (body.action === "clear_details") {
       const hours = body.olderThanHours === undefined ? retentionConfig().detailHours : Number(body.olderThanHours);
       if (!Number.isInteger(hours) || hours < 0 || hours > 24 * 365) return fail(400, "详情时间范围须为 0～8760 之间的整数小时");
       const cleared = await clearRequestLogDetails(hours);
-      cache = null;
+      statsCache.clear();
       return ok({ action: body.action, cleared, stats: await readStats() });
     }
     if (body.action === "clear_expired_logs") {
@@ -310,7 +278,7 @@ export async function POST(req: Request) {
         rowsDeleted: await pruneRequestLogs(days),
         healthDeleted: await pruneModelHealth(healthDays),
       };
-      cache = null;
+      statsCache.clear();
       return ok({ action: body.action, result, stats: await readStats() });
     }
     return fail(400, "unknown_action");

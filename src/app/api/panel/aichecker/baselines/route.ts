@@ -1,5 +1,5 @@
 import { panelAuth, ok, fail } from "@/lib/panel-auth";
-import { panelCacheGet, panelCacheSet, panelCacheDel } from "@/lib/panel-cache";
+import { cachedPanelData, panelCacheDel } from "@/lib/panel-cache";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -16,15 +16,19 @@ export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const refresh = new URL(req.url).searchParams.get("refresh") === "1";
-  if (!refresh) {
-    const cached = panelCacheGet<Record<string, unknown>>("aichecker/baselines");
-    if (cached) return ok({ ...cached, cached: true });
-  }
+  const { promise, cached } = cachedPanelData("aichecker/baselines", () => loadBaselines(req.url), {
+    refresh, shouldCache: (result) => result.status === 200,
+  });
+  const result = await promise;
+  if (result.status !== 200) return fail(result.status, result.error);
+  return ok(cached ? { ...result.payload, cached: true } : result.payload);
+}
 
+async function loadBaselines(reqUrl: string) {
   let official: { id: string; file: string }[] = [];
   let officialError = "";
   try {
-    official = await loadOfficialBaselines(req.url);
+    official = await loadOfficialBaselines(reqUrl);
   } catch (e) {
     officialError = e instanceof Error ? e.message : String(e);
   }
@@ -36,7 +40,7 @@ export async function GET(req: Request) {
   }
 
   if (official.length === 0 && custom.length === 0) {
-    return fail(502, "无法获取官方基准列表" + (officialError ? `：${officialError}` : ""));
+    return { status: 502 as const, error: "无法获取官方基准列表" + (officialError ? `：${officialError}` : "") };
   }
   const models = [
     ...official.map((b) => ({ ...b, source: "official" as const, label: b.id })),
@@ -52,8 +56,7 @@ export async function GET(req: Request) {
     repo: "hanlinwenyuan/hlwy-ai-checker",
     ...(officialError ? { official_error: officialError } : {}),
   };
-  panelCacheSet("aichecker/baselines", payload);
-  return ok(payload);
+  return { status: 200 as const, payload };
 }
 
 // POST 保存基准：

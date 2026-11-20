@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BALANCE_HISTORY_CACHE_MS, panelCacheTtlMs } from "../src/lib/balance-history-cache.ts";
-import { panelCacheGet, panelCacheSet, panelCacheStats } from "../src/lib/panel-cache.ts";
+import { BALANCE_HISTORY_CACHE_MS } from "../src/lib/balance-history-cache.ts";
+import { panelCacheGet, panelCacheSet, panelCacheStats, panelCacheTtlMs } from "../src/lib/panel-cache.ts";
 import { rollupBalanceSamples, sampleAll } from "../src/lib/balance.ts";
 import { prisma } from "../src/lib/db.ts";
 
@@ -24,9 +24,10 @@ test("余额保留策略不删除原始采样点", { skip: !integration }, async
   }
 });
 
-test("余额趋势采用 60 秒短缓存，其他面板数据仍保留 1 小时", () => {
+test("余额趋势和模型探测采用 60 秒短缓存，积分构成仍保留 1 小时", () => {
   assert.equal(BALANCE_HISTORY_CACHE_MS, 60_000);
   assert.equal(panelCacheTtlMs("balance_history:30"), 60_000);
+  assert.equal(panelCacheTtlMs("model_probes"), 60_000);
   assert.equal(panelCacheTtlMs("packages"), 3_600_000);
 });
 
@@ -41,7 +42,7 @@ test("余额缓存过期后重取，状态页显示独立 TTL 并清理过期项
     now += 59_999;
     assert.deepEqual(panelCacheGet("balance_history:30", BALANCE_HISTORY_CACHE_MS), { series: [{ current: 100 }] });
     now += 1;
-    assert.equal(panelCacheGet("balance_history:30", BALANCE_HISTORY_CACHE_MS), null);
+    assert.equal(panelCacheGet("balance_history:30"), null);
     assert.notEqual(panelCacheGet("packages"), null);
 
     panelCacheSet("balance_history:30", { series: [{ current: 200 }] });

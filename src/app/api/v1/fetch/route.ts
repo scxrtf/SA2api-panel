@@ -1,7 +1,9 @@
 // POST /api/v1/fetch —— DeepSeek Fetch API 兼容入口（移植 internal/server/fetch.go，
 // 上游 3d5900f）：DSH 的 web-deepseek-api 把 /search 与 /fetch 指向同一 baseURL。
 //
-// 请求 {"url":"https://…"} → 响应 {content:<markdown>, url, title}（上游字段透传；
+// 请求 {url,prompt?,model_name?,timeout?,max_length?,model?,realm?}；官方默认
+// format=markdown、timeout=20秒、max_length=100000，URL-only 调用兼容 prompt=""。
+// 响应 {content:<markdown>, url, title}（上游字段透传；
 // content 缺失/非字符串按 502 报错，不伪造空正文——空正文会被 DSH 当成「页面没有
 // 可用内容」的成功抓取，掩盖真实故障）。
 export const runtime = "nodejs";
@@ -11,7 +13,8 @@ export const maxDuration = 120;
 import { verifyAny } from "@/lib/auth-guard";
 import { openAIError } from "@/lib/chat";
 import { agentToolError, resolveRealm, runAgentTool } from "@/lib/agenttool-route";
-import { webFetch } from "@/lib/upstream/agenttool";
+import { agentToolContext, webFetch } from "@/lib/upstream/agenttool";
+import { isJSONObject } from "@/lib/request-validation";
 
 // normalizeFetchResponse 确保响应是 DSH 需要的 {"content": "<markdown>"} 形状。
 function normalizeFetchResponse(raw: string, reqURL: string): { out?: string; err?: string } {
@@ -42,7 +45,9 @@ export async function POST(req: Request): Promise<Response> {
   }
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    const parsed: unknown = await req.json();
+    if (!isJSONObject(parsed)) return openAIError(400, "invalid_request", "JSON body must be an object");
+    body = parsed;
   } catch {
     return openAIError(400, "invalid_request", "invalid JSON body");
   }
@@ -60,9 +65,36 @@ export async function POST(req: Request): Promise<Response> {
   if (scheme !== "http:" && scheme !== "https:") {
     return openAIError(400, "invalid_request", "url must be an absolute http(s) URL");
   }
+  for (const name of ["prompt", "model", "model_name"]) {
+    const value = body[name];
+    if (value !== undefined && (typeof value !== "string" || name !== "prompt" && !value.trim())) {
+      return openAIError(400, "invalid_request", `${name} must be ${name === "prompt" ? "a string" : "a non-empty string"}`);
+    }
+  }
+  if (body["realm"] !== undefined && (typeof body["realm"] !== "string" || !["cn", "global"].includes(body["realm"].trim()))) {
+    return openAIError(400, "invalid_request", "realm must be cn or global");
+  }
+  if (body["format"] !== undefined && body["format"] !== "markdown") {
+    return openAIError(400, "invalid_request", "format must be markdown");
+  }
+  // 可选范围是网关保护值，不宣称是上游公开接口限制；显式值不静默丢弃。
+  for (const [name, max] of [["timeout", 120], ["max_length", 1_000_000]] as const) {
+    const value = body[name];
+    if (value !== undefined && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > max)) {
+      return openAIError(400, "invalid_request", `${name} must be an integer from 1 to ${max}`);
+    }
+  }
   const realm = resolveRealm(body["model"], body["realm"]);
+  const selectedModel = typeof body["model"] === "string"
+    ? body["model"].trim().replace(/^(?:cn|global):/i, "") : "";
   const outcome = await runAgentTool(realm,
-    (cfg, auth) => webFetch(cfg, auth, target, req.signal), req.signal);
+    (cfg, auth) => webFetch(cfg, auth, target, req.signal, {
+      prompt: body["prompt"] as string | undefined,
+      model_name: (body["model_name"] as string | undefined) || selectedModel || undefined,
+      timeout: body["timeout"] as number | undefined,
+      max_length: body["max_length"] as number | undefined,
+      context: agentToolContext(req.headers),
+    }), req.signal);
   if (outcome.data === undefined) return agentToolError(outcome);
   const norm = normalizeFetchResponse(outcome.data, target);
   if (norm.err) {

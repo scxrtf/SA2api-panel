@@ -44,7 +44,9 @@ import { tokensPerSecond } from "./upstream/usage";
 import { currentModelRate } from "./upstream/modelCatalog";
 import { toolNameAllowlist, MarkupRepair, repairAggregatedResponse } from "./upstream/dsml";
 import { runlog } from "./runlog";
-import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import { assistantMessageForLog, errorText, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, responseMessageFromObject, sanitizeRequestLogData, type AttemptDetail } from "./request-log-detail";
+import { clipLogText } from "./logfmt"; import { markRunlogPersisted } from "./runlog"; import * as wafip from "./wafip"; import { backoffAfter, sleep } from "./backoff"; import { identifyKeyIdentity, providerAllowed } from "./auth-guard"; import { withFreshAuth, classifySessionError } from "./accountSession"; import { isModelRateLimit } from "./upstream/errors"; import { aggregateStarved, starvedRetryBody } from "./starved"; import { maybeProbeAfterModelCall } from "./model-health-trigger"; import { assistantMessageForLog, errorText, failureDetail, logDialogEnabled, parameterOverrides, requestMessagesForLog, responseMessageFromObject, type AttemptDetail } from "./request-log-detail";
+import { requestLogSessionId } from "./request-log-session-id";
+import { createRequestLog } from "./request-log-write";
 
 import { sleepAbortable } from "./backoff";
 
@@ -211,6 +213,7 @@ async function recordAttempt(r: AttemptRec): Promise<void> {
 
 async function recordRequestLog(r: {
   uid: string;
+  sessionId?: string;
   model: string;
   realm: string;
   provider: string;
@@ -245,10 +248,7 @@ async function recordRequestLog(r: {
     const data = logDialogEnabled()
       ? r
       : { ...r, requestMessages: undefined, responseMessage: undefined };
-    const row = await prisma.requestLog.create({
-      data: sanitizeRequestLogData(data) as never,
-      select: { id: true },
-    });
+    const row = await createRequestLog(data as never);
     markRunlogPersisted(logRef, row.id);
     return true;
   } catch (error) {
@@ -303,6 +303,7 @@ export interface ChatResult {
 //（rawBody 为原始串，供不改写场景零漂移透传）。
 export async function handleChat(opts: {
   body: Obj;
+  sessionBody?: Obj; // 翻译协议的原始入参，仅用于识别会话元数据
   clientIP: string;
   inboundHeaders: Headers;
   ua: string;
@@ -348,6 +349,7 @@ export async function handleChat(opts: {
   // 同一身份同时携带供应商授权面，供 provider 通道做准入判定。
   const keyIdentity = opts.req ? await identifyKeyIdentity(opts.req) : null;
   const keyName = keyIdentity?.name ?? "";
+  const sessionId = requestLogSessionId(opts.inboundHeaders, opts.sessionBody ?? body, keyName);
   // 请求时生效积分倍率（Go handler.go:605）：目录成功刷新时缓存于 modelRates 桶。
   const modelRate = currentModelRate(realm, bare);
   // 显式供应商前缀绝不回落池：查找失败由 providerChat 返回并记录错误。
@@ -364,7 +366,7 @@ export async function handleChat(opts: {
           uid: "", model: rawModel, realm: "provider:" + provider, provider,
           status: 403, errKind: "provider_not_authorized", stream,
           errMsg: "key 未授权使用供应商 " + provider,
-          durationMs: Date.now() - started, clientIp: clientIP, ua, path, keyName,
+          durationMs: Date.now() - started, clientIp: clientIP, ua, path, keyName, sessionId,
           attempts: 0,
           requestMessages: loggedRequestMessages,
           errorDetail: failureDetail({
@@ -385,7 +387,7 @@ export async function handleChat(opts: {
     }
     const { providerChat } = await import("./provider");
     return providerChat(provider, bare, JSON.stringify(body), stream, keyName, rawModel,
-      { started, clientIP, ua, path, signal: opts.req?.signal });
+      { started, clientIP, ua, path, sessionId, signal: opts.req?.signal });
   }
 
   // 会话键 / 轮级键 / 粘性解析。
@@ -578,7 +580,7 @@ export async function handleChat(opts: {
       hasCredit: extra?.hasCredit === true,
       cacheHitTok: extra?.hasCache ? (extra?.cacheHitTokens ?? 0) : 0,
       cacheMissTok: extra?.hasCache ? (extra?.cacheMissTokens ?? 0) : 0,
-      keyName,
+      keyName, sessionId,
       // 机器码 = 实际用号按 desktop.go deriveID("machine") 同盐派生（sha36 截 36 hex）。
       // uid 为空（选号前失败 / 供应商直连）时留空，与 Go 请求日志"账号列 + 派生"口径一致。
       machineId: uid ? deriveID({ uid }, "machine") : "",

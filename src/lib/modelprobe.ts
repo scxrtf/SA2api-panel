@@ -5,6 +5,7 @@
 //   finish=stop   且 输出 < 请求  → 模型主动收尾，不可作判据，强化提示重试
 // 结果五态之三：clamped（钳制）/ at_least（≥下界）/ inconclusive（未测出）。
 import { prisma } from "@/lib/db";
+import { MODEL_PROBES_CACHE_KEY, panelCacheDel } from "./panel-cache";
 
 export const PROBE_TIMEOUT_MS = 300_000; // 单请求上限 5 分钟
 export const PROBE_SOURCE = "panel-probe";
@@ -182,38 +183,9 @@ export function verdictFromState(
   return { measured: null, verdict: "inconclusive", note: st.evidence.join("；") || "未测出", elapsed_s: elapsedS };
 }
 
-// 探测结果进程内快照：面板多个视图会轮询 /api/panel/model_probes，
-// 原先每次都整表 findMany（含 note 这类长文本）。60s TTL + 写点失效。
-const PROBES_TTL_MS = 60_000;
-type ProbeRow = {
-  key: string;
-  claimed: number | null;
-  measured: number | null;
-  verdict: string;
-  note: string;
-  source: string;
-  testedAt: Date;
-  updatedAt: Date;
-};
-type ProbesCache = { at: number; rows: ProbeRow[] };
-const probeGlobals = globalThis as unknown as { __wbProbes?: ProbesCache };
-
+// 列表由面板路由统一缓存，避免下层快照让手动刷新仍读到旧结果。
 export function invalidateProbeList(): void {
-  delete probeGlobals.__wbProbes;
-}
-
-async function loadProbeRows(): Promise<ProbeRow[]> {
-  const cached = probeGlobals.__wbProbes;
-  if (cached && Date.now() - cached.at < PROBES_TTL_MS) return cached.rows.slice();
-  const rows = await prisma.modelProbe.findMany({
-    orderBy: { updatedAt: "desc" },
-    select: {
-      key: true, claimed: true, measured: true, verdict: true,
-      note: true, source: true, testedAt: true, updatedAt: true,
-    },
-  });
-  probeGlobals.__wbProbes = { at: Date.now(), rows };
-  return rows.slice();
+  panelCacheDel(MODEL_PROBES_CACHE_KEY);
 }
 
 // saveProbe 落库（合并语义：未重测的模型保留旧记录，上游改限后重跑即覆盖）。
@@ -242,7 +214,13 @@ export async function listProbes(): Promise<{
   }>;
   exists: boolean; updated_at: string | null;
 }> {
-  const rows = await loadProbeRows();
+  const rows = await prisma.modelProbe.findMany({
+    orderBy: { updatedAt: "desc" },
+    select: {
+      key: true, claimed: true, measured: true, verdict: true,
+      note: true, source: true, testedAt: true, updatedAt: true,
+    },
+  });
   const probes: Record<string, {
     claimed: number | null; measured: number | null; verdict: string;
     note: string; tested_at: string; source: string;

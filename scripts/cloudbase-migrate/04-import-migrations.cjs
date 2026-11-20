@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
 
 const out = process.argv[2];
 const rows = JSON.parse(fs.readFileSync(path.join(out, 'data', '_prisma_migrations.json'), 'utf8'));

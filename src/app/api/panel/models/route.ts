@@ -12,7 +12,7 @@ import {
 import { effortListing } from "@/lib/upstream/payload";
 import { providerModels } from "@/lib/provider";
 import { authShapeOf } from "@/lib/login";
-import { panelCacheGet, panelCacheSet } from "@/lib/panel-cache";
+import { cachedPanelData } from "@/lib/panel-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,10 +61,15 @@ export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const refresh = new URL(req.url).searchParams.get("refresh") === "1";
-  if (!refresh) {
-    const cached = panelCacheGet<Record<string, unknown>>("models");
-    if (cached) return ok({ ...cached, cached: true });
-  }
+  const { promise, cached } = cachedPanelData("models", loadModels, {
+    refresh, shouldCache: (result) => result.status === 200,
+  });
+  const result = await promise;
+  if (result.status !== 200) return fail(result.status, result.error);
+  return ok(cached ? { ...result.payload, cached: true } : result.payload);
+}
+
+async function loadModels() {
   const cfg = await getConfig();
   const out: Record<string, unknown>[] = [];
   const fetchErrs: string[] = [];
@@ -124,11 +129,10 @@ export async function GET(req: Request) {
 
   if (out.length === 0) {
     const errs = [...fetchErrs, ...providerErrs];
-    if (errs.length > 0) return fail(502, "fetch models: " + errs.join("; "));
-    return fail(503, "没有可用账号：请先在面板添加账号再查询");
+    if (errs.length > 0) return { status: 502 as const, error: "fetch models: " + errs.join("; ") };
+    return { status: 503 as const, error: "没有可用账号：请先在面板添加账号再查询" };
   }
   // 供应商目录失败时透出原因，避免「探测能拿到模型、模型页却空着」无从排查。
   const payload = { models: out, ...(providerErrs.length > 0 ? { warnings: providerErrs } : {}) };
-  panelCacheSet("models", payload);
-  return ok(payload);
+  return { status: 200 as const, payload };
 }

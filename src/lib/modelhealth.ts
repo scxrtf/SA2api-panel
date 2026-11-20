@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "./db";
 import { getConfig, type AppConfig } from "./config";
 import { authShapeOf } from "./login";
+import { invalidateProbeList } from "./modelprobe";
 import { findProvider, loadProviders, providerModels } from "./provider";
 import { providerEndpoint } from "./provider-endpoint";
 import { runlog } from "./runlog";
@@ -165,6 +166,7 @@ async function executeProbe(source: string, modelKey: string): Promise<ModelHeal
     : await discoverTargets(cfg);
   let ok = 0;
   let failed = 0;
+  let saved = false;
 
   await mapLimit(targets, PROBE_CONCURRENCY, async (target) => {
     const outcome = await probeTarget(cfg, target);
@@ -183,6 +185,7 @@ async function executeProbe(source: string, modelKey: string): Promise<ModelHeal
         },
         select: { id: true },
       });
+      saved = true;
       const latency = outcome.latencyMs >= 1000
         ? (outcome.latencyMs / 1000).toFixed(1) + "s"
         : outcome.latencyMs + "ms";
@@ -207,11 +210,13 @@ async function executeProbe(source: string, modelKey: string): Promise<ModelHeal
     }
   });
 
-  await prisma.modelHealthCheck.deleteMany({
+  const removed = await prisma.modelHealthCheck.deleteMany({
     where: { checkedAt: { lt: new Date(Date.now() - HEALTH_RETENTION_MS) } },
   }).catch((e) => {
     runlog("modelhealth cleanup: " + errMsg(e));
+    return null;
   });
+  if (saved || removed?.count) invalidateProbeList();
 
   const result = {
     total: targets.length,

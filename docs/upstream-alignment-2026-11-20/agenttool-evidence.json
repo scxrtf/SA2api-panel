@@ -1,0 +1,119 @@
+{
+  "generated_at": "2026-11-20T03:25:39.055Z",
+  "source": {
+    "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+    "bytes": 9880062,
+    "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5"
+  },
+  "authority": "shipped-artifact-static-analysis",
+  "execution": {
+    "specimen_executed": false,
+    "real_upstream_requested": false,
+    "user_tokens_read": false
+  },
+  "observations": [
+    {
+      "id": "AT1",
+      "selector": "57893(t,i,n){",
+      "byte_offset": 2000777,
+      "statement": "Module cq.Vo is the literal CLI, not the multi-part WorkBuddy RPC UA.",
+      "excerpt": "57893(t,i,n){n.d(i,{KR:()=>s.KR,Vo:()=>\"CLI\"});var s=n(64186);\"string\"==typeof PACKAGE_TYPE&&PACKAGE_TYPE},64"
+    },
+    {
+      "id": "AT2",
+      "selector": "34506(t,i,n){",
+      "byte_offset": 9855527,
+      "statement": "a7.nH is uuidv7; message/request use its hyphenless value.",
+      "excerpt": "34506(t,i,n){let s;n.d(i,{nH:()=>uuidv7});let c=\"0123456789abcdef\";let UUID=class UUID{constructor(t){this.bytes=t}static ofInner(t){if(16===t.length)return new UUID(t);throw TypeE"
+    },
+    {
+      "id": "AT3",
+      "selector": "t.APPLICATION_JSON_UTF8=",
+      "byte_offset": 128775,
+      "statement": "Tool Content-Type is application/json;charset=UTF-8.",
+      "excerpt": "t.APPLICATION_JSON_UTF8=\"application/json;charset=UTF-8\",t.APPLICATION_OCTET"
+    },
+    {
+      "id": "AT4",
+      "selector": "let dw=aY.z.object({query:",
+      "byte_offset": 5986564,
+      "statement": "Search requires query min length 2, optional domain string arrays, and the recorded freshness regex.",
+      "excerpt": "let dw=aY.z.object({query:aY.z.string().min(2).describe(\"The search query to use\"),allowed_domains:aY.z.array(aY.z.string()).optional().describe(\"Only include search results from these domains.\"),blocked_domains:aY.z.array(aY.z.string()).optional().describe(\"Never include search results from these domains\"),freshness:aY.z.string().regex(/^(?:d(?:[1-9]|[12]\\d|30)?|m(?:[1-9]|1[0-2])?|y[1-5]?)$/,\"freshness must be d or d1-d30, m or m1-m12, or y or y1-y5\").optional().describe(\"Filter search results by time range. Supports d[N], m[N], and y[N] for the last N calendar days, months, and years:\\n- d[N]: N is an integer from 1 to 30;\\n- m[N]: N is an integer from 1 to 12;\\n- y[N]: N is an integer from 1 to 5.\\n\\nN may be omitted and defaults to 1. The current partial calendar unit counts as 1. For example, d1 means today, m1 means the current month to date, and y1 means the current year to date. Omit this parameter to disable time filtering.\")}),dS=class extends aZ.o{constructor(){super(...arguments),this.WEB_SEARCH_API_PATH=\"/agenttool/v1/search\",this.WEB_SEARCH"
+    },
+    {
+      "id": "AT5",
+      "selector": "async performWebSearch(t,i){",
+      "byte_offset": 5990540,
+      "statement": "Search constructs an independent header object and calls native fetch with a 20000 ms controller timer.",
+      "excerpt": "async performWebSearch(t,i){let n,s=await this.productManager.waitConfiguration(),c=`${s.endpoint}${this.WEB_SEARCH_API_PATH}`,p=(0,a7.nH)().replace(/-/g,\"\"),{ideType:h,platform:S,platformVersion:E}=await this.clientInfoProvider.get(),A=this.authenticationManager.currentSessionSubject.getValue(),R=A?.account,I=(0,cH.Gp)(),P=I?.auth?.accessToken??A?.auth?.accessToken,O=Object.keys((0,cH.Gp)()?.headers??{}).some(t=>\"authorization\"===t.toLowerCase());if(!P&&!O)throw Error(\"Authentication required for web search\");let M=E||\"1.0.0\",N={[cU.HttpHeaders.ACCEPT]:cU.MediaType.APPLICATION_JSON,[cU.HttpHeaders.CONTENT_TYPE]:cU.MediaType.APPLICATION_JSON_UTF8,[cU.HttpHeaders.X_REQUESTED_WITH]:cU.XML_HTTP_REQUEST,[cU.HttpHeaders.USER_AGENT]:`${cq.Vo}/${M}`,...P?{[cU.HttpHeaders.AUTHORIZATION]:`Bearer ${P}`}:{},[cW.AGENT_INTENT]:i.meta?.[\"codebuddy.ai/mode\"]??\"craft\",[cW.AGENT_RUNTIME]:(0,cG.kl)(i),[cW.CONVERSATION_ID_HEADER]:i.id,[cW.CONVERSATION_REQUEST_ID_HEADER]:i.conversationRequestId||\"\",[cW.CONVERSATION_MESSAGE_ID_HEADER]:p,[cW.REQUEST_ID_HEADER]:p,[cW.PRODUCT]:s?.deploymentType||\"\",[cW.IDE_TYPE_HEADER]:h||cq.Vo,[cW.IDE_NAME_HEADER]:S||cq.Vo,[cW.IDE_VERSION_HEADER]:M,[cW.USER_ID_HEADER]:I?.account?.uid??(R?.uid||\"\"),\"X-Department-Info\":R?.departmentFullName||\"\"},L=await this.settingsManager.get(\"env\"),$=R?.enterpriseId?.trim(),F=(0,cB.isPersonalAccount)(R)&&!$;await af.IOAUtils.applyIOADefaultHeaders(N,L,{enterpriseId:$,skipDefaultEnterpriseHeaders:F}),await this.customHeadersProvider.applyTo(N),Object.assign(N,(0,cH.I2)());let U=this.buildRequestBody(t),B=new AbortController,W=setTimeout(()=>B.abort(),this.WEB_SEARCH_TIMEOUT_MS);try{n=await fetch(c,{method:\"POST\",headers:N,body:JSON.stringify(U),signal:B.signal})}catch(t){if(t instanceof DOMException&&\"AbortError\"===t.name)throw Error(`Web Search API request timed out after ${this.WEB_SEARCH_TIMEOUT_MS/1e3}s (requestId: ${N[cW.REQUEST_ID_HEADER]})`);throw t}finally{clearTimeout(W)}if(!n.ok)throw Error(`Web Search API request failed with status ${n.status}: ${n.statusText} (requestId: ${N[cW.REQUEST_ID_HEADER]})`);let q=await n.json();if(q.code)throw Error(`Web Search API returned error: ${q.msg||\"Unknown error\"} (requestId: ${N[cW.REQUEST_ID_HEADER]})`);let G=q;return{provider:G.provider||\"\",results:(G.results||[]).map(t=>({title:t.title||\"Untitled\",url:t.url||\"\",snippet:t.snippet||\"\",...t.site?{site:t.site}:{},..."
+    },
+    {
+      "id": "AT6",
+      "selector": "buildRequestBody(t){let{query:",
+      "byte_offset": 5993049,
+      "statement": "Search fixed default max_results=5; blocked domains become -site terms in query, allowed_domains and freshness stay request fields.",
+      "excerpt": "buildRequestBody(t){let{query:i,allowed_domains:n,blocked_domains:s}=t,c=s?.length?` (${s.map(t=>`-site:${t}`).join(\" \")})`:\"\";return{query:`${i}${c}`,type:\"text2text\",max_results:5,...n?.length?{allowed_domains:n}:{},...t.freshness?{freshness:t.freshness}:{}}}buildStructuredResult(t,i){return{type:\"web_search_tool_result\",query:t,searchType:\"text2text\",provider:i?.provider||\"\",results:i?.results||[],t"
+    },
+    {
+      "id": "AT7",
+      "selector": "async fetchContentViaApi(t,i,n,s,c,p,h){",
+      "byte_offset": 5970348,
+      "statement": "WebFetch native fetch headers additionally contain X-Wb-Uid; body includes format, prompt, timeout, max_length and optional model_name.",
+      "excerpt": "async fetchContentViaApi(t,i,n,s,c,p,h){let S,E=await this.productManager.waitConfiguration(),A=`${E.endpoint}${this.WEB_FETCH_API_PATH}`,R=(0,a7.nH)().replace(/-/g,\"\"),{ideType:I,platform:P,platformVersion:O}=await this.clientInfoProvider.get(),M=this.authenticationManager.currentSessionSubject.getValue(),N=M?.account,L=(0,cH.Gp)(),$=L?.auth?.accessToken??M?.auth?.accessToken,F=Object.keys((0,cH.Gp)()?.headers??{}).some(t=>\"authorization\"===t.toLowerCase());if(!$&&!F)throw Error(\"Authentication required for web fetch\");let U=O||\"1.0.0\",B={[cU.HttpHeaders.ACCEPT]:cU.MediaType.APPLICATION_JSON,[cU.HttpHeaders.CONTENT_TYPE]:cU.MediaType.APPLICATION_JSON_UTF8,[cU.HttpHeaders.X_REQUESTED_WITH]:cU.XML_HTTP_REQUEST,[cU.HttpHeaders.USER_AGENT]:`${cq.Vo}/${U}`,...$?{[cU.HttpHeaders.AUTHORIZATION]:`Bearer ${$}`}:{},[cW.AGENT_INTENT]:\"craft\",[cW.AGENT_RUNTIME]:(0,cG.kl)(n),[cW.CONVERSATION_ID_HEADER]:n.id,[cW.CONVERSATION_REQUEST_ID_HEADER]:n.conversationRequestId||\"\",[cW.CONVERSATION_MESSAGE_ID_HEADER]:R,[cW.REQUEST_ID_HEADER]:R,[cW.PRODUCT]:E?.deploymentType||\"\",[cW.IDE_TYPE_HEADER]:I||cq.Vo,[cW.IDE_NAME_HEADER]:P||cq.Vo,[cW.IDE_VERSION_HEADER]:U,[cW.USER_ID_HEADER]:L?.account?.uid??(N?.uid||\"\"),\"X-Wb-Uid\":L?.account?.uid??(N?.uid||\"\"),\"X-Department-Info\":N?.departmentFullName||\"\"},W=await this.settingsManager.get(\"env\"),q=N?.enterpriseId?.trim(),G=(0,cB.isPersonalAccount)(N)&&!q;await af.IOAUtils.applyIOADefaultHeaders(B,W,{enterpriseId:q,skipDefaultEnterpriseHeaders:G}),await this.customHeadersProvider.applyTo(B),Object.assign(B,(0,cH.I2)());let z=await this.resolveCurrentModelName(n),V={url:t,format:\"markdown\",prompt:i,timeout:Math.floor(dl/1e3),max_length:dd,...z?{model_name:z}:{}},J=new AbortController;s?.aborted?J.abort(s.reason):s?.addEventListener(\"abort\",()=>J.abort(s.reason),{once:!0});try{S=await fetch(A,{method:\"POST\",headers:B,body:JSON.stringify(V),signal:J.signal})}catch(t){if(t instanceof DOMException&&\"AbortError\"===t.name){let t=s?.reason;if(t instanceof Error)throw t;throw Error(\"WebFetch API request aborted\")}throw t}if(!S.ok){let t,i=await S.text().catch(()=>\"\"),n=`WebFetch API request failed with status ${S.status}`,s=!1;if(i)try{let c=JSON.parse(i);t=c.code,s=!0===c.decisive,c.msg&&(n=`WebFetch API error: ${c.msg} (code: ${c.code})`)}catch{}throw toApiFetchError(n,s,t)}let Y=await S.json();if(Y.code){let"
+    },
+    {
+      "id": "AT8",
+      "selector": "dl=2e4,dc=3e4,dd=1e5",
+      "byte_offset": 5960167,
+      "statement": "WebFetch remote deadline is 20000 ms and default maximum returned length is 100000.",
+      "excerpt": "dl=2e4,dc=3e4,dd=1e5,du=15e3,dp=\"No extr"
+    },
+    {
+      "id": "AT9",
+      "selector": "let P=new AbortController,O=setTimeout(()=>P.abort(Error(`WebFetch API timed out",
+      "byte_offset": 5968244,
+      "statement": "The WebFetch outer race installs the remote deadline and passes its signal into fetchContentViaApi.",
+      "excerpt": "let P=new AbortController,O=setTimeout(()=>P.abort(Error(`WebFetch API timed out after ${dl/1e3}s`)),dl),M=Date.now(),N=t,L=!1,$=t,F=this.fetchContentViaApi(t,i,n,P.signal,t=>{N=t},s,t=>{L=t}).then(t=>{c=t.length,p=Date.now()-M;let i=(0,nq.EZ9)(t,dd);return{content:i,needsSummary:i.length>du}}).catch(t=>{throw p=Date.now()-M,h=t instanceof Error?t.message:String(t),t}).finally(()=>clearTimeout(O)),U=new AbortController,B=Date.now(),W=(I?Promise.reject(Error(\"WebFetch local fallback disabled (CODEBUDDY_WEB"
+    },
+    {
+      "id": "AT10",
+      "selector": "static async applyIOADefaultHeaders(",
+      "byte_offset": 6933713,
+      "statement": "IOA domain/enterprise defaults are conditional on an IOA environment; they are not unconditional ordinary desktop tool headers.",
+      "excerpt": "static async applyIOADefaultHeaders(t,i,n={}){if(!this.isIOAEnvironment(i))return;let h=s.ContainerUtil.get(p.Vr),S=await h.get(\"envRouteMode\")===\"staging\";t[c.HTTP_HEADER_DOMAIN]||(t[c.HTTP_HEADER_DOMAIN]=S?p.Xp:p.Zp);let E=S?p.sE:p.cD,A=n.enterpriseId?.trim()||(n.skipDefaultEnterpriseHeaders?void 0:E);A&&(t[c.HTTP_HEADER_ENTERPRISE_ID]||(t[c.HTTP_HEADER_ENTERPRISE_ID]=A),t[c.HTTP_HEADER_TENANT_ID]||(t[c.HTTP_HEADER_TENANT_ID]=A))}}},33891(t,i,n){n.d(i,{A:()=>JsonUtils});var s=n(57975),c=n(35414);let JsonUtils=class JsonUtils{static parse(t){let i=[],n=(0,c.qg)(t,i,{allowTrailingComma:!0});if(i.length>0)throw Error(`JSONC parse error: ${(0,c._n)(i[0]."
+    }
+  ],
+  "implementation": {
+    "files": [
+      "src/lib/upstream/agenttool.ts",
+      "src/app/api/v1/search/route.ts",
+      "src/app/api/v1/fetch/route.ts"
+    ],
+    "transport": "globalThis.fetch (native fetch); intentionally not the axios/RPC officialEgress transport",
+    "default_deadline_ms": 20000,
+    "search_default": {
+      "type": "text2text",
+      "max_results": 5
+    },
+    "fetch_default": {
+      "format": "markdown",
+      "prompt": "",
+      "timeout": 20,
+      "max_length": 100000
+    },
+    "local_compatibility_extensions": [
+      "Positive max_results/count values are preserved; 0/missing selects the official default 5.",
+      "URL-only WebFetch remains accepted by supplying prompt=\"\".",
+      "Explicit timeout seconds 1..120 and max_length 1..1000000 are gateway bounds, not claims about upstream documented limits.",
+      "model_name may be explicitly supplied; otherwise the selected model routing prefix cn:/global: is removed for WebFetch.",
+      "The same deadline also bounds response-body reading to retain a gateway resource safeguard; native search clears its local timer after fetch headers.",
+      "Downstream fetch keeps the existing JSON/content validation and URL-backfill compatibility wrapper; agentTool returns successful upstream text unchanged."
+    ]
+  },
+  "unknowns": [
+    "Static construction does not prove real network wire equality or identical host Node/OpenSSL TLS fingerprints.",
+    "Per-session context IDs are empty if absent from incoming correlation headers; no real WorkBuddy session was acquired.",
+    "Per-account departmentFullName and optional configured custom-header/IOA overrides are not available from the current account schema and were not read from user settings.",
+    "Local-agent is the gateway desktop profile default; the specimen runtime resolver additionally supports session/environment/OpenTelemetry overrides."
+  ]
+}

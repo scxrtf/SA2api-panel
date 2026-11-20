@@ -80,7 +80,7 @@ function call(sql) {
           const j = JSON.parse(body);
           if (j.Response && j.Response.Error) return reject(new Error(JSON.stringify(j.Response.Error)));
           resolve(j.Response);
-        } catch (e) { reject(new Error('bad response: ' + body.slice(0, 300))); }
+        } catch { reject(new Error('bad response: ' + body.slice(0, 300))); }
       });
     });
     req.on('error', reject);

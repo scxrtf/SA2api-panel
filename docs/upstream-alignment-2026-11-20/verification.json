@@ -1,0 +1,75 @@
+{
+  "schema": "workbuddy.alignment-verification.v1",
+  "checked_at": "2026-11-20T03:49:23.262Z",
+  "scope": "login request flow, model-optimization/privacy decision and native search/webfetch request contracts",
+  "client": {
+    "desktop": "5.9.3",
+    "cli": "2.165.0",
+    "artifact_sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5"
+  },
+  "focused": {
+    "tests": 28,
+    "pass": 28,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "log": ".runtime/alignment-focused-tests.log",
+    "sha256": "505b33d5703d65c719e26b18639191f9ddd64a08b0871342edd80e76a46d4ef8"
+  },
+  "full": {
+    "tests": 196,
+    "pass": 194,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 2,
+    "log": ".runtime/alignment-all-tests.log",
+    "sha256": "d3c25204d67992fb04fb73708ffbc40ee13840e40da54fd62d78c3fc42b0aee2",
+    "skips": [
+      "﹣ 余额保留策略不删除原始采样点 (1.2327ms) # SKIP",
+      "﹣ installed Codex App Server emits a real thread, turn and reply using a loopback Responses fixture (0.2345ms) # SKIP"
+    ]
+  },
+  "lint": {
+    "exit_code": 0,
+    "errors": 0,
+    "warnings": 0,
+    "log": ".runtime/alignment-lint.log",
+    "sha256": "4b2a8025f34dd3d3a07fa62de5f797535d25fb99fe7defccaf9e2eda052fc981"
+  },
+  "typecheck": {
+    "exit_code": 0,
+    "config": "tsconfig.json",
+    "excluded": [
+      "node_modules",
+      "scripts",
+      "workers/workspace"
+    ],
+    "log": ".runtime/alignment-typecheck.log",
+    "note": "Independent workspace worker is excluded by existing repository configuration; route type caches were regenerated without excluding alignment source."
+  },
+  "typegen": {
+    "exit_code": 0,
+    "log": ".runtime/alignment-typegen.log",
+    "cache_preimages": ".codex-backup/alignment-20261120-110929/generated-type-preimages"
+  },
+  "build": {
+    "exit_code": 0,
+    "warnings": 0,
+    "log": ".runtime/alignment-build.log",
+    "sha256": "d4bbe20a54f7858db7d688acd9965c864969b904534df97121f1839e6298d34c",
+    "dist": ".runtime/alignment-build-next",
+    "build_id": "w7-XEgQrrrGaMbb-Ioaww"
+  },
+  "untouched": [
+    "real account credentials",
+    "database contents",
+    "actual .env",
+    "existing service processes"
+  ],
+  "not_executed": [
+    "live account sign-in/authorization",
+    "paid upstream chat",
+    "full same-version Global application capture",
+    "user settings/AB/optional host login metadata capture"
+  ]
+}

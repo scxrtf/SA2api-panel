@@ -1,6 +1,6 @@
 // modelview.test.mts — 对齐 Go modelview_test.go 的 9 个场景（离线纯函数）。
 import assert from "node:assert/strict";
-import { modelLockViewPure, type LockViewEntry } from "file:///C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next/src/lib/modelview.ts";
+import { modelLockViewPure, type LockViewEntry } from "../src/lib/modelview.ts";
 
 const NOW = Date.now();
 const H = 3600_000;

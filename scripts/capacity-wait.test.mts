@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { DEFAULT_CONFIG, type AppConfig } from "../src/lib/config.ts";
 import { sleepAbortable } from "../src/lib/backoff.ts";
 import {
-  acquire, applyErrorKind, capacityWaitStatus, inFlightCount, noteSuccess, pick, release,
+  acquire, applyErrorKind, capacityWaitStatus, inFlightCount, invalidateEntries, noteSuccess, pick, release,
 } from "../src/lib/pool.ts";
 
 const globalWithDb = globalThis as typeof globalThis & { prisma?: unknown };
@@ -74,10 +74,12 @@ try {
   account.modelCooldowns = [{
     uid: account.uid, model, until: BigInt(Date.now() + 100), reason: "6020 queue: offline",
   }];
+  invalidateEntries();
   const queueWait = await capacityWaitStatus(cfg, { model, realm: "cn", tried }, 1_000);
   assert.ok(queueWait.waitMs > 0 && queueWait.waitMs <= 100);
   assert.ok(await sleepAbortable(queueWait.waitMs));
   account.modelCooldowns = [];
+  invalidateEntries();
   tried.clear(); // 与 chat/agenttool 在 6020 冷却结束后的重选规则一致。
   assert.equal((await pick(cfg, { model, realm: "cn", tried }))?.account.uid, account.uid);
   console.log("PASS short 6020 cooldown permits bounded retry after all accounts queued");
@@ -120,6 +122,7 @@ try {
   release(account.uid);
   console.log("PASS unlimited in-flight remains unlimited under upstream pressure");
 } finally {
+  invalidateEntries();
   if (oldPrisma === undefined) delete globalWithDb.prisma;
   else globalWithDb.prisma = oldPrisma;
 }

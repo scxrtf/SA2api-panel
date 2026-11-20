@@ -16,7 +16,7 @@ function constTimeEq(a: string, b: string): boolean {
 // 密钥环进程内快照。原先 /api/v1/* 的每个请求都要扫两遍 ApiKey 全表
 // （verifyAny 一遍、identifyKeyIdentity 一遍），是 Supabase egress 的主要来源之一。
 // 30s TTL 覆盖突发流量；面板增删改密钥后立即失效（见 api/panel/keys 路由）。
-// DB 异常时若已有快照则继续用快照（更稳），无快照才按 dbOk=false 处理。
+// 缓存过期后 DB 异常则关闭子密钥访问，不把“查询失败”当作“未配置鉴权”。
 const KEY_RING_TTL_MS = 30_000;
 export interface KeyRingRow {
   name: string;
@@ -25,28 +25,39 @@ export interface KeyRingRow {
 }
 type KeyRingCache = { at: number; rows: KeyRingRow[] };
 const keyRingGlobals = globalThis as unknown as { __wbKeyRing?: KeyRingCache };
+let keyRingGeneration = 0;
+let pendingKeyRing: Promise<KeyRingRow[]> | null = null;
 
 export function invalidateKeyRing(): void {
   delete keyRingGlobals.__wbKeyRing;
+  keyRingGeneration++;
+  pendingKeyRing = null;
 }
 
 async function loadKeyRing(): Promise<KeyRingRow[]> {
   const cached = keyRingGlobals.__wbKeyRing;
   if (cached && Date.now() - cached.at < KEY_RING_TTL_MS) return cached.rows.slice();
-  const rows = await prisma.apiKey.findMany({
+  if (pendingKeyRing) return (await pendingKeyRing).slice();
+  const generation = keyRingGeneration;
+  const pending = prisma.apiKey.findMany({
     select: { name: true, key: true, providers: true },
+  }).then((rows) => {
+    // 管理端删改密钥后，旧的在途快照不得重新写回缓存。
+    if (generation === keyRingGeneration) keyRingGlobals.__wbKeyRing = { at: Date.now(), rows };
+    return rows;
+  }).finally(() => {
+    if (pendingKeyRing === pending) pendingKeyRing = null;
   });
-  keyRingGlobals.__wbKeyRing = { at: Date.now(), rows };
-  return rows.slice();
+  pendingKeyRing = pending;
+  return (await pending).slice();
 }
 
 // extractToken 提取请求凭证：优先 Authorization: Bearer，其次 x-api-key
 // （Anthropic/Claude Code 客户端默认凭证头）。
 export function extractToken(req: Request): string {
   const authz = req.headers.get("authorization") ?? "";
-  if (authz.startsWith("Bearer ") && authz.length > 7) {
-    return authz.slice(7);
-  }
+  const bearer = /^Bearer[ \t]+(.+)$/i.exec(authz)?.[1].trim();
+  if (bearer) return bearer;
   const xkey = (req.headers.get("x-api-key") ?? "").trim();
   if (xkey) return xkey;
   return "";
@@ -93,6 +104,10 @@ export function providerAllowed(providersRaw: string, provider: string): boolean
 export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | null> {
   const tok = extractToken(req);
   const cfg = await getConfig();
+  // 主密钥不依赖子密钥表可用性，也避免每个主密钥请求多查一次数据库。
+  if (cfg.api_key && tok && constTimeEq(tok, cfg.api_key)) {
+    return { name: "", providers: "*", unrestricted: true };
+  }
   let rows: KeyRingRow[] = [];
   let dbOk = true;
   try {
@@ -105,9 +120,6 @@ export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | n
     return { name: "", providers: "*", unrestricted: true };
   }
   if (!tok) return null;
-  if (cfg.api_key && constTimeEq(tok, cfg.api_key)) {
-    return { name: "", providers: "*", unrestricted: true };
-  }
   for (const r of rows) {
     if (r.key && constTimeEq(tok, r.key)) {
       return { name: r.name || mask(r.key), providers: r.providers ?? "", unrestricted: false };
@@ -138,22 +150,7 @@ export async function identifyKeyName(req: Request): Promise<string> {
 // verifyAny 校验凭证是否命中 主密钥 ∪ ApiKey 环 中的任意一把。
 // 全部为空 = 未启用鉴权，恒 true（与 Go VerifyAny 同语义）。
 export async function verifyAny(req: Request): Promise<boolean> {
-  const cfg = await getConfig();
-  const keys: string[] = [];
-  if (cfg.api_key) keys.push(cfg.api_key);
-  try {
-    const rows = await loadKeyRing();
-    for (const r of rows) if (r.key) keys.push(r.key);
-  } catch {
-    // DB 不可用时仅按主密钥判定。
-  }
-  if (keys.length === 0) return true;
-  const tok = extractToken(req);
-  let matched = false;
-  for (const k of keys) {
-    if (constTimeEq(tok, k)) matched = true;
-  }
-  return matched;
+  return (await identifyKeyIdentity(req)) !== null;
 }
 
 // mask 密钥展示脱敏：前 4 后 4，中间打码。

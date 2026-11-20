@@ -61,7 +61,7 @@ try {
     try {
       await client.query(sql, values);
       done += batch.length;
-    } catch (e) {
+    } catch {
       // 单行退化重试，避免整批丢
       for (const obj of batch) {
         try {

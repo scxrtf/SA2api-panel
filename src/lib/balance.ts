@@ -148,7 +148,7 @@ export async function snapshotBalance(
     };
     if (r.day) {
       p.d = r.day;
-      p.f = Number(r.first);
+      if (r.first !== null && r.first !== undefined) p.f = Number(r.first);
       p.cons = Number(r.consumed);
       p.gain = Number(r.gained);
     }
@@ -174,7 +174,7 @@ export async function snapshotBalance(
       if (p.c < lo) lo = p.c;
       if (p.c > hi) hi = p.c;
       // 折叠点只剩末值：当日首值也要参与极值，否则窗口首日水位失真
-      if (p.d && p.f) {
+      if (p.d && p.f !== undefined) {
         if (p.f < lo) lo = p.f;
         if (p.f > hi) hi = p.f;
       }
@@ -182,7 +182,7 @@ export async function snapshotBalance(
     s.min = lo;
     s.max = hi;
     const firstPt = pts[0];
-    const firstVal = firstPt.d && firstPt.f ? firstPt.f : firstPt.c;
+    const firstVal = firstPt.d && firstPt.f !== undefined ? firstPt.f : firstPt.c;
     s.change = pts[pts.length - 1].c - firstVal;
     s.daily = dailyOf(pts);
     out.push(s);
@@ -205,13 +205,16 @@ function dailyOf(pts: BalancePoint[]): DailyRow[] {
     let a = m.get(day);
     if (!a) {
       // 折叠点自带当日首值：first 不能取自身，否则 Change 恒为 0
-      const first = p.d && p.f ? p.f : p.c;
+      const first = p.d && p.f !== undefined ? p.f : p.c;
       a = { first, last: p.c, min: p.c, max: p.c, n: 0, consumed: 0, gained: 0, prev: 0, hasPrev: false };
       m.set(day, a);
     }
     a.last = p.c;
     if (a.hasPrev) {
-      const d = p.c - a.prev;
+      // 同日可能随 30 天保留边界逐段折叠。段内涨跌已经保存在 cons/gain，
+      // 相邻段只补「上一段末值 → 下一段首值」，不能再按下一段末值重复计算。
+      const segmentFirst = p.d && p.f !== undefined ? p.f : p.c;
+      const d = segmentFirst - a.prev;
       if (d > 0) a.gained += d;
       else if (d < 0) a.consumed += -d;
     }
@@ -221,7 +224,7 @@ function dailyOf(pts: BalancePoint[]): DailyRow[] {
     a.prev = p.c;
     a.hasPrev = true;
     let lo = p.c, hi = p.c;
-    if (p.d && p.f) {
+    if (p.d && p.f !== undefined) {
       if (p.f < lo) lo = p.f;
       if (p.f > hi) hi = p.f;
     }

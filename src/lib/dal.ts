@@ -41,7 +41,7 @@ const PK_COL: Record<string, string> = {
   ApiKey: "id", MachineKeyAuthorization: "machineId", Provider: "id",
   Setting: "key", UsageEvent: "id", RequestLog: "id", StickySession: "key",
   LoginSession: "id", TaskQueueItem: "id", ModelProbe: "key",
-  ModelHealthCheck: "id", BalanceSample: "id",
+  ModelHealthCheck: "id", BalanceSample: "id", GatewayResponse: "id",
 };
 
 // @updatedAt 是 Prisma 客户端语义（库端无 DEFAULT/触发器）：写入时注入当前时间。
@@ -528,7 +528,7 @@ async function dalDelete<T>(table: string, args: { where: Where; select?: Record
 }
 
 async function dalDeleteMany(table: string, args: { where?: Where } = {}): Promise<{ count: number }> {
-  const url = writeUrl(table, args.where);
+  const url = writeUrl(table, args.where, table === "GatewayResponse" ? { id: true } : undefined);
   const rows = await http<Record<string, unknown>[]>("DELETE", url, undefined, { Prefer: "return=representation" });
   return { count: rows.length };
 }
@@ -636,6 +636,7 @@ const MODEL_TABLE: Record<string, string> = {
   setting: "Setting",
   usageEvent: "UsageEvent",
   requestLog: "RequestLog",
+  gatewayResponse: "GatewayResponse",
   stickySession: "StickySession",
   loginSession: "LoginSession",
   taskQueueItem: "TaskQueueItem",

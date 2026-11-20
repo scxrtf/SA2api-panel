@@ -1,0 +1,57 @@
+{
+  "schema": "review.verification.v1",
+  "checked_at": "2026-11-20T02:57:36.783Z",
+  "node": "v24.14.0",
+  "platform": "win32",
+  "tests": {
+    "tests": 148,
+    "pass": 147,
+    "fail": 0,
+    "skipped": 1,
+    "cancelled": 0,
+    "duration_ms": 30682.6646,
+    "log": ".runtime/review-final-tests.log",
+    "sha256": "95474155d41c20f93b6d5180f032eba71c6d50d3360bee6cbbfb246d74dc5163"
+  },
+  "lint": {
+    "exit_code": 0,
+    "errors": 0,
+    "warnings": 0,
+    "log": ".runtime/review-final-lint.log",
+    "sha256": "4b2a8025f34dd3d3a07fa62de5f797535d25fb99fe7defccaf9e2eda052fc981"
+  },
+  "typecheck": {
+    "exit_code": 0,
+    "log": ".runtime/review-final-typecheck.log"
+  },
+  "build": {
+    "exit_code": 0,
+    "warnings": 0,
+    "dist": ".runtime/review-build-next",
+    "build_id": "gDeFki4tXdmH9_R4UKsSO",
+    "log": ".runtime/review-final-build.log",
+    "sha256": "b11ea84766aa7dbd72612dd05ebc528a7050fd6420cd6a069188dfa53ea8cdbe"
+  },
+  "browser": {
+    "status": "passed",
+    "api_cases": 3,
+    "browser_cases": 5,
+    "page_errors": [],
+    "log": ".runtime/review-panel-smoke-browser.log",
+    "evidence": "panel-smoke.json"
+  },
+  "dependency_audit": {
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "high": 4,
+    "critical": 0,
+    "total": 4
+  },
+  "limits": [
+    "real database integration skipped",
+    "no paid/live upstream chat",
+    "runtime TLS capture is Node mode, not a full application API capture",
+    "concurrent workspace feature functionality was not end-to-end accepted"
+  ]
+}

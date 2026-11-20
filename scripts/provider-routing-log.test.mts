@@ -4,38 +4,55 @@ process.env.USE_CLOUDBASE_REST = "0";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 
-const requests: Record<string, any>[] = [];
-const usages: Record<string, any>[] = [];
+type Row = Record<string, unknown>;
+type LogRow = Row & { errorDetail: string };
+type Query = {
+  where: { id?: string; status?: { lt?: number }; errKind?: unknown; OR?: unknown };
+  select: Record<string, unknown>;
+};
+interface LogModel {
+  create(args: { data: LogRow }): Promise<LogRow>;
+  findUnique(args?: { where: { id: string }; select: Record<string, unknown> }): Promise<Row | null>;
+  findMany?: (args: Query) => Promise<Row[]>;
+  count?: (args: Query) => Promise<number>;
+  aggregate?: () => Promise<{ _avg: { durationMs: number } }>;
+}
+interface DetailResponse { ok: boolean; error?: string; entry: Row }
+const globalWithDb = globalThis as typeof globalThis & { prisma?: unknown };
+const requests: LogRow[] = [];
+const usages: Row[] = [];
 let calls = 0;
 let poolReads = 0;
-let provider = { name: "测试商", models: "", apiKey: "fake-upstream", baseUrl: "https://example.invalid/v1" };
+const provider = { name: "测试商", models: "", apiKey: "fake-upstream", baseUrl: "https://example.invalid/v1" };
 let keyProviders = "测试商";
 let reply: (signal?: AbortSignal | null) => Promise<Response> = async () => Response.json({ choices: [], usage: { prompt_tokens: 8, completion_tokens: 2 } });
 const oldFetch = globalThis.fetch;
 const oldKey = process.env.WB2A_API_KEY;
 process.env.REQUEST_LOG_DIALOG = "1";
 delete process.env.WB2A_API_KEY;
-(globalThis as any).prisma = {
+const logModel: LogModel = {
+  create: async ({ data }) => { requests.push(data); return { ...data, id: "test-log-" + requests.length }; },
+  findUnique: async () => null,
+};
+const fixtureDb = {
   setting: { findUnique: async () => ({ value: JSON.stringify({ stream_idle_ms: 40, header_timeout_ms: 100 }) }) },
   apiKey: { findMany: async () => [{ name: "SA", key: "fake-client", providers: keyProviders }] },
   provider: {
-    findUnique: async ({ where }: any) => where.name === provider.name ? provider : null,
+    findUnique: async ({ where }: { where: { name: string } }) => where.name === provider.name ? provider : null,
     findMany: async () => [provider],
   },
   account: { findMany: async () => { poolReads++; throw new Error("provider must not use account pool"); } },
-  requestLog: {
-    create: async ({ data }: any) => { requests.push(data); return { ...data, id: "test-log-" + requests.length }; },
-    findUnique: async () => null,
-  },
-  usageEvent: { create: async ({ data }: any) => { usages.push(data); return data; } },
+  requestLog: logModel,
+  usageEvent: { create: async ({ data }: { data: Row }) => { usages.push(data); return data; } },
 };
+globalWithDb.prisma = fixtureDb;
 globalThis.fetch = async (url, init) => {
   calls++;
   assert.equal(String(url), "https://example.invalid/v1/chat/completions");
   const body = JSON.parse(String(init?.body));
   assert.equal(body.model, "glm-5.3");
   assert.deepEqual(body.messages, [{ role: "developer", content: "keep unchanged" }]);
-  assert.equal((init?.headers as any).Authorization, "Bearer fake-upstream");
+  assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer fake-upstream");
   return reply(init?.signal);
 };
 const { handleChat, resolveModel } = await import("../src/lib/chat.ts");
@@ -174,7 +191,7 @@ try {
   console.log("PASS response-header timeout and request abort");
 
   // A failed audit insert must not turn a successful upstream response into a 500.
-  const db = (globalThis as any).prisma;
+  const db = fixtureDb;
   const saveLog = db.requestLog.create;
   db.requestLog.create = () => { throw Object.assign(new Error("test DB failure"), { code: "P2003" }); };
   reply = async () => Response.json({ choices: [] });
@@ -229,20 +246,30 @@ try {
   assert.equal(poolReads, 0);
   console.log("PASS UTF-8 chunking and pool TTFB regression");
 
+  // Panel APIs require the main key; the earlier provider calls deliberately
+  // exercise a restricted child key instead.
+  process.env.WB2A_API_KEY = "offline-panel-master";
+  const { getConfig } = await import("../src/lib/config.ts");
+  await getConfig(true);
+  const panelRequest = (url: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", "Bearer offline-panel-master");
+    return new Request(url, { ...init, headers });
+  };
   const { GET: getLogs } = await import("../src/app/api/panel/request_logs/route.ts");
-  const queries: any[] = [];
-  db.requestLog.findMany = async (q: any) => { queries.push(q); return []; };
-  await getLogs(new Request("https://gateway.invalid/api/panel/request_logs?outcome=ok"));
-  assert.equal(queries.at(-1).where.status.lt, 400);
-  assert.equal(queries.at(-1).where.errKind, "");
-  const listSelect = queries.at(-1).select;
+  const queries: Query[] = [];
+  db.requestLog.findMany = async (q: Query) => { queries.push(q); return []; };
+  await getLogs(panelRequest("https://gateway.invalid/api/panel/request_logs?outcome=ok"));
+  assert.equal(queries.at(-1)!.where.status!.lt, 400);
+  assert.equal(queries.at(-1)!.where.errKind, "");
+  const listSelect = queries.at(-1)!.select;
   for (const field of [
     "requestMessages", "responseMessage", "errorDetail", "parameterOverrides", "attemptDetails",
   ]) {
     assert.equal(listSelect[field], undefined, `list payload must omit ${field}`);
   }
-  await getLogs(new Request("https://gateway.invalid/api/panel/request_logs?outcome=error"));
-  assert.deepEqual(queries.at(-1).where.OR, [{ status: { gte: 400 } }, { errKind: { not: "" } }]);
+  await getLogs(panelRequest("https://gateway.invalid/api/panel/request_logs?outcome=error"));
+  assert.deepEqual(queries.at(-1)!.where.OR, [{ status: { gte: 400 } }, { errKind: { not: "" } }]);
 
   const detailEntry = {
     id: "log-detail-1",
@@ -253,20 +280,20 @@ try {
     parameterOverrides: [{ path: "$.model", before: "a", after: "b" }],
     attemptDetails: [{ attempt: 1, status: 200, ok: true, errKind: "", durationMs: 12 }],
   };
-  db.requestLog.findUnique = async ({ where, select }: any) => {
-    if (where.id !== detailEntry.id) return null;
-    return Object.fromEntries(Object.keys(select).map((key) => [key, (detailEntry as any)[key]]));
+  db.requestLog.findUnique = async (args) => {
+    if (!args || args.where.id !== detailEntry.id) return null;
+    return Object.fromEntries(Object.keys(args.select).map((key) => [key, (detailEntry as Row)[key]]));
   };
   const { GET: getLogDetail } = await import(
     "../src/app/api/panel/request_logs/[id]/route.ts"
   );
   process.env.WB2A_SUPER_PASSWORD = "detail-test-password";
   let detailResp = await getLogDetail(
-    new Request("https://gateway.invalid/api/panel/request_logs/log-detail-1"),
+    panelRequest("https://gateway.invalid/api/panel/request_logs/log-detail-1"),
     { params: Promise.resolve({ id: detailEntry.id }) },
   );
   assert.equal(detailResp.status, 200, "普通详情无需超级密码");
-  let detailBody = await detailResp.json() as any;
+  let detailBody = await detailResp.json() as DetailResponse;
   assert.equal(detailBody.ok, true);
   assert.equal("requestMessages" in detailBody.entry, false, "普通详情不得返回请求对话");
   assert.equal("responseMessage" in detailBody.entry, false, "普通详情不得返回回复对话");
@@ -274,35 +301,35 @@ try {
   assert.deepEqual(detailBody.entry.parameterOverrides, detailEntry.parameterOverrides);
   assert.deepEqual(detailBody.entry.attemptDetails, detailEntry.attemptDetails);
   detailResp = await getLogDetail(
-    new Request("https://gateway.invalid/api/panel/request_logs/log-detail-1?dialog=1"),
+    panelRequest("https://gateway.invalid/api/panel/request_logs/log-detail-1?dialog=1"),
     { params: Promise.resolve({ id: detailEntry.id }) },
   );
   assert.equal(detailResp.status, 403, "查看对话未提供超级密码时必须拒绝");
   detailResp = await getLogDetail(
-    new Request("https://gateway.invalid/api/panel/request_logs/log-detail-1?dialog=1&super_password=wrong"),
+    panelRequest("https://gateway.invalid/api/panel/request_logs/log-detail-1?dialog=1&super_password=wrong"),
     { params: Promise.resolve({ id: detailEntry.id }) },
   );
   assert.equal(detailResp.status, 403, "错误超级密码必须拒绝");
   detailResp = await getLogDetail(
-    new Request("https://gateway.invalid/api/panel/request_logs/log-detail-1?dialog=1&super_password=detail-test-password"),
+    panelRequest("https://gateway.invalid/api/panel/request_logs/log-detail-1?dialog=1&super_password=detail-test-password"),
     { params: Promise.resolve({ id: detailEntry.id }) },
   );
   assert.equal(detailResp.status, 200);
-  detailBody = await detailResp.json() as any;
+  detailBody = await detailResp.json() as DetailResponse;
   assert.equal(detailBody.ok, true);
   assert.deepEqual(detailBody.entry.requestMessages, detailEntry.requestMessages);
   assert.deepEqual(detailBody.entry.responseMessage, detailEntry.responseMessage);
   assert.deepEqual(detailBody.entry.parameterOverrides, detailEntry.parameterOverrides);
   assert.deepEqual(detailBody.entry.attemptDetails, detailEntry.attemptDetails);
   detailResp = await getLogDetail(
-    new Request("https://gateway.invalid/api/panel/request_logs/missing"),
+    panelRequest("https://gateway.invalid/api/panel/request_logs/missing"),
     { params: Promise.resolve({ id: "missing" }) },
   );
   assert.equal(detailResp.status, 404);
-  assert.equal((await detailResp.json() as any).error, "request_log_not_found");
+  assert.equal((await detailResp.json() as DetailResponse).error, "request_log_not_found");
   const { POST: createProvider } = await import("../src/app/api/panel/providers/route.ts");
   for (const name of ["cn", "global"]) {
-    const resp = await createProvider(new Request("https://gateway.invalid/api/panel/providers", {
+    const resp = await createProvider(panelRequest("https://gateway.invalid/api/panel/providers", {
       method: "POST", body: JSON.stringify({ name, base_url: "https://example.invalid", key: "fake", super_password: "detail-test-password" }),
     }));
     assert.equal(resp.status, 400);
@@ -310,15 +337,15 @@ try {
   console.log("PASS log list/detail payloads and reserved provider prefixes");
 
   const { GET: metrics } = await import("../src/app/api/panel/request_metrics/route.ts");
-  db.requestLog.count = async (query: any) => { queries.push(query); return 0; };
+  db.requestLog.count = async (query: Query) => { queries.push(query); return 0; };
   db.requestLog.aggregate = async () => ({ _avg: { durationMs: 0 } });
-  await metrics(new Request("https://gateway.invalid/api/panel/request_metrics"));
-  assert.deepEqual(queries.at(-1).where.OR, [{ status: { gte: 400 } }, { errKind: { not: "" } }]);
+  await metrics(panelRequest("https://gateway.invalid/api/panel/request_metrics"));
+  assert.deepEqual(queries.at(-1)!.where.OR, [{ status: { gte: 400 } }, { errKind: { not: "" } }]);
   console.log("PASS dashboard error count includes HTTP 200 errors");
 } finally {
   globalThis.fetch = oldFetch;
   if (oldKey === undefined) delete process.env.WB2A_API_KEY;
   else process.env.WB2A_API_KEY = oldKey;
   delete process.env.WB2A_SUPER_PASSWORD;
-  delete (globalThis as any).prisma;
+  delete globalWithDb.prisma;
 }

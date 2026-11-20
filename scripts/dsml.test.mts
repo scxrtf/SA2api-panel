@@ -6,7 +6,7 @@ import {
   toolNameAllowlist,
   repairAggregatedResponse,
   markupToolCalls,
-} from "file:///C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next/src/lib/upstream/dsml.ts";
+} from "../src/lib/upstream/dsml.ts";
 
 type Obj = Record<string, unknown>;
 const PIPE = "｜｜"; // U+FF5C ×2
@@ -183,7 +183,7 @@ t("AnyChunkBoundary", () => {
 
 t("RealLeakedSample", () => {
   const raw = readFileSync(
-    "C:/Users/16321/Downloads/workbuddy2api-panel-main/workbuddy2api-panel-main/internal/upstream/testdata/leaked_markup.txt",
+    new URL("./fixtures/leaked-markup.txt", import.meta.url),
     "utf8",
   );
   const { out, calls } = repairAll(new Set(["exec_command"]), [raw]);
@@ -288,7 +288,7 @@ t("RepairAggregatedResponseSkips", () => {
 // --- 弱判定 ---
 t("WeakModeRealSample", () => {
   const raw = readFileSync(
-    "C:/Users/16321/Downloads/workbuddy2api-panel-main/workbuddy2api-panel-main/internal/upstream/testdata/leaked_markup.txt",
+    new URL("./fixtures/leaked-markup.txt", import.meta.url),
     "utf8",
   );
   const r = new MarkupRepair(null, true);

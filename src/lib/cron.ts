@@ -127,8 +127,9 @@ const KEEPALIVE_SAVE_RETRY_MS = 250;
 
 const keepaliveSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// CloudBase PostgREST 通道下的租约实现：读-判-写非原子，但 keepalive 是低频任务
-// （scheduler/cron/panel 三源、分钟级），单容器内并发碰撞概率可忽略；抢占语义不变。
+// CloudBase PostgREST 通道下的读-判-写租约不是跨实例原子操作。
+// runKeepalive 的进程级锁隔离本项目单容器部署内的 scheduler/cron/panel 并发；
+// 多实例部署仍需数据库端原子 RPC，不能将本分支当作分布式互斥锁。
 async function acquireKeepaliveLeaseDal(ttlMs: number): Promise<string | null> {
   const now = Date.now();
   const token = randomUUID();
@@ -306,7 +307,27 @@ async function refreshKeepaliveAccount(
 // runKeepalive 仅刷新临期 token；force=true 保留面板「全部保活」语义。
 // 跨触发源用 DB lease 互斥，账号并发处理，预算耗尽时返回 deferred 供下一轮续跑。
 // 12153 session dead 连续 3 次自动禁用；成功续期会清误判计数。
+// globalThis 保持 Next 不同路由 bundle / 开发热重载共用同一把本地锁。
+const keepaliveGlobals = globalThis as unknown as { __wbKeepaliveRunning?: boolean };
+
 export async function runKeepalive(options: KeepaliveOptions = {}): Promise<KeepaliveResult> {
+  // 必须在第一个 await 之前占位，否则两个调用会同时通过 DAL 的租约检查。
+  if (keepaliveGlobals.__wbKeepaliveRunning) {
+    runlog("keepalive: 已有任务运行中，跳过 source=" + (options.source ?? "unknown"));
+    return {
+      refreshed: 0, skipped: 0, failed: 0, deferred: 0, candidates: 0,
+      busy: true, force: options.force ?? false, elapsedMs: 0,
+    };
+  }
+  keepaliveGlobals.__wbKeepaliveRunning = true;
+  try {
+    return await runKeepaliveOnce(options);
+  } finally {
+    keepaliveGlobals.__wbKeepaliveRunning = false;
+  }
+}
+
+async function runKeepaliveOnce(options: KeepaliveOptions): Promise<KeepaliveResult> {
   const startedAt = Date.now();
   const force = options.force ?? false;
   const cfg = await getConfig();

@@ -4,6 +4,7 @@ import { panelAuth, ok, fail } from "@/lib/panel-auth";
 import { invalidateKeyRing, mask, parseProviderAccess } from "@/lib/auth-guard";
 import { prisma } from "@/lib/db";
 import { getOrCreateMachineId, machineKeyAuthorized } from "@/lib/machine-key";
+import { isJSONObject } from "@/lib/request-validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,13 +33,15 @@ export async function POST(req: Request) {
   if (!(await machineKeyAuthorized(machine.id))) {
     return fail(403, "当前机器尚未授权：请先添加一个账号，或输入密码完成机器授权");
   }
-  let body: { name?: string };
+  let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as { name?: string };
+    const parsed: unknown = await req.json();
+    if (!isJSONObject(parsed)) return fail(400, "JSON body must be an object");
+    body = parsed;
   } catch {
     return fail(400, "invalid json body");
   }
-  const name = (body.name ?? "").trim();
+  const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name || name.length > 64) return fail(400, "name 必填且不超过 64 字符");
   const exists = await prisma.apiKey.findUnique({ where: { name } });
   if (exists) return fail(409, "同名密钥已存在");

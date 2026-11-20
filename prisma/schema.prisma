@@ -123,6 +123,18 @@ model Provider {
   createdAt DateTime @default(now())
 }
 
+// Responses protocol state. The primary key is a digest of the verified gateway
+// credential scope and the public response ID; native rows contain no transcript.
+model GatewayResponse {
+  id         String   @id
+  backend    String
+  model      String
+  snapshot   String   @default("")
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([createdAt])
+}
+
 model Setting {
   key       String   @id
   value     String   @default("") // JSON 字符串
@@ -158,6 +170,7 @@ model UsageEvent {
 
 model RequestLog {
   id                 String   @id @default(cuid())
+  sessionId          String   @default("") // 客户端声明的会话指纹，空值表示未关联
   uid                String   @default("")
   // 供应商/选号前失败没有池账号，uid 留空；删除账号也保留历史日志。
   model              String   @default("")
@@ -200,6 +213,7 @@ model RequestLog {
   @@index([errKind, at])
   @@index([model, at])
   @@index([keyName, at])
+  @@index([sessionId, at, id])
 }
 
 model StickySession {

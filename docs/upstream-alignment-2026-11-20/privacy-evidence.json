@@ -1,0 +1,44 @@
+{
+  "schema": "workbuddy.privacy-alignment.v1",
+  "authority": "local-observed-shipped-artifact",
+  "createdAt": "2026-11-20T03:39:17.746Z",
+  "artifact": {
+    "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+    "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5"
+  },
+  "product": {
+    "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/product.json",
+    "sha256": "a73bea91defd7d5f38d5672c19111681ba52244ee8b9b64cc59dc3e3992eed61",
+    "DefaultModelOptimizationOff": false
+  },
+  "evidence": [
+    {
+      "id": "AP01",
+      "byteOffset": 8912000,
+      "excerpt": "agnostics},8154(t,i){function isEnterpriseEditionAccount(t){return!!t?.enterpriseId?.trim()||t?.type===\"ultimate\"||t?.type===\"exclusive\"}function resolveModelOptimizationEnabled({explicitEnabled:t,productDefaultEnabled:i,isEnterpriseEdition:n}){return\"boolean\"==typeof t?t:!n&&(i??!0)}Object.defineProperty(i,\"__esModule\",{value:!0}),i.isEnterpriseEditionAccount=isEnterpriseEditionAccount,i.resolveModelOptimizationEnabled=resolveModelOptimizationEn",
+      "claim": "explicit boolean wins; otherwise enterprise disables optimization and product default falls back to true"
+    },
+    {
+      "id": "AP02",
+      "byteOffset": 3805900,
+      "excerpt": ".nW]),c=await this.settingsManager.get(\"env\"),p=this.parseCustomHeaders(c?.[h6.nW]),h=await this.settingsManager.get(\"enableModelOptimization\"),S=\"boolean\"==typeof h?.enabled?h.enabled:void 0,E=!1;if(void 0===S){i=!0;try{let t=await this.abTestService?.booleanValue(pB.ProductFeature.DefaultModelOptimizationOff,!1);t&&(i=!t.value)}catch{}let t=this.authenticationManager.currentSessionSubject.getValue()?.account;E=(0,pB.isEnterpriseEditionAccount)(t)}let A=(",
+      "claim": "preference enabled is optional boolean; product/AB defaults and edition are resolved only without explicit preference"
+    },
+    {
+      "id": "AP03",
+      "byteOffset": 3806365,
+      "excerpt": "resolveModelOptimizationEnabled)({explicitEnabled:S,productDefaultEnabled:i,isEnterpriseEdition:E});p[hK.PRIVATE_DATA_HEADER]=A?\"false\":\"true\";let R={};try{let t=mT.Context.getRequest()?.body;if(t?.header){let i=hL.HeaderUtils.convertH",
+      "claim": "X-Private-Data is the inverse of resolved optimization, not a realm test"
+    }
+  ],
+  "gatewayAdapters": {
+    "globalPreference": "enable_model_optimization",
+    "productDefault": "model_optimization_default_enabled",
+    "perUidPreference": "model_optimization_accounts"
+  },
+  "limits": [
+    "local client user preference storage was not read",
+    "legacy Account table has no native edition type column; enterpriseId and explicit per-UID policy remain available",
+    "remote AB decisions can be supplied via the resolved product-default option; this task did not query account-specific AB data"
+  ]
+}

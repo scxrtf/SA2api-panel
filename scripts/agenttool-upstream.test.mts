@@ -12,6 +12,18 @@ const auth = {
 const oldFetch = globalThis.fetch;
 
 try {
+  globalThis.fetch = async (_url, init) => {
+    const headers = init?.headers as Record<string, string>;
+    assert.equal(headers["Content-Type"], "application/json;charset=UTF-8");
+    assert.match(headers["User-Agent"], /^CLI\//);
+    assert.equal(headers["X-Stainless-Lang"], undefined);
+    assert.equal(headers["X-Private-Data"], undefined);
+    assert.equal(headers["baggage"], undefined);
+    return new Response('{ "results": [] }');
+  };
+  assert.equal(await webSearch(DEFAULT_CONFIG, auth, "offline", 5), '{ "results": [] }');
+  console.log("PASS Agent native-fetch headers are independent from chat SDK/RPC headers");
+
   globalThis.fetch = async () => new Response(JSON.stringify({
     code: 6020, msg: "queue.waiting.title", data: { retry_after: 1.25 },
   }), { status: 200 });

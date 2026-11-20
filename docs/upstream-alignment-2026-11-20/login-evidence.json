@@ -1,0 +1,364 @@
+{
+  "schema": "workbuddy-login-alignment/v1",
+  "createdAt": "2026-11-20T03:26:25.326Z",
+  "scope": {
+    "execution": "Static reads and fake network only; no app entrypoint execution, user token/profile read or real upstream calls.",
+    "artifactIdentity": "Local installed CN5.9.3 / embeddedCLI2.165.0; not asserted pristine outside verified member digests.",
+    "globalLimitation": "www.workbuddy.ai mapping is preserved from the existing project; this installed CN artifact does not establish every global5.9.4 provider override.",
+    "conditionalHeaders": "Real host LoginTraceCarrier/AuthStateHeaderProvider and active SDK span context remain runtime-dependent. Default UUIDv4 path is implemented; no synthetic device attestation is claimed."
+  },
+  "artifacts": [
+    {
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "bytes": 9880062
+    },
+    {
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/product.json",
+      "sha256": "a73bea91defd7d5f38d5672c19111681ba52244ee8b9b64cc59dc3e3992eed61",
+      "bytes": 387311
+    }
+  ],
+  "mapping": {
+    "cn": {
+      "base": "https://www.workbuddy.cn",
+      "state": "POST /v2/plugin/auth/state?platform=workbuddy body={}",
+      "token": "GET /v2/plugin/auth/token?state=<encoded>",
+      "account": "GET /v2/plugin/account Bearer(no state)"
+    },
+    "global": {
+      "base": "https://www.workbuddy.ai",
+      "profile": "same route profile; preserve regional base",
+      "status": "inferred compatibility, not verified against a global installed artifact"
+    }
+  },
+  "evidence": [
+    {
+      "id": "AL01",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7188746,
+      "excerptByteStart": 7188746,
+      "excerptByteEnd": 7189196,
+      "excerpt": "async fetchAuthState(t){let i=t.traceSpan.startSpan(A.SPAN_GET_AUTH_STATE),n=this.configuration.authentication?.attributes?.platform??this.configuration.platform,s=await this.authStateHeaderComposer.compose();try{let c=await this.restOperations.post(`/v2${this.prefixPath}/auth/state?platform=${n}`,{},{headers:{...this.enterpriseHeaders(),...s,...t.traceSpan.requestHeaders,...(0,L.hasHostLoginObservation)()?(0,M.loginTraceCarrier)(i):{},[N.HTTP_HE",
+      "claim": "AccountScoped fetchAuthState resolves auth.attributes.platform before configuration.platform.",
+      "projectReference": "src/lib/login.ts:loginEndpoints"
+    },
+    {
+      "id": "AL02",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7189049,
+      "excerptByteStart": 7188949,
+      "excerptByteEnd": 7189409,
+      "excerpt": "ose();try{let c=await this.restOperations.post(`/v2${this.prefixPath}/auth/state?platform=${n}`,{},{headers:{...this.enterpriseHeaders(),...s,...t.traceSpan.requestHeaders,...(0,L.hasHostLoginObservation)()?(0,M.loginTraceCarrier)(i):{},[N.HTTP_HEADER_NO_AUTHORIZATION]:\"true\",[N.HTTP_HEADER_NO_USER_ID]:\"true\",[N.HTTP_HEADER_NO_ENTERPRISE_ID]:\"true\",[N.HTTP_HEADER_NO_DEPARTMENT_INFO]:\"true\"}})||{data:{data:void 0}};if(c.data.data){i.markAsSuccessful();let t",
+      "claim": "State POST uses empty object, endpoint domain and four no-identity sentinels; trace/host extra headers are conditional.",
+      "projectReference": "src/lib/login.ts:loginHeaders"
+    },
+    {
+      "id": "AL03",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7189788,
+      "excerptByteStart": 7189788,
+      "excerptByteEnd": 7190228,
+      "excerpt": "async loopGetToken(t,i,n){let s=n.traceSpan.startSpan(A.SPAN_GET_AUTH_TOKEN);for(;Date.now()-i<F;){if(await (0,p.wait)(U),n.abortController.signal.aborted)throw s.markAsFailed(\"Canceled\"),new N.CanceledError;try{let i=(await this.restOperations.get(`/v2${this.prefixPath}/auth/token?state=${t.state}`,{signal:n.abortController.signal,headers:{...n.traceSpan.requestHeaders,...(0,L.hasHostLoginObservation)()?(0,M.loginTraceCarrier)(s):{},[N",
+      "claim": "Token polling is GET with state query and anonymous sentinel headers.",
+      "projectReference": "src/app/api/panel/login/poll/route.ts:32"
+    },
+    {
+      "id": "AL04",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7189186,
+      "excerptByteStart": 7189186,
+      "excerptByteEnd": 7189486,
+      "excerpt": "[N.HTTP_HEADER_NO_AUTHORIZATION]:\"true\",[N.HTTP_HEADER_NO_USER_ID]:\"true\",[N.HTTP_HEADER_NO_ENTERPRISE_ID]:\"true\",[N.HTTP_HEADER_NO_DEPARTMENT_INFO]:\"true\"}})||{data:{data:void 0}};if(c.data.data){i.markAsSuccessful();let t=c.data.data;return this.lastAuthApiOrigin=(0,P.resolveAuthApiOrigin)(c.confi",
+      "claim": "The sentinel values are the string true, not1.",
+      "projectReference": "src/lib/login.ts:loginHeaders"
+    },
+    {
+      "id": "AL05",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7191430,
+      "excerptByteStart": 7191430,
+      "excerptByteEnd": 7191890,
+      "excerpt": "async fetchCurrentAccount(t,i,n){let s=await this.restOperations.get(`/v2${this.prefixPath}/account`,{signal:i.abortController.signal,headers:{...this.enterpriseHeaders(t),Authorization:`Bearer ${t.accessToken}`,...i.traceSpan.requestHeaders,...(0,L.hasHostLoginObservation)()?(0,M.loginTraceCarrier)(n):{}}})||{data:{data:void 0}};if(!s.data.data)throw new N.SignError(\"Failed to fetch current account\");return(0,I.normalizeAccountAvatar)(s.data.data)}enterpr",
+      "claim": "AccountScoped account endpoint is GET /v2${prefixPath}/account with Bearer; no state query.",
+      "projectReference": "src/app/api/panel/login/poll/route.ts:47"
+    },
+    {
+      "id": "AL06",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7191883,
+      "excerptByteStart": 7191883,
+      "excerptByteEnd": 7192203,
+      "excerpt": "enterpriseHeaders(t){try{let i=t?.domain||R.URI.parse(this.endpoint).authority;return i?{[N.HTTP_HEADER_DOMAIN]:i}:{}}catch{return this.logger.warn(\"endpoint domain format error\"),{}}}calculateExpiresAt(t){!t.expiresAt&&t.expiresIn&&(t.expiresAt=Date.now()+1e3*t.expiresIn),!t.refreshExpiresAt&&t.refreshExpiresIn&&(t.re",
+      "claim": "Domain defaults to endpoint authority; token-returned domain is preferred for account lookup.",
+      "projectReference": "src/lib/login.ts:loginHeaders"
+    },
+    {
+      "id": "AL07",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 8881891,
+      "excerptByteStart": 8881891,
+      "excerptByteEnd": 8882321,
+      "excerpt": "async buildUserAgent(t=\"\"){let i=t?[t]:[],n=await this.clientInfoProvider.get()||{},s=n.applicationName||n.productName;return s&&i.unshift(`${s}/${n.productVersion||\"unknown\"}`),n.platform&&i.unshift(`${n.platform}/${n.platformVersion||\"unknown\"}`),n.userAgentExtension&&i.push(n.userAgentExtension),i.join(\" \")}};i.UserAgentHttpInterceptor=R,s([(0,p.Autowired)(E.ClientInfoProvider),c(\"design:type\",Object)],R.prototype,\"clientIn",
+      "claim": "User-Agent is dynamically merged from client platform/product and optional extension segments.",
+      "projectReference": "src/lib/login.ts:rpcUserAgent reuse"
+    },
+    {
+      "id": "AL08",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 8714410,
+      "excerptByteStart": 8714410,
+      "excerptByteEnd": 8714850,
+      "excerpt": "i.CommonHeaderHttpInterceptor=void 0;let p=n(64071),h=n(7268),S=n(35049),E=class{initialize(){this.restOperations.interceptors.request.use(t=>(t.headers||(t.headers={}),(0,S.injectRequestIdHeader)(t.headers),t.proxy=!1,t))}};i.CommonHeaderHttpInterceptor=E,s([(0,p.Autowired)(h.RestOperations),c(\"design:type\",Function)],E.prototype,\"restOperations\",void 0),i.CommonHeaderHttpInterceptor=s([(0,p.Component)(p.ApplicationLifecycle)],E)},9384",
+      "claim": "The common RestOperations interceptor invokes injectRequestIdHeader and disables axios own proxy handling.",
+      "projectReference": "src/lib/login.ts:loginHeaders"
+    },
+    {
+      "id": "AL09",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 8715677,
+      "excerptByteStart": 8715677,
+      "excerptByteEnd": 8716057,
+      "excerpt": "function injectRequestIdHeader(t){if(getHeaderCaseInsensitive(t,c.REQUEST_ID_HEADER))return;let i=getHeaderCaseInsensitive(t,c.TRACE_ID_HEADER);t[c.REQUEST_ID_HEADER]=\"string\"==typeof i&&i?i:(0,s.generateUUUID)().replace(/-/g,\"\")}function withRequestIdHeaders(t){let i={...t?.headers};return injectRequestIdHeader(i),{...t,headers:i}}},51147(t,i,n){var s=this&&this.__createBindin",
+      "claim": "Preserve request ID, otherwise reuse trace ID, otherwise generate UUIDv4; the gateway uses the no-trace fallback, not synthetic OpenTelemetry span context.",
+      "projectReference": "src/lib/login.ts:loginHeaders"
+    },
+    {
+      "id": "AL10",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 119804,
+      "excerptByteStart": 119804,
+      "excerptByteEnd": 120194,
+      "excerpt": "i.DefaultRestOperationsFactory=void 0;let p=n(40416),h=n(1134),S=n(64071),E=class{create(){return h.default.create(this.clientConfig)}};i.DefaultRestOperationsFactory=E,s([(0,S.Value)(\"cell.client.config\"),c(\"design:type\",Object)],E.prototype,\"clientConfig\",void 0),i.DefaultRestOperationsFactory=s([(0,S.Component)(p.RestOperationsFactory)],E)},96218(t,i){Object.defineProperty(i,\"__esModu",
+      "claim": "Default RestOperations delegates to axios.create(this.clientConfig); arbitrary dynamic cell.client.config overrides were not read.",
+      "projectReference": "src/lib/login.ts:loginDoJSON"
+    },
+    {
+      "id": "AL11",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9639475,
+      "excerptByteStart": 9639475,
+      "excerptByteEnd": 9639905,
+      "excerpt": "function stringifySafely(t,i,n){if(eu.isString(t))try{return(i||JSON.parse)(t),eu.trim(t)}catch(t){if(\"SyntaxError\"!==t.name)throw t}return(n||JSON.stringify)(t)}let eF={transitional:eA,adapter:[\"xhr\",\"http\",\"fetch\"],transformRequest:[function(t,i){let n,s=i.getContentType()||\"\",c=s.indexOf(\"application/json\")>-1,p=eu.isObject(t);if(p&&eu.isHTMLForm(t)&&(t=new FormData(t)),eu.isFormData(t))return c?JSON.stringify(helpers_formD",
+      "claim": "Axios transform serializes object{} as JSON and sets Content-Type application/json.",
+      "projectReference": "src/lib/login.ts:loginDoJSON"
+    },
+    {
+      "id": "AL12",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9684372,
+      "excerptByteStart": 9684372,
+      "excerptByteEnd": 9684802,
+      "excerpt": "function dispatchRequest(t){return throwIfCancellationRequested(t),t.headers=em.from(t.headers),t.data=transformData.call(t,t.transformRequest),-1!==[\"post\",\"put\",\"patch\"].indexOf(t.method)&&t.headers.setContentType(\"application/x-www-form-urlencoded\",!1),tL(t.adapter||eU.adapter,t)(t).then(function(i){throwIfCancellationRequested(t),t.response=i;try{i.data=transformData.call(t,t.transformResponse,i)}finally{delete t.response}",
+      "claim": "Axios dispatchRequest defaults empty POST/PUT/PATCH content type to application/x-www-form-urlencoded if not explicitly set; GET remains without it.",
+      "projectReference": "src/lib/login.ts:loginHeaders"
+    },
+    {
+      "id": "AL13",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9641283,
+      "excerptByteStart": 9641283,
+      "excerptByteEnd": 9641503,
+      "excerpt": "common:{Accept:\"application/json, text/plain, */*\",\"Content-Type\":void 0}}};eu.forEach([\"delete\",\"get\",\"head\",\"post\",\"put\",\"patch\",\"query\"],t=>{eF.headers[t]={}});let eU=eF;function transformData(t,i){let n=this||eU,s=i|",
+      "claim": "Default Axios Accept header and initially absent Content-Type.",
+      "projectReference": "src/lib/login.ts:loginHeaders"
+    },
+    {
+      "id": "AL14",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9654089,
+      "excerptByteStart": 9654009,
+      "excerptByteEnd": 9654349,
+      "excerpt": "isFunction(eZ.createBrotliDecompress),td=eu.isFunction(eZ.createZstdDecompress),tu=\"gzip, compress, deflate\"+(tc?\", br\":\"\"),tp=tu+(td?\", zstd\":\"\"),{http:th,https:tg}=eQ,tf=/https:?/,tm=[\"content-type\",\"content-length\"];function setFormDataHeaders(t,i,n){\"content-only\"!==n?t.set(i):Object.entries(i).forEach(([i,n])=>{tm.includes(i.toLowerC",
+      "claim": "tu is gzip,compress,deflate plus optional br. tp additionally includes zstd when the runtime supports it; the HTTP adapter does not select tp merely because that function exists.",
+      "projectReference": "src/lib/login.ts:loginHeaders",
+      "relatedEvidence": [
+        "AL15",
+        "AL23",
+        "AL24"
+      ]
+    },
+    {
+      "id": "AL15",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9663476,
+      "excerptByteStart": 9663476,
+      "excerptByteEnd": 9663816,
+      "excerpt": "eo.set(\"Accept-Encoding\",eu.hasOwnProp(P,\"advertiseZstdAcceptEncoding\")&&!0===P.advertiseZstdAcceptEncoding?tp:tu,!1);let ed=Object.assign(Object.create(null),{path:S,method:z,headers:toByteStringHeaderObject(eo),agents:{http:F,https:U},auth:I,protocol:ei,family:N,beforeRedirect:dispatchBeforeRedirect,beforeRedirects:Object.create(null),h",
+      "claim": "At byte9663476 HTTP adapter sets Accept-Encoding to tp only when transitional has its own advertiseZstdAcceptEncoding property with boolean true; otherwise it selects tu. The final false argument preserves an explicit header override.",
+      "projectReference": "src/lib/login.ts:loginHeaders",
+      "relatedEvidence": [
+        "AL14",
+        "AL23",
+        "AL24"
+      ]
+    },
+    {
+      "id": "AL16",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7261342,
+      "excerptByteStart": 7261212,
+      "excerptByteEnd": 7261492,
+      "excerpt": "d 0,i.readLoginEnvelopeCode=readLoginEnvelopeCode,i.isLoginPollPending=isLoginPollPending,i.hasUsableAuthToken=hasUsableAuthToken,i.LOGIN_TOKEN_PENDING_CODE=11217,i.LOGIN_ACCOUNT_PENDING_CODE=12151},57740(t,i,n){Object.defineProperty(i,\"__esModule\",{value:!0}),n(86482),i.default=",
+      "claim": "Native pending business codes are11217 for token and12151 for account; an unusable token without pending is an error.",
+      "projectReference": "src/app/api/panel/login/poll/route.ts:pending checks"
+    },
+    {
+      "id": "AL17",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7192067,
+      "excerptByteStart": 7192067,
+      "excerptByteEnd": 7192327,
+      "excerpt": "calculateExpiresAt(t){!t.expiresAt&&t.expiresIn&&(t.expiresAt=Date.now()+1e3*t.expiresIn),!t.refreshExpiresAt&&t.refreshExpiresIn&&(t.refreshExpiresAt=Date.now()+1e3*t.refreshExpiresIn)}isAuthenticationInvalidError(t){return t?.isAxiosError&&(t.response?.statu",
+      "claim": "Native token expiry may be absolute milliseconds or computed from expiresIn seconds.",
+      "projectReference": "src/app/api/panel/login/poll/route.ts:73"
+    },
+    {
+      "id": "AL18",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 8949876,
+      "excerptByteStart": 8949876,
+      "excerptByteEnd": 8950276,
+      "excerpt": "function alignLoginPageUrl(t,n,s=i.CN_SAAS_CORE_API_TRUSTED_ORIGINS){if(!n||!s.includes(n))return t;try{let i=new URL(t),c=new URL(n);if(isIpHostname(c.hostname)||i.host===c.host||!isTrustedHostname(i.hostname,s))return t;return i.protocol=c.protocol,i.host=c.host,i.toString()}catch{return t}}function resolveFailoverPair(t,i){let n=resolveFailoverBackupOrigin(i);return[isFailoverFrontDoorOrigin(t,",
+      "claim": "Login page origin is aligned only among trusted CN API hostnames.",
+      "projectReference": "src/lib/login.ts:alignLoginAuthURL"
+    },
+    {
+      "id": "AL19",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 8950934,
+      "excerptByteStart": 8950934,
+      "excerptByteEnd": 8951384,
+      "excerpt": "i.CN_SAAS_CORE_API_PRIMARY_ORIGIN=\"https://www.workbuddy.cn\",i.CN_SAAS_CORE_API_ALTERNATE_ORIGIN=\"https://copilot.tencent.com\",i.CN_SAAS_CORE_API_BACKUP_ORIGIN=\"https://wb.tencentbuddy.com\",i.CN_SAAS_CORE_API_FRONT_DOORS=[i.CN_SAAS_CORE_API_PRIMARY_ORIGIN,i.CN_SAAS_CORE_API_ALTERNATE_ORIGIN],i.CN_SAAS_CORE_API_TRUSTED_ORIGINS=[i.CN_SAAS_CORE_API_PRIMARY_ORIGIN,i.CN_SAAS_CORE_API_ALTERNATE_ORIGIN,i.CN_SAAS_CORE_API_BACKUP_ORIGIN]},66984(t,i){Objec",
+      "claim": "CN primary WorkBuddy,alternate copilot.tencent.com,backup wb.tencentbuddy.com are the shipped trusted origins.",
+      "projectReference": "src/lib/login.ts:UPSTREAM_BASE_CN"
+    },
+    {
+      "id": "AL20",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7196305,
+      "excerptByteStart": 7196305,
+      "excerptByteEnd": 7196625,
+      "excerpt": "async compose(){if(!this.authStateHeaderProvider)return{};try{return await this.authStateHeaderProvider.provide()??{}}catch(t){return this.logger.warn(`[auth/state] resolve extra headers failed, skip: ${t}`),{}}}};i.AuthStateHeaderComposer=S,s([(0,p.Autowired)(p.Logger),c(\"design:type\",Object)],S.prototype,\"logger\",voi",
+      "claim": "Additional auth/state headers come from an optional host provider; this task did not fabricate device/nonces or read user stores.",
+      "projectReference": "src/lib/login.ts:known default headers"
+    },
+    {
+      "id": "AL21",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/product.json",
+      "sha256": "a73bea91defd7d5f38d5672c19111681ba52244ee8b9b64cc59dc3e3992eed61",
+      "byteOffset": 1785,
+      "excerptByteStart": 1755,
+      "excerptByteEnd": 1865,
+      "excerpt": ".codebuddy.cn\"\n      ],\n      \"platform\": \"workbuddy\"\n    }\n  },\n  \"updates\": {\n    \"apiVersion\": \"v2\",\n    \"d",
+      "claim": "Installed CN default product selects account-scoped-external-link, /plugin, platform workbuddy.",
+      "projectReference": "src/lib/login.ts:loginEndpoints"
+    },
+    {
+      "id": "AL22",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9640518,
+      "excerptByteStart": 9640458,
+      "excerptByteEnd": 9640668,
+      "excerpt": "pers_toFormData(n?{\"files[]\":t}:t,c&&new c,i)}}return p||c?(i.setContentType(\"application/json\",!1),stringifySafely(t)):t}],transformResponse:[function(t){let i=defaults_own(this,\"transitional\")||eF.transitiona",
+      "claim": "The actual Axios object transform sets JSON content type before stringify; fetchAuthState passes{}.",
+      "projectReference": "src/lib/login.ts:loginHeaders"
+    },
+    {
+      "id": "AL23",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9637342,
+      "excerptByteStart": 9637262,
+      "excerptByteEnd": 9637542,
+      "excerpt": ",forcedJSONParsing:!0,clarifyTimeoutError:!1,legacyInterceptorReqResOrdering:!0,advertiseZstdAcceptEncoding:!1,validateStatusUndefinedResolves:!0};var eT=n(76982);let ek=n(87016).URLSearchParams,eR=\"abcdefghijklmnopqrstuvwxyz\",eI=\"0123456789\",eP={DIGIT:eI,ALPHA:eR,ALPHA_DIGIT:eR+",
+      "claim": "Bundled Axios transitional defaults explicitly disable zstd advertisement, even when the Node runtime supports zstd decoding.",
+      "projectReference": "src/lib/login.ts:loginHeaders Accept-Encoding default"
+    },
+    {
+      "id": "AL24",
+      "path": "D:/workBuddyAI/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9658957,
+      "excerptByteStart": 9658897,
+      "excerptByteEnd": 9659217,
+      "excerpt": "ction(i,n,s){let c,p,h,S,E,A,R,I,own=i=>eu.getSafeProp(t,i),P=own(\"transitional\")||eA,O=own(\"data\"),M=own(\"lookup\"),N=own(\"family\"),L=own(\"httpVersion\");void 0===L&&(L=1);let $=own(\"http2Options\"),F=own(\"httpAgent\"),U=own(\"httpsAgent\"),B=own(\"proxy\"),W=own(\"responseType\"),q=own(\"responseEncoding\"),G=own(\"socketPath\"),z",
+      "claim": "HTTP adapter P refers to request transitional config or bundled default eA; AL23 supplies the default false used by AL15.",
+      "projectReference": "src/lib/login.ts:loginHeaders Accept-Encoding default"
+    }
+  ],
+  "changedFiles": [
+    {
+      "path": "src/lib/login.ts",
+      "sha256": "1d8577a2e9e70df1f938f244bff5e0e1bdae94714aff4cf5e35cb82397d6b616",
+      "backup": ".codex-backup\\alignment-20261120-110929\\src\\lib\\login.ts",
+      "newFile": false
+    },
+    {
+      "path": "src/app/api/panel/login/start/route.ts",
+      "sha256": "a9015681cf8ac34dfe7ffa916e85f01745b3004c7d772421c063e90e57760ce2",
+      "backup": ".codex-backup\\alignment-20261120-110929\\src\\app\\api\\panel\\login\\start\\route.ts",
+      "newFile": false
+    },
+    {
+      "path": "src/app/api/panel/login/poll/route.ts",
+      "sha256": "c084b1df0d9781cfc040a6ad96ef75183d6f7d7aebe2bafa9c1c529aa0e5d8be",
+      "backup": ".codex-backup\\alignment-20261120-110929\\src\\app\\api\\panel\\login\\poll\\route.ts",
+      "newFile": false
+    },
+    {
+      "path": "scripts/workbuddy-login.test.mts",
+      "sha256": "000349f954519f15fa4a5b751d8bf2ab21425806da00befd35e055f67f7a300f",
+      "backup": null,
+      "newFile": true
+    }
+  ],
+  "verification": {
+    "command": "node scripts/test-offline.mjs scripts/workbuddy-login.test.mts scripts/import-validation.test.mts",
+    "tests": 11,
+    "pass": 11,
+    "fail": 0,
+    "log": ".runtime/alignment-login-tests.log",
+    "eslint": "node node_modules/eslint/bin/eslint.js [four changed login source/test files] exited0.",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit --incremental false exited0 after the final login edits.",
+    "finalRerun": "9new login tests plus2existing import-compatibility tests passed after final edits. ESLint and project tsc exited0."
+  },
+  "notes": [
+    "Native actual fetchAuthState uses POST{} (JSON). The POSTnull path is native5-second connectivity checking; the generic helper reproduces default Axios empty POST form type and Content-Length0 behavior.",
+    "loginDoJSON retains its original five positional arguments and adds optional cfg/context.",
+    "Existing unrelated account records are left untouched; this task does not migrate or inspect real credentials.",
+    "LOGIN_UA remains a compatibility-only pure CN constant to avoid eager cross-module initialization when consumers import validUID/authShapeOf; actual outbound requests always call client.rpcUserAgent with current cfg/realm.",
+    "Read-only zstd follow-up: final HTTP header selection and its default/config binding were followed through AL14,AL15,AL23,AL24. No production transport or login source was edited for this follow-up."
+  ],
+  "acceptEncodingResolution": {
+    "artifactSHA256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+    "httpAdapterByteOffset": 9663476,
+    "defaultTransitionalByteOffset": 9637342,
+    "adapterConfigBindingByteOffset": 9658957,
+    "defaultHeader": "gzip, compress, deflate, br",
+    "requiresProductionLoginChange": false,
+    "reason": "Runtime createZstdDecompress only determines contents of tp. A separate explicit boolean advertiseZstdAcceptEncoding:true switch selects tp; bundled default is false.",
+    "unobserved": "Arbitrary dynamic cell.client.config / request-specific overrides are not established by this static inspection."
+  }
+}

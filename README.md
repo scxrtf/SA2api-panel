@@ -8,6 +8,7 @@
 | 模块 | Go 版 | 本版 |
 |---|---|---|
 | OpenAI 兼容端点 | `/v1/chat/completions` `/v1/models` | `/api/v1/chat/completions` `/api/v1/models` |
+| OpenAI Responses | — | `/api/v1/responses`（亦可用 `/v1/responses`），支持 Codex |
 | Anthropic 端点 | `/v1/messages`（翻译层） | `/api/v1/messages`（等价移植） |
 | 管理面板 | 内嵌 HTML | `/panel`（React SPA） |
 | 面板 API | `/panel/api/*` | `/api/panel/*` |
@@ -28,14 +29,35 @@ npx prisma migrate dev      # 建表
 npm run dev                 # http://localhost:3000/panel
 ```
 
+## 机器会话工作树
+
+从面板进入 `/panel/workspace`。客户端继续使用现有网关，页面按机器和会话只读展示请求、响应与已回传的工具活动。
+用 `WB2_WORKSPACE_ENABLED=1` 启用，见[机器会话运行指南](docs/agent-workspace.md)。
+
+## OpenAI Responses / Codex
+
+用已有网关密钥与 `/api/v1/models` 返回的模型 ID 调用 `/api/v1/responses`。
+WorkBuddy 账号池与现有 Chat 供应商无需额外上游配置；原生供应商可通过环境变量接入。
+见 [Responses 接入、数据迁移与能力对照](docs/responses.md)。
+
 ## 数据库通道
 
 默认使用 Prisma/PostgreSQL，设置 `DATABASE_URL` 与 `DIRECT_URL` 后运行迁移。
 使用 CloudBase 时设置 `USE_CLOUDBASE_REST=1`、`CLOUDBASE_POSTGREST_URL` 与
 `CLOUDBASE_API_KEY`；CloudBase 模式不执行 Prisma migration。
 
+### 请求日志的会话模式
+
+面板「请求日志」默认逐条展示。在「前缀缓存命中率」右侧点「会话」，按最近一次请求查看会话，
+展开后可浏览该会话命中当前筛选的请求。新日志以客户端提供的会话标识关联，例如 `X-WB2A-Session-ID`、
+`X-Conversation-ID` 或 JSON 中的 `conversation_id`；同一会话内换模型、换上游账号也不会拆组。
+旧日志和未携带有效会话标识的请求单独标为「未关联会话」。
+
+启用会话查询前，Prisma 模式运行 `npx prisma migrate deploy`；CloudBase REST 模式应先在对应
+PostgreSQL 环境应用 `cloudbase/migrations/20261120120000_request_log_sessions.sql`，再更新应用。
+
 `WB2A_SUPER_PASSWORD` 用于配置、密钥与账号权限操作的二次确认；
-`WB2A_MACHINE_PASSWORD` 用于当前机器的建 Key 授权。本项目两项均配置为 `QWEZXC2004`。
+`WB2A_MACHINE_PASSWORD` 用于当前机器的建 Key 授权。两项均从环境变量读取，仓库不记录实际密码。
 
 ## 部署到 Railway
 
@@ -81,7 +103,7 @@ Token 保活默认只处理 24 小时内到期或过期时间未知的账号；�
 
 - **单实例语义**：选号运行态（inFlight/lastUsed/抽签序号）为进程内 Map，与 Go 单机口径等价。
   Railway 单容器部署即可；不要水平扩多副本（多副本会分裂在途计数，同 Go 版约束）。
-- **鉴权**：`/api/v1/*` 接受主密钥 ∪ ApiKey 环任一 Bearer；`/api/panel/*` 与 `/api/cron/*` 仅主密钥。
+- **鉴权**：`/api/v1/*` 接受主密钥 ∪ ApiKey 环任一 Bearer；`/api/panel/*` 与 `/api/cron/*` 仅主密钥。面板和 cron 缺少主密钥配置时返回 503；子密钥没有管理权限。网关仅在主密钥与密钥环都为空且密钥环读取成功时保持显式免鉴权模式，数据库读取失败不会放行。
 - **粘性会话**：会话键 → 账号绑定存 StickySession 表，与 Go 的内存 map 语义一致（DB 化后重启不丢）。
 - **冷却/熔断/降权**：ModelCooldown、AccountState 落库，策略逻辑 1:1 移植 internal/pool。
 
@@ -155,3 +177,15 @@ curl -X POST https://<你的域名>/api/panel/models/test \
 
 供应商 `/models` 目录探测失败不会拖垮整体列表，错误以 `warnings` 形式返回在
 `/api/panel/models` 响应中。
+
+## 复审与离线验证
+
+```bash
+npm test          # 仅本地 fixture；不连接真实上游或数据库
+npm run lint
+```
+
+全项目复审、WorkBuddy 请求一致性矩阵、证据与回退步骤见 [REVIEW.md](REVIEW.md)。
+
+登录、隐私判定、搜索/抓取请求的后续对齐及新配置见 [UPSTREAM_ALIGNMENT.md](UPSTREAM_ALIGNMENT.md)。
+定向离线回归：`npm run test:workbuddy-profile`。

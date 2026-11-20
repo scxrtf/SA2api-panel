@@ -1,6 +1,6 @@
 // global-cache-uid.test.mts — global 探测缓存按账号 uid 隔离测试（mock fetch，离线）。
 import assert from "node:assert/strict";
-import { fetchGlobalModelInfos } from "file:///C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next/src/lib/upstream/modelCatalog.ts";
+import { fetchGlobalModelInfos } from "../src/lib/upstream/modelCatalog.ts";
 
 // mock fetch：任何探测请求都按 Authorization 头里的 token 返回不同模型名单，
 // 并记录每 token 的请求次数。命中缓存的第二次调用不得再发网。
@@ -17,7 +17,6 @@ globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
   ] } }), { status: 200, headers: { "Content-Type": "application/json" } });
 }) as typeof fetch;
 
-type Obj = Record<string, unknown>;
 const cfg = {} as never;
 const acctA = { uid: "uid-A", nickname: "A", realm: "global", accessToken: "tok-A", refreshToken: "", expiresAt: 0, domain: "", enterpriseId: "", deviceToken: "" };
 const acctB = { uid: "uid-B", nickname: "B", realm: "global", accessToken: "tok-B", refreshToken: "", expiresAt: 0, domain: "", enterpriseId: "", deviceToken: "" };

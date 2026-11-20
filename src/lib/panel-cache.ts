@@ -1,45 +1,51 @@
-// 面板服务端数据缓存：低频视图默认 1 小时，余额趋势单独缓存 60 秒。
-// 多个浏览器/标签页共享同一份，刷新页面也不会丢失。
-// 手动刷新通过 ?refresh=1 绕过缓存立即拉新数据。
-// globalThis 防止 Next 热重载重复建缓存实例。
-import { PANEL_CACHE_DEFAULT_TTL_MS, panelCacheTtlMs } from "./balance-history-cache";
+// 多个浏览器/标签页共享进程内的面板快照；各路由独立打包时仍共用同一份。
+import { BALANCE_HISTORY_CACHE_MS } from "./balance-history-cache";
+import { cacheAgeMs, createServerCache, type CacheLoadOptions } from "./server-cache";
 
-interface Entry { at: number; data: unknown }
-const globalForPanel = globalThis as unknown as { panelDataCache?: Map<string, Entry> };
-const cache = globalForPanel.panelDataCache ?? new Map<string, Entry>();
-globalForPanel.panelDataCache = cache;
+export const PANEL_CACHE_DEFAULT_TTL_MS = 60 * 60_000;
+export const MODEL_PROBES_CACHE_KEY = "model_probes";
 
-const DEFAULT_TTL_MS = PANEL_CACHE_DEFAULT_TTL_MS;
+export function panelCacheTtlMs(key: string): number {
+  if (key.startsWith("balance_history:")) return BALANCE_HISTORY_CACHE_MS;
+  if (key === MODEL_PROBES_CACHE_KEY) return 60_000;
+  return PANEL_CACHE_DEFAULT_TTL_MS;
+}
 
-export function panelCacheGet<T>(key: string, ttlMs = DEFAULT_TTL_MS): T | null {
-  const hit = cache.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.at >= ttlMs) { cache.delete(key); return null; }
-  return hit.data as T;
+const MAX_ENTRIES = 64; // 30 个余额窗口 + 固定键仍有余量。
+const globals = globalThis as typeof globalThis & { wb2aPanelServerCache?: ReturnType<typeof createServerCache<unknown>> };
+const cache = globals.wb2aPanelServerCache ??= createServerCache<unknown>(MAX_ENTRIES, panelCacheTtlMs);
+
+export function cachedPanelData<T>(key: string, loader: () => Promise<T>, options: CacheLoadOptions<T> = {}) {
+  const { refresh, shouldCache } = options;
+  const { promise, cached } = cache.load(key, loader, {
+    refresh,
+    shouldCache: shouldCache && ((value) => shouldCache(value as T)),
+  });
+  return { promise: promise as Promise<T>, cached };
+}
+
+export function panelCacheGet<T>(key: string, ttlMs = panelCacheTtlMs(key)): T | null {
+  const now = Date.now();
+  const hit = cache.peek(key, now);
+  return hit && cacheAgeMs(hit.at, now) < ttlMs ? hit.value as T : null;
 }
 
 export function panelCacheSet(key: string, data: unknown): void {
-  cache.delete(key);
-  cache.set(key, { at: Date.now(), data });
+  cache.set(key, data);
 }
 
-export function panelCacheDel(keyPrefix?: string): void {
-  if (!keyPrefix) { cache.clear(); return; }
-  for (const k of cache.keys()) if (k.startsWith(keyPrefix)) cache.delete(k);
+export function panelCacheAgeMs(key: string, now = Date.now()): number | undefined {
+  const hit = cache.peek(key, now);
+  return hit && cacheAgeMs(hit.at, now);
+}
+
+// 使用完整键，避免 balance_history:1 连带失效 10～19 天窗口。
+export function panelCacheDel(key?: string): void {
+  if (key === undefined) cache.clear();
+  else cache.delete(key);
 }
 
 // 快照供「缓存详细」页展示。
-export function panelCacheStats(): { size: number; entries: { key: string; ageMs: number; ttlMs: number }[] } {
-  const now = Date.now();
-  const entries: { key: string; ageMs: number; ttlMs: number }[] = [];
-  for (const [k, e] of cache) {
-    const ageMs = now - e.at;
-    const ttlMs = panelCacheTtlMs(k);
-    if (ageMs >= ttlMs) {
-      cache.delete(k);
-      continue;
-    }
-    entries.push({ key: k, ageMs, ttlMs });
-  }
-  return { size: entries.length, entries };
+export function panelCacheStats(now = Date.now()) {
+  return cache.stats(now);
 }

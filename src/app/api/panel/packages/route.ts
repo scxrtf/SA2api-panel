@@ -6,7 +6,7 @@
 import { panelAuth, ok } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
-import { panelCacheGet, panelCacheSet } from "@/lib/panel-cache";
+import { cachedPanelData } from "@/lib/panel-cache";
 import { creditPackages, type AuthShape } from "@/lib/upstream/client";
 import {
   classifySessionError,
@@ -23,10 +23,12 @@ export async function GET(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
   const refresh = new URL(req.url).searchParams.get("refresh") === "1";
-  if (!refresh) {
-    const cached = panelCacheGet<Record<string, unknown>>("packages");
-    if (cached) return ok({ ...cached, cached: true });
-  }
+  const { promise, cached } = cachedPanelData("packages", loadPackages, { refresh });
+  const payload = await promise;
+  return ok(cached ? { ...payload, cached: true } : payload);
+}
+
+async function loadPackages() {
   const cfg = await getConfig();
   // 只取 AuthShape 需要的字段 + 展示名；BigInt 只有 expiresAt，其它大字段不落内存。
   const accounts = await prisma.account.findMany({
@@ -90,12 +92,10 @@ export async function GET(req: Request) {
     return y.remain - x.remain;
   });
   const failed = out.filter((r) => !r.ok).length;
-  const payload = {
+  return {
     accounts: out,
     detail_limit: cfg.package_detail_limit,
     failed,
     total: out.length,
   };
-  panelCacheSet("packages", payload);
-  return ok(payload);
 }

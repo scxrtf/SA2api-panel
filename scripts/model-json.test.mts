@@ -1,20 +1,36 @@
 // model-json.test.mts — 子进程隔离测试 model.json 落盘（每 case 独立 WB2API_DATA_DIR）。
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = "C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next";
-const IMPORT = "file:///C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next/src/lib/upstream/modelCatalog.ts";
+const ownedTemps: string[] = [];
+function testTemp(prefix: string): string {
+  const path = mkdtempSync(prefix);
+  ownedTemps.push(path);
+  return path;
+}
+process.on("exit", () => {
+  for (const path of ownedTemps) {
+    if (dirname(resolve(path)) !== resolve(tmpdir()) || !/^wb2a-(?:script|mj)-/.test(basename(path))) {
+      throw new Error("unexpected model-json temporary directory");
+    }
+    rmSync(path, { recursive: true, force: true });
+  }
+});
+
+const ROOT = fileURLToPath(new URL("../", import.meta.url));
+const IMPORT = new URL("../src/lib/upstream/modelCatalog.ts", import.meta.url).href;
+const SETUP = new URL("./test-offline-setup.mts", import.meta.url).href;
 
 function runChild(code: string, dataDir: string): { stdout: string; stderr: string; code: number } {
-  const f = join(mkdtempSync(join(tmpdir(), "wb2a-script-")), "child.mts");
+  const f = join(testTemp(join(tmpdir(), "wb2a-script-")), "child.mts");
   writeFileSync(f, `const mod = await import("${IMPORT}");\n` + code);
-  const TSX_CLI = "C:/Users/16321/AppData/Local/npm-cache/_npx/fd45a72a545557e9/node_modules/tsx/dist/cli.mjs";
-  const r = spawnSync(process.execPath, [TSX_CLI, f], {
+  const r = spawnSync(process.execPath, ["--experimental-test-module-mocks", "--import", "tsx", "--import", SETUP, f], {
     cwd: ROOT,
-    env: { ...process.env, WB2API_DATA_DIR: dataDir },
+    env: { ...process.env, WB2API_TEST_MODEL_JSON: "1", WB2API_DATA_DIR: dataDir },
     encoding: "utf8",
   });
   if (r.error) console.error("SPAWN ERROR:", r.error.message);
@@ -31,7 +47,7 @@ function t(name: string, fn: () => void) {
 
 // 1. 种子条目查第 2 级直接命中，不落盘（无 put 不产生文件）。
 t("SeedHitNoFile", () => {
-  const dir = mkdtempSync(join(tmpdir(), "wb2a-mj-"));
+  const dir = testTemp(join(tmpdir(), "wb2a-mj-"));
   const r = runChild(`
 console.log("ctx:", mod.contextWindowListing("kimi-k2.6", 0));
 console.log("max:", mod.maxOutputTokensListing("kimi-k2.6", 0));
@@ -43,8 +59,8 @@ console.log("max:", mod.maxOutputTokensListing("kimi-k2.6", 0));
 });
 
 // 2. put 后落盘；新进程加载同文件命中（跨进程持久化 = 重启不丢）。
-t("PutPersistsAcrossProcesses", () => {
-  const dir = mkdtempSync(join(tmpdir(), "wb2a-mj-"));
+t("ManualCacheLoadsInFreshProcess", () => {
+  const dir = testTemp(join(tmpdir(), "wb2a-mj-"));
   // 未知模型全链 miss：remote=0、种子无 → 触发第 4 级（异步拉取会失败/节流，无所谓），
   // 本次返回 1M。手动喂 doc 不现实（异步真网），改为直接利用 mdLookup 需要 doc 的前提：
   // 无法离线测 put 路径——用 contextWindowListing 走不通。
@@ -65,7 +81,7 @@ console.log("max:", mod.maxOutputTokensListing("my-custom-model", 0));
 
 // 3. 损坏文件 → 降级种子 + WARN，不崩溃。
 t("CorruptedFileFallsBackToSeed", () => {
-  const dir = mkdtempSync(join(tmpdir(), "wb2a-mj-"));
+  const dir = testTemp(join(tmpdir(), "wb2a-mj-"));
   writeFileSync(join(dir, "model.json"), "{not json");
   const r = runChild(`
 console.log("ctx:", mod.contextWindowListing("kimi-k2.6", 0));
@@ -79,7 +95,7 @@ console.log("unknown:", mod.contextWindowListing("totally-unknown-model-xyz", 0)
 
 // 4. 条目级非法剔除：context<=0 的条目被剔除并 WARN，合法条目保留。
 t("InvalidEntriesDropped", () => {
-  const dir = mkdtempSync(join(tmpdir(), "wb2a-mj-"));
+  const dir = testTemp(join(tmpdir(), "wb2a-mj-"));
   writeFileSync(join(dir, "model.json"), JSON.stringify({
     "good-model": { context_length: 100000, max_output_tokens: 8000, source: "manual" },
     "bad-model": { context_length: 0, max_output_tokens: 8000, source: "manual" },
@@ -96,7 +112,7 @@ console.log("bad:", mod.contextWindowListing("bad-model", 0));
 
 // 5. max_output_tokens 省略口径：条目 maxOutput=0 → undefined（字段省略不编造）。
 t("MaxOutputZeroOmits", () => {
-  const dir = mkdtempSync(join(tmpdir(), "wb2a-mj-"));
+  const dir = testTemp(join(tmpdir(), "wb2a-mj-"));
   writeFileSync(join(dir, "model.json"), JSON.stringify({
     "no-out-model": { context_length: 100000, max_output_tokens: 0, source: "manual" },
   }));
@@ -111,7 +127,7 @@ console.log("max:", mod.maxOutputTokensListing("no-out-model", 0));
 
 // 6. remote 权威永远压过 model.json。
 t("RemoteAuthoritative", () => {
-  const dir = mkdtempSync(join(tmpdir(), "wb2a-mj-"));
+  const dir = testTemp(join(tmpdir(), "wb2a-mj-"));
   writeFileSync(join(dir, "model.json"), JSON.stringify({
     "kimi-k2.6": { context_length: 999, max_output_tokens: 999, source: "manual" },
   }));

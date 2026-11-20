@@ -3,6 +3,7 @@
 import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { invalidateKeyRing } from "@/lib/auth-guard";
+import { nativeResponsesConfig } from "@/lib/responses-native";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,14 +57,17 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!list.includes(v)) list.push(v);
   }
 
-  // 绑定白名单时逐个核对供应商是否已注册，避免写出永不命中的幽灵授权。
+  // 原生 Responses 由服务环境配置，没有 Provider 表记录。
   if (!list.includes("*") && list.length > 0) {
-    const found = await prisma.provider.findMany({
-      where: { name: { in: list } },
+    const native = nativeResponsesConfig();
+    const nativeName = native?.canonical && native.secret ? native.provider : null;
+    const ordinary = list.filter((name) => name !== nativeName);
+    const found = ordinary.length ? await prisma.provider.findMany({
+      where: { name: { in: ordinary } },
       select: { name: true },
-    });
+    }) : [];
     const known = new Set(found.map((r) => r.name));
-    const missing = list.filter((n) => !known.has(n));
+    const missing = ordinary.filter((n) => !known.has(n));
     if (missing.length > 0) {
       return fail(400, "未知供应商：" + missing.join(", "));
     }

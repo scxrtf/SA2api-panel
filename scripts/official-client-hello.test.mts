@@ -8,7 +8,9 @@ import test from "node:test";
 import { officialEgress, closeOfficialEgressConnections } from "../src/lib/upstream/official-egress.ts";
 
 const OFFICIAL_JA3 = "771,4865-4866-4867-49199-49195-49200-49196-49191-52393-52392-49161-49171-49162-49172-156-157-47-53,0-23-65281-10-11-35-13-51-45-43,29-23-24,0";
-const OFFICIAL_JA4 = "t13d0a1200_5d04281c6031_b76c5ee2507d";
+// Standard JA4: decimal cipher count, decimal extension count, wire-order sigalgs.
+// The fixture describes this helper profile, not a live client capture.
+const OFFICIAL_JA4 = "t13d181000_5d04281c6031_78e6aca7449b";
 
 function parseHello(raw: Buffer) {
   assert.equal(raw[0], 22);
@@ -56,12 +58,18 @@ function parseHello(raw: Buffer) {
     p += 4 + length;
   }
   const ja3 = [version, ciphers.join("-"), extensions.join("-"), groups.join("-"), ecPointFormats.join("-")].join(",");
-  const tlsVersion = Math.max(version, ...versions);
-  const a = `t1${(tlsVersion & 0xff) - 1}${hasSNI ? "d" : "i"}${extensions.length.toString(16).padStart(2, "0")}${ciphers.length.toString(16).padStart(2, "0")}${alpn[0]?.slice(0, 2) ?? "00"}`;
+  const grease = (n: number) => (n & 0x0f0f) === 0x0a0a && (n >> 8) === (n & 0xff);
+  const filteredCiphers = ciphers.filter((n) => !grease(n));
+  const filteredExtensions = extensions.filter((n) => !grease(n));
+  const tlsVersion = Math.max(version, ...versions.filter((n) => !grease(n)));
+  const count = (n: number) => Math.min(n, 99).toString().padStart(2, "0");
+  const firstAlpn = alpn[0];
+  const alpnTag = firstAlpn ? firstAlpn[0] + firstAlpn.at(-1) : "00";
+  const a = `t1${(tlsVersion & 0xff) - 1}${hasSNI ? "d" : "i"}${count(filteredCiphers.length)}${count(filteredExtensions.length)}${alpnTag}`;
   const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 12);
-  const b = hash(ciphers.toSorted((x, y) => x - y).map((n) => n.toString(16).padStart(4, "0")).join(","));
-  const extensionList = extensions.filter((n) => n !== 0 && n !== 16).toSorted((x, y) => x - y);
-  const c = hash(`${extensionList.map((n) => n.toString(16).padStart(4, "0")).join(",")}_${sigalgs.toSorted((x, y) => x - y).map((n) => n.toString(16).padStart(4, "0")).join(",")}`);
+  const b = hash(filteredCiphers.toSorted((x, y) => x - y).map((n) => n.toString(16).padStart(4, "0")).join(","));
+  const extensionList = filteredExtensions.filter((n) => n !== 0 && n !== 16).toSorted((x, y) => x - y);
+  const c = hash(`${extensionList.map((n) => n.toString(16).padStart(4, "0")).join(",")}_${sigalgs.filter((n) => !grease(n)).map((n) => n.toString(16).padStart(4, "0")).join(",")}`);
   return { ja3, ja4: `${a}_${b}_${c}`, sessionIDLen, extensions, ciphers, sigalgs, groups, alpn };
 }
 
@@ -107,7 +115,7 @@ function assertOfficial(raw: Buffer) {
   assert.deepEqual(hello.alpn, []);
 }
 
-test("直连 ClientHello 的 JA3/JA4、session_id、扩展与 ALPN 对齐真机", async () => {
+test("直连 ClientHello 的 JA3/标准 JA4、session_id、扩展与 ALPN 符合固定 profile", async () => {
   const raw = await captureHello((port) => {
     const socket = new Socket();
     void officialEgress(`https://www.workbuddy.cn:${port}/`, { proxy: null, connectHost: "127.0.0.1" }).catch(() => undefined);

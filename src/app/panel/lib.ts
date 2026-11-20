@@ -1,6 +1,8 @@
 // 面板前端公共工具：统一请求封装。
 "use client";
 
+import { panelFetch } from "./local-access";
+
 const KEY = "wb2a_panel_key";
 
 export function getKey(): string {
@@ -8,6 +10,16 @@ export function getKey(): string {
 }
 export function setKey(k: string) {
   try { localStorage.setItem(KEY, k); } catch { /* 忽略 */ }
+  invalidateCache();
+}
+
+export const PANEL_AUTH_REQUIRED_EVENT = "wb2a:panel-auth-required";
+
+export class PanelRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "PanelRequestError";
+  }
 }
 
 export interface ApiResp<T = unknown> {
@@ -21,17 +33,32 @@ export interface ApiResp<T = unknown> {
 // req 统一打面板 API。
 export async function req<T = Record<string, unknown>>(
   path: string,
-  opts: { method?: string; body?: unknown } = {},
+  opts: { method?: string; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<T & ApiResp<T>> {
-  const r = await fetch("/api/panel/" + path, {
+  const key = getKey();
+  const headers = new Headers();
+  if (key) headers.set("Authorization", "Bearer " + key);
+  if (opts.body !== undefined) headers.set("Content-Type", "application/json");
+  const r = await panelFetch("/api/panel/" + path, {
     method: opts.method ?? "GET",
-    headers: opts.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     cache: "no-store",
+    signal: opts.signal,
   });
   let j: ApiResp<T>;
-  try { j = (await r.json()) as ApiResp<T>; } catch { j = { ok: false, error: "HTTP " + r.status }; }
-  if (!j.ok) throw new Error(j.error ?? "HTTP " + r.status);
+  try {
+    const value: unknown = await r.json();
+    j = value && typeof value === "object" && !Array.isArray(value)
+      ? value as ApiResp<T> : { ok: false, error: "HTTP " + r.status };
+  } catch { j = { ok: false, error: "HTTP " + r.status }; }
+  if (!r.ok || !j.ok) {
+    if (r.status === 401 && !opts.signal?.aborted && key === getKey() && typeof window !== "undefined") {
+      invalidateCache();
+      window.dispatchEvent(new Event(PANEL_AUTH_REQUIRED_EVENT));
+    }
+    throw new PanelRequestError(j.error ?? "HTTP " + r.status, r.status);
+  }
   return j as T & ApiResp<T>;
 }
 
@@ -46,6 +73,7 @@ export async function req<T = Record<string, unknown>>(
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 小时
 const dataCache = new Map<string, { at: number; data: unknown }>();
 const inflight = new Map<string, Promise<unknown>>();
+let cacheGeneration = 0;
 
 export async function reqCached<T = Record<string, unknown>>(
   path: string,
@@ -60,17 +88,25 @@ export async function reqCached<T = Record<string, unknown>>(
   const pending = inflight.get(path);
   if (!opts.force && pending) return pending as Promise<T & ApiResp<T>>;
   const fetchPath = opts.force ? path + (path.includes("?") ? "&" : "?") + "refresh=1" : path;
+  const generation = cacheGeneration;
   const p = req<T>(fetchPath)
-    .then((data) => { dataCache.set(path, { at: Date.now(), data }); return data; })
-    .finally(() => { inflight.delete(path); });
+    .then((data) => {
+      if (generation === cacheGeneration && inflight.get(path) === p) {
+        dataCache.set(path, { at: Date.now(), data });
+      }
+      return data;
+    })
+    .finally(() => { if (inflight.get(path) === p) inflight.delete(path); });
   inflight.set(path, p);
   return p;
 }
 
 // 外部写入（新增/删除基准等）后调用，让相关缓存立即失效。
 export function invalidateCache(pathPrefix?: string): void {
-  if (!pathPrefix) { dataCache.clear(); return; }
+  cacheGeneration++;
+  if (!pathPrefix) { dataCache.clear(); inflight.clear(); return; }
   for (const k of dataCache.keys()) if (k.startsWith(pathPrefix)) dataCache.delete(k);
+  for (const k of inflight.keys()) if (k.startsWith(pathPrefix)) inflight.delete(k);
 }
 
 // fmt*：数字/时间展示工具。

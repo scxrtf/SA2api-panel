@@ -1,10 +1,10 @@
 "use client";
-// 接入引导视图：把「取模型 → 选模型 → 发对话」三步完整摊开。
-// 地址按当前访问域名自动生成：本机访问显示 127.0.0.1，线上域名访问显示线上域名。
+// 接入引导：端点、请求样例和客户端配置共用当前访问地址与选中的模型 ID。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { req } from "../lib";
 import { Box, ButtonLoadingContent, LoadingIndicator } from "../components/ui";
-import { CtrlHint } from "../components/ctrl";
 
 interface ModelRow {
   id: string;
@@ -20,6 +20,13 @@ interface ModelRow {
 }
 
 const MODEL_STORE = "wb2a_connect_model";
+const GATEWAY_AUTH = '  -H "Authorization: Bearer $WB2A_API_KEY"';
+const bashQuote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+
+function curlJson(url: string, payload: Record<string, unknown>, headers: string[] = []) {
+  return ["curl " + bashQuote(url), GATEWAY_AUTH, '  -H "Content-Type: application/json"', ...headers,
+    "  -d " + bashQuote(JSON.stringify(payload, null, 2))].join(" \\\n");
+}
 
 // realmLabel 按模型 ID 前缀标注路由通道。
 function realmLabel(id: string): string {
@@ -31,8 +38,9 @@ function realmLabel(id: string): string {
 // fallbackCopy 非安全上下文（HTTP 局域网）下 Clipboard API 不可用时走 textarea。
 function fallbackCopy(text: string): Promise<void> {
   return new Promise((resolve, reject) => {
+    const active = document.activeElement;
+    const ta = document.createElement("textarea");
     try {
-      const ta = document.createElement("textarea");
       ta.value = text;
       ta.setAttribute("readonly", "");
       ta.style.position = "fixed";
@@ -41,11 +49,13 @@ function fallbackCopy(text: string): Promise<void> {
       ta.focus();
       ta.select();
       const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
       if (ok) resolve();
       else reject(new Error("copy failed"));
     } catch (e) {
       reject(e);
+    } finally {
+      ta.remove();
+      if (active instanceof HTMLElement) active.focus({ preventScroll: true });
     }
   });
 }
@@ -59,41 +69,60 @@ function copyText(text: string): Promise<void> {
 }
 
 // CopyRow 一行「标签 + 等宽值 + 复制」。值本身可点选，复制走剪贴板。
-function CopyRow({ label, value, tip, copied, onCopy }: {
-  label: string; value: string; tip?: string;
+function CopyRow({ label, value, copied, onCopy }: {
+  label: string; value: string;
   copied: string; onCopy: (v: string) => void;
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0", flexWrap: "wrap" }}>
       <span className="copy-label" style={{ fontSize: 12, color: "var(--fg-dim)" }}>{label}</span>
-      <code
+      <code dir="ltr"
         style={{
           flex: "1 1 180px", minWidth: 0, background: "var(--bg-soft)", padding: "5px 8px",
           borderRadius: 6, fontSize: 12, fontFamily: "var(--mono)",
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          whiteSpace: "normal", overflowWrap: "anywhere",
         }}
         title={value}
       >{value}</code>
-      {tip && <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{tip}</span>}
-      <button className="btn xs" onClick={() => onCopy(value)}>
+      <Button size="xs" variant="outline" type="button" onClick={() => onCopy(value)} aria-label={`复制 ${label}`}>
         {copied === value ? "已复制" : "复制"}
-      </button>
+      </Button>
     </div>
   );
 }
 
 // UrlLine 主地址行：地址独占一行，避免被标签挤成省略号。
-function UrlLine({ value, copied, onCopy }: {
-  value: string; copied: string; onCopy: (v: string) => void;
+function UrlLine({ label, value, copied, onCopy }: {
+  label: string; value: string; copied: string; onCopy: (v: string) => void;
 }) {
   return (
     <div className="url-line">
-      <code title={value}>{value}</code>
-      <button className="btn xs" onClick={() => onCopy(value)}>
+      <code dir="ltr" title={value} style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{value}</code>
+      <Button size="xs" variant="outline" type="button" className="ml-auto" onClick={() => onCopy(value)} aria-label={`复制 ${label} 地址`}>
         {copied === value ? "已复制" : "复制"}
-      </button>
+      </Button>
     </div>
   );
+}
+
+function CodeSnippet({ label, value, copied, onCopy }: {
+  label: string; value: string; copied: string; onCopy: (v: string) => void;
+}) {
+  return (
+    <div className="min-w-0">
+      <pre dir="ltr" tabIndex={0} aria-label={label} style={{ fontSize: 12 }}
+        className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><code>{value}</code></pre>
+      <div className="mt-2 flex justify-end">
+        <Button size="xs" variant="outline" type="button" onClick={() => onCopy(value)} aria-label={`复制 ${label}`}>
+          {copied === value ? "已复制" : "复制示例"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CtrlHint({ children }: { children: React.ReactNode }) {
+  return <div className="ctrl-hint" style={{ fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>{children}</div>;
 }
 
 // StepCard 带编号与 method 徽章的三步卡片。
@@ -124,10 +153,10 @@ function pickDefault(models: ModelRow[]): string {
   );
 }
 
-function capsOf(m: ModelRow | undefined): string {
+function capsOf(m: ModelRow | undefined, showDefault = true): string {
   if (!m) return "";
   const out: string[] = [];
-  if (m.is_default) out.push("默认");
+  if (showDefault && m.is_default) out.push("默认");
   if (m.supports_tool_call) out.push("工具调用");
   if (m.supports_images) out.push("图片");
   if (m.supports_reasoning) out.push("思考");
@@ -135,7 +164,7 @@ function capsOf(m: ModelRow | undefined): string {
     out.push("上下文 " + (m.context_length >= 1000 ? Math.round(m.context_length / 1000) + "K" : m.context_length));
   }
   if (m.credits !== undefined && m.credits !== "") out.push("倍率 " + String(m.credits));
-  return out.join(" · ");
+  return out.join(" / ");
 }
 
 export function ConnectView() {
@@ -187,6 +216,7 @@ export function ConnectView() {
   const openaiBase = base + "/api/v1";
   const anthropicBase = base + "/api";
   const modelsUrl = openaiBase + "/models";
+  const responsesUrl = openaiBase + "/responses";
   const chatUrl = openaiBase + "/chat/completions";
   const messagesUrl = anthropicBase + "/v1/messages";
   const model = selected || pickDefault(models) || "cn:glm-5.2";
@@ -231,36 +261,50 @@ export function ConnectView() {
   const copy = useCallback((v: string) => {
     copyText(v).then(() => {
       setCopied(v);
-      window.setTimeout(() => setCopied(""), 1500);
+      window.setTimeout(() => setCopied((current) => current === v ? "" : current), 2500);
     }).catch(() => {});
   }, []);
 
-  const curlModels = `curl ${modelsUrl}`;
+  const curlModels = ["curl " + bashQuote(modelsUrl), GATEWAY_AUTH].join(" \\\n");
+  const curlResponses = curlJson(responsesUrl, { model, input: "你好", store: false });
+  const messages = [{ role: "user", content: "你好" }];
+  const curlChat = curlJson(chatUrl, { model, messages });
+  const curlMessages = curlJson(messagesUrl, { model, max_tokens: 256, messages }, ['  -H "anthropic-version: 2023-06-01"']);
 
-  const curlChat =
-`curl ${chatUrl} \\
-  -H "Content-Type: application/json" \\
-  -d '{"model":"${model}","messages":[{"role":"user","content":"你好"}]}'`;
+  const codexConfig = `model = ${JSON.stringify(model)}
+model_provider = "wb2api"
+web_search = "disabled"
 
-  const httpMessages =
-`POST ${messagesUrl}
-anthropic-version: 2023-06-01
-Content-Type: application/json
+[model_providers.wb2api]
+name = "wb2api"
+base_url = ${JSON.stringify(openaiBase)}
+wire_api = "responses"
+env_key = "WB2A_API_KEY"
+requires_openai_auth = false
+supports_websockets = false`;
 
-{
-  "model": "${model}",
-  "max_tokens": 256,
-  "messages": [{"role": "user", "content": "你好"}]
-}`;
+  const pythonResponses = `import os
+from openai import OpenAI
+
+client = OpenAI(
+    base_url=${JSON.stringify(openaiBase)},
+    api_key=os.environ["WB2A_API_KEY"],
+)
+reply = client.responses.create(
+    model=${JSON.stringify(model)},
+    input="你好",
+    store=False,
+)
+print(reply.output_text)`;
 
   return (
     <>
       <Box
         title="接入引导"
-        hint="三步：取模型 → 选模型 → 发对话；地址按当前访问域名自动生成"
-        extra={<button className="btn xs" onClick={() => void loadModels()} disabled={loadingModels} aria-busy={loadingModels}>
+        hint="OpenAI Responses、Chat Completions 和 Anthropic Messages"
+        extra={<Button size="xs" variant="outline" onClick={() => void loadModels()} disabled={loadingModels} aria-busy={loadingModels}>
           <ButtonLoadingContent loading={loadingModels} loadingChildren="读取中…">刷新模型</ButtonLoadingContent>
-        </button>}
+        </Button>}
         pad
       >
         <div className="connect-flow">
@@ -270,36 +314,25 @@ Content-Type: application/json
           </span>
         </div>
 
+        <div className="mb-3">
+          <CtrlHint>
+            cURL 示例使用 Bash。将 <code>WB2A_API_KEY</code> 设为网关密钥，不使用供应商的上游密钥；
+            网关未启用鉴权时，HTTP 请求可省略 <code>Authorization</code>。
+          </CtrlHint>
+        </div>
+
         <div className="connect-steps">
           {/* ① 获取模型 */}
           <StepCard no="01" method="GET" title="获取模型" desc="拉取当前可用的模型 ID 列表">
-            <div className="url-label">请求地址</div>
-            <UrlLine value={modelsUrl} copied={copied} onCopy={copy} />
+            <UrlLine label="模型目录" value={modelsUrl} copied={copied} onCopy={copy} />
             <CtrlHint>
-              返回 <code>{"{ object: \"list\", data: [...] }"}</code>，其中
-              <code>data[].id</code> 就是下一步要填的 <code>model</code>。
+              将返回的 <code>data[].id</code> 原样填入下一步。已配置的原生 Responses 模型也以此目录为准。
             </CtrlHint>
-            <pre>{curlModels}</pre>
-            <CtrlHint>模型列表页也可查看完整能力与倍率。</CtrlHint>
+            <CodeSnippet label="模型目录命令" value={curlModels} copied={copied} onCopy={copy} />
           </StepCard>
 
-          {/* ② 发起对话 */}
-          <StepCard no="02" method="POST" title="发起对话" desc="两种协议任选，模型 ID 与上一步一致">
-            <div className="url-label">OpenAI 兼容 · Chat Completions</div>
-            <UrlLine value={chatUrl} copied={copied} onCopy={copy} />
-            <pre>{curlChat}</pre>
-            <div className="url-label" style={{ marginTop: 4 }}>Anthropic 兼容 · Messages</div>
-            <UrlLine value={messagesUrl} copied={copied} onCopy={copy} />
-            <pre>{httpMessages}</pre>
-            <CtrlHint>
-              OpenAI SDK 的 <code>base_url</code> 填 <code>{openaiBase}</code>；
-              Anthropic SDK / Claude Code 的 Base URL 填 <code>{anthropicBase}</code>，
-              客户端会自动补 <code>/v1/messages</code>。
-            </CtrlHint>
-          </StepCard>
-
-          {/* ③ 开哪个模型 */}
-          <StepCard no="03" method="MODEL" title="开哪个模型" desc="从列表选一个，或直接输入完整模型 ID">
+          {/* ② 选择模型 */}
+          <StepCard no="02" method="MODEL" title="选择模型" desc="选中的 ID 会自动填入请求和客户端配置。">
             <div className="model-pick">
               <input
                 className="input"
@@ -307,6 +340,7 @@ Content-Type: application/json
                 value={model}
                 onChange={(e) => setSelected(e.target.value)}
                 placeholder="从列表选择，或直接填模型 ID"
+                aria-label="模型 ID"
                 style={{ flex: 1, minWidth: 0, fontFamily: "var(--mono)", fontSize: 12 }}
               />
               <datalist id="connect-model-options">
@@ -319,8 +353,8 @@ Content-Type: application/json
 
             <div className="model-current">
               <div className="id">
-                <code>{model}</code>
-                <span className="realm-chip">{realmLabel(model)}</span>
+                <code dir="ltr" style={{ minWidth: 0, overflowWrap: "anywhere" }}>{model}</code>
+                {current && <span className="realm-chip">{realmLabel(current.id)}</span>}
               </div>
               <div className="caps">{caps || (modelErr ? "模型目录读取失败" : "—")}</div>
             </div>
@@ -344,8 +378,38 @@ Content-Type: application/json
             <CtrlHint>
               {loadingModels
                 ? <LoadingIndicator inline label="正在读取模型目录…" />
-                : "共 " + models.length + " 个可选模型" + (modelErr ? "（读取失败：" + modelErr + "）" : "") + "。模型 ID 必须原样使用，前缀决定路由通道。"}
+                : modelErr ? "目录读取失败，可直接填入已知模型 ID。" : "当前目录有 " + models.length + " 个模型。"}
             </CtrlHint>
+          </StepCard>
+
+          {/* ③ 发起对话 */}
+          <StepCard no="03" method="POST" title="发送请求">
+            <Tabs defaultValue="responses" className="min-w-0 flex-col gap-3">
+              <TabsList aria-label="请求协议" variant="line"
+                className="h-auto w-full max-w-full flex-wrap justify-start gap-y-2">
+                <TabsTrigger value="responses" className="h-7 flex-none text-xs aria-selected:border-b-foreground">Responses</TabsTrigger>
+                <TabsTrigger value="chat" className="h-7 flex-none text-xs aria-selected:border-b-foreground">Chat Completions</TabsTrigger>
+                <TabsTrigger value="messages" className="h-7 flex-none text-xs aria-selected:border-b-foreground">Messages</TabsTrigger>
+              </TabsList>
+              <TabsContent value="responses" className="min-w-0 space-y-2">
+                <UrlLine label="Responses" value={responsesUrl} copied={copied} onCopy={copy} />
+                <CodeSnippet label="Responses cURL" value={curlResponses} copied={copied} onCopy={copy} />
+                <CtrlHint>
+                  请求用 <code>input</code>；从 <code>output[].content[]</code> 中读取 <code>output_text</code> 项的 <code>text</code>。
+                  流式模式设 <code>{'"stream": true'}</code>，用 <code>curl -N</code> 查看 <code>response.output_text.delta</code> 事件。
+                </CtrlHint>
+              </TabsContent>
+              <TabsContent value="chat" className="min-w-0 space-y-2">
+                <UrlLine label="Chat Completions" value={chatUrl} copied={copied} onCopy={copy} />
+                <CodeSnippet label="Chat Completions cURL" value={curlChat} copied={copied} onCopy={copy} />
+                <CtrlHint>请求用 <code>messages</code>，回复在 <code>choices[0].message</code>。</CtrlHint>
+              </TabsContent>
+              <TabsContent value="messages" className="min-w-0 space-y-2">
+                <UrlLine label="Messages" value={messagesUrl} copied={copied} onCopy={copy} />
+                <CodeSnippet label="Messages cURL" value={curlMessages} copied={copied} onCopy={copy} />
+                <CtrlHint>Anthropic Messages 请求包含 <code>messages</code> 和 <code>max_tokens</code>。</CtrlHint>
+              </TabsContent>
+            </Tabs>
           </StepCard>
         </div>
 
@@ -353,7 +417,7 @@ Content-Type: application/json
           <span><code>cn:</code> 国区账号池，如 <code>cn:glm-5.2</code></span>
           <span><code>global:</code> 国际版账号池，如 <code>global:gpt-5</code></span>
           <span><code>供应商名:</code> 聚合供应商，如 <code>xxx:model</code></span>
-          <span><code>裸名</code> 默认走 CN，如 <code>glm-5.2</code></span>
+          <span><code className="shrink-0 whitespace-nowrap">裸名</code> 默认走 CN；原生模型 ID 以目录为准。</span>
         </div>
 
         <div className="connect-catalog-head">
@@ -378,7 +442,7 @@ Content-Type: application/json
                   <tr key={m.id}>
                     <td className="mono">{m.id}</td>
                     <td><span className="realm-chip">{realmLabel(m.id)}</span></td>
-                    <td className="dim" style={{ fontSize: 11 }}>{capsOf(m).replace(/^默认 · /, "") || "—"}</td>
+                    <td className="dim" style={{ fontSize: 12 }}>{capsOf(m, false) || "—"}</td>
                     <td className="mono">{m.credits === undefined || m.credits === "" ? "—" : String(m.credits)}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <button className="btn xs" onClick={() => copy(m.id)} style={{ marginRight: 6 }}>
@@ -404,24 +468,36 @@ Content-Type: application/json
         )}
       </Box>
 
-      <Box title="客户端怎么填" hint="只填 Base URL + 模型名" pad>
-        <div className="connect-grid">
+      <Box title="客户端怎么填" pad>
+        <div className="grid grid-cols-1 gap-3.5 min-[901px]:grid-cols-2">
+          <div className="connect-card">
+            <h4>Codex（Responses）</h4>
+            <CtrlHint>将示例合并到 <code>~/.codex/config.toml</code>，启动前设置 <code>WB2A_API_KEY</code>。</CtrlHint>
+            <CodeSnippet label="Codex 配置" value={codexConfig} copied={copied} onCopy={copy} />
+            <CtrlHint>
+              使用 HTTP/SSE，保持 <code>supports_websockets = false</code>。搭配 WorkBuddy 或 Chat 上游时关闭服务端网页搜索。
+            </CtrlHint>
+          </div>
+
+          <div className="connect-card">
+            <h4>OpenAI SDK（Python）</h4>
+            <CtrlHint>调用 <code>client.responses.create()</code>。示例使用 <code>store=False</code>，无需先启用响应存档。</CtrlHint>
+            <CodeSnippet label="Python Responses 示例" value={pythonResponses} copied={copied} onCopy={copy} />
+          </div>
+
           <div className="connect-card">
             <h4>OpenAI 兼容客户端</h4>
-            <CopyRow label="BASE URL" value={openaiBase} tip="Cherry Studio / LobeChat" copied={copied} onCopy={copy} />
-            <CopyRow label="MODEL" value={model} copied={copied} onCopy={copy} />
-            <pre>{`base_url: ${openaiBase}
-model:    ${model}`}</pre>
+            <CopyRow label="Base URL" value={openaiBase} copied={copied} onCopy={copy} />
+            <CopyRow label="模型 ID" value={model} copied={copied} onCopy={copy} />
             <CtrlHint>
-              服务商类型选「OpenAI 兼容 / 自定义」。Base URL 只填到
-              <code>{openaiBase}</code>，不要带 <code>/chat/completions</code>。
+              Base URL 只填到 <code>/api/v1</code>，不要附加 <code>/responses</code> 或 <code>/chat/completions</code>。
+              客户端若可选协议，按需选择 Responses 或 Chat Completions。
             </CtrlHint>
           </div>
 
           <div className="connect-card">
             <h4>Anthropic / Claude Code</h4>
-            <CopyRow label="BASE URL" value={anthropicBase} tip="会拼 /v1/messages" copied={copied} onCopy={copy} />
-            <CopyRow label="MODEL" value={model} copied={copied} onCopy={copy} />
+            <CopyRow label="Anthropic Base URL" value={anthropicBase} copied={copied} onCopy={copy} />
             <pre>{`ANTHROPIC_BASE_URL=${anthropicBase}
 ANTHROPIC_MODEL=${model}`}</pre>
             <CtrlHint>
@@ -430,35 +506,17 @@ ANTHROPIC_MODEL=${model}`}</pre>
             </CtrlHint>
           </div>
 
-          <div className="connect-card">
-            <h4>Python OpenAI SDK</h4>
-            <pre>{`from openai import OpenAI
-
-client = OpenAI(
-    base_url="${openaiBase}",
-)
-
-resp = client.chat.completions.create(
-    model="${model}",
-    messages=[{"role": "user", "content": "你好"}],
-)`}</pre>
-            <CtrlHint>
-              流式请求（<code>stream: true</code>）同样走 <code>{chatUrl}</code>。
-              若提示 404，检查 Base URL 是否多写或少写了 <code>/api/v1</code>。
-            </CtrlHint>
-          </div>
         </div>
 
         <div className="connect-verify">
           <b>最小验收</b>
           <span>① <code>GET /api/v1/models</code> 返回 200 且 <code>data[]</code> 非空</span>
-          <span>② <code>POST /api/v1/chat/completions</code> 返回 <code>choices[0]</code></span>
+          <span>② <code>POST /api/v1/responses</code> 返回 <code>{'object: "response"'}</code>，回复见 <code>output</code></span>
         </div>
 
         <div className="msg ok" style={{ marginTop: 14 }}>
-          接入时只需填写地址与模型名，不配置访问令牌。
-          模型别名/前缀由网关路由：<code>cn:</code> 走国区账号池，<code>global:</code> 走国际版，
-          <code>名称:</code> 走对应聚合供应商。
+          WorkBuddy 模型和现有 Chat 供应商无需另配上游即可使用 Responses。
+          后台任务、托管工具和精确 token 计数需要网关配置原生 Responses 上游。
         </div>
       </Box>
 
@@ -490,9 +548,8 @@ resp = client.chat.completions.create(
     "messages": [{"role":"user","content":"你好"}]
   }'`}</pre>
             <CtrlHint>
-              命中供应商时<b>完全旁路账号池</b>（无粘性/无积分台账），请求原样转发、响应原样回传；
-              流式受 <code>stream_idle_ms</code> 看门狗保护（默认 300s）。
-              用量记入 <code>provider:myvendor</code> realm，用量视图可筛。
+              同一个 <code>myvendor:模型名</code> 也可用于 <code>/api/v1/responses</code>，网关会转换协议后调用该供应商。
+              请求不经过账号池，用量仍记入 <code>provider:myvendor</code>。
             </CtrlHint>
           </div>
 
@@ -504,7 +561,7 @@ resp = client.chat.completions.create(
             <CtrlHint>
               面板「模型」页的「实测」按钮同效果（最长 45s，返回 HTTP 状态与首条回复）。
               子密钥可在「供应商与密钥」页勾选供应商白名单：绑定后该密钥只能调用已勾选供应商，
-              显式 <code>*</code> = 全部，留空 = 不限制。
+              显式 <code>*</code> 表示全部供应商，留空表示未授权任何供应商。
             </CtrlHint>
           </div>
         </div>
@@ -517,14 +574,14 @@ resp = client.chat.completions.create(
         </div>
       </Box>
 
-      <Box title="排错速查" hint="接入时最常见的四类问题" pad>
+      <Box title="排错速查" pad>
         <div className="connect-faq">
           <div className="faq-item">
             <span className="faq-code">401</span>
             <div>
               <b>invalid or missing api key</b>
               <p>
-                网关鉴权已配置。请按部署环境核对网关设置；本页接入配置只需 Base URL 和模型名。
+                使用网关密钥。HTTP 请求发送 <code>Authorization: Bearer</code>；Codex 检查 <code>WB2A_API_KEY</code> 是否已设置。
               </p>
             </div>
           </div>
@@ -533,8 +590,8 @@ resp = client.chat.completions.create(
             <div>
               <b>路径不对</b>
               <p>
-                Base URL 填成了完整端点。OpenAI 兼容只填到 <code>/api/v1</code>，
-                Anthropic 只填到 <code>/api</code>；先用 <code>GET /api/v1/models</code> 确认网关可达。
+                OpenAI、Codex 的 Base URL 只填到 <code>/api/v1</code>，不加 <code>/responses</code>。
+                Anthropic 填到 <code>/api</code>；先用 <code>GET /api/v1/models</code> 验证地址。
               </p>
             </div>
           </div>
@@ -556,6 +613,16 @@ resp = client.chat.completions.create(
               <p>
                 账号冷却、限流或上游失败。换一个模型重试，或到「账号池」检查账号是否被禁用/暂停；
                 无可用账号时模型目录也会为空。
+              </p>
+            </div>
+          </div>
+          <div className="faq-item">
+            <span className="faq-code">503</span>
+            <div>
+              <b>Responses 存档未就绪</b>
+              <p>
+                收到 <code className="wrap-anywhere">responses_storage_unavailable</code> 时，先用 <code>{'"store": false'}</code> 验证连通。
+                查询存档或用 <code>previous_response_id</code> 续聊前，由部署者应用对应的数据库迁移。
               </p>
             </div>
           </div>

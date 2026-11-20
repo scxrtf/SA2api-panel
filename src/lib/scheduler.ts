@@ -267,6 +267,7 @@ async function balanceLoop(): Promise<void> {
 // cron 写入新记录后也会自然顺延。
 async function healthLoop(): Promise<void> {
   let seenRearm = st.rearmSeq;
+  let lastRunAt: number | null = null;
   for (;;) {
     if (st.stop) return;
     const cfg = await getConfig();
@@ -284,7 +285,12 @@ async function healthLoop(): Promise<void> {
     let dueAt = Date.now();
     try {
       const latest = await latestModelHealthAt();
-      if (latest) dueAt = latest.getTime() + intervalMs;
+      // 空池、目录失败或结果写入失败都可能没有新记录；仍按本地执行时刻
+      // 等下一周期，避免 latest 为空/陈旧时连续重跑甚至重复计费探测。
+      const latestAt = latest?.getTime() ?? null;
+      const anchor = latestAt === null ? lastRunAt
+        : lastRunAt === null ? latestAt : Math.max(latestAt, lastRunAt);
+      if (anchor !== null) dueAt = anchor + intervalMs;
     } catch (e) {
       console.log("[scheduler] model health latest error: " + (e instanceof Error ? e.message : String(e)));
       await sleep(WALLCLOCK_CHECK_STEP_MS);
@@ -299,6 +305,7 @@ async function healthLoop(): Promise<void> {
     }
     if (st.stop) return;
     if (interrupted) { seenRearm = st.rearmSeq; continue; }
+    lastRunAt = Date.now();
     try {
       await runModelHealthProbe("scheduler");
     } catch (e) {

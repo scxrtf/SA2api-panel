@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildUsageSnapshot } from "../src/lib/usage-aggregation.ts";
-import { cachedUsageQuery } from "../src/lib/usage-cache.ts";
+import { cachedUsageQuery, usageCacheStats } from "../src/lib/usage-cache.ts";
 import { queryUsageAggregate } from "../src/lib/usage-query.ts";
 
 process.env.WB2API_MODEL_JSON_DISABLE = "1";
@@ -55,6 +55,7 @@ test("同参数缓存与并发共用一次数据库调用，异常不进入缓�
   const one = cachedUsageQuery(key, loader);
   const two = cachedUsageQuery(key, loader);
   assert.equal(one, two);
+  await Promise.resolve();
   assert.equal(calls, 1);
   resolveFirst({ ok: true });
   assert.deepEqual(await one, { ok: true });
@@ -62,6 +63,26 @@ test("同参数缓存与并发共用一次数据库调用，异常不进入缓�
   const failedKey = key + "-failed";
   await assert.rejects(cachedUsageQuery(failedKey, async () => { throw new Error("test"); }));
   assert.equal(await cachedUsageQuery(failedKey, async () => "recovered"), "recovered");
+});
+
+test("慢用量查询在完成前持续合并，20 秒有效期从成功返回起算", async (t) => {
+  const key = "usage-cache-slow";
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  let finish!: (value: number) => void;
+  const slow = new Promise<number>((resolve) => { finish = resolve; });
+  const first = cachedUsageQuery(key, () => slow);
+  await Promise.resolve();
+  now += 30_000;
+  assert.equal(usageCacheStats().entries.some((entry) => entry.key === key), false);
+  assert.equal(cachedUsageQuery(key, async () => assert.fail("slow query should still be in flight")), first);
+  finish(1);
+  assert.equal(await first, 1);
+  assert.equal(usageCacheStats().entries.find((entry) => entry.key === key)?.ttlMs, 20_000);
+  now += 19_999;
+  assert.equal(await cachedUsageQuery(key, async () => 2), 1);
+  now += 1;
+  assert.equal(await cachedUsageQuery(key, async () => 2), 2);
 });
 
 test("聚合 SQL 由 PostgreSQL 分组，并参数化时间过滤", async () => {

@@ -1,0 +1,614 @@
+{
+  "schema": "workbuddy-profile-static-evidence/v1",
+  "createdAt": "2026-11-20T02:20:19.579Z",
+  "scope": {
+    "root": "D:/workBuddyAI/resources/app.asar.unpacked/cli",
+    "source": "local installed files; not asserted vendor-pristine",
+    "asar": {
+      "path": "D:/workBuddyAI/resources/app.asar",
+      "sha256": "dcabcd90f07a627a06f1fd55bc872a1c25a79aab43c3012930b6287840ab3d20",
+      "identityProvidedByParent": true
+    },
+    "execution": false,
+    "profileOrCredentialsRead": false,
+    "realUpstreamCalls": false,
+    "limitations": [
+      "Static construction/registration is not an observed request or TLS wire capture.",
+      "Merged remote config,settings,actual auth/account context and feature overrides were not read.",
+      "Parent reported integrity contradictions for some unpacked native members; these local files are evidence of this installation only.",
+      "No global5.9.4 installed artifact was examined."
+    ],
+    "projectComparisonsTiming": "Comparisons marked prior refer to the pre-fix gateway. Root has since patched default chat gzip, UUIDv7 message IDs and W3C normalization; this report preserves original static observations.",
+    "runtimeEvidenceReference": ".runtime/workbuddy-runtime-evidence.json (captured independently by root; not a real upstream request)"
+  },
+  "artifacts": [
+    {
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "bytes": 9880062,
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5"
+    },
+    {
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\lazy-lite-wb\\1885.6c6f1797.mjs",
+      "bytes": 248324,
+      "sha256": "d15afe063921908b603fa82f715fd0f4e680720acaa05c5493877617ac52e268"
+    },
+    {
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\lazy-lite-wb\\3043.50ee4dca.mjs",
+      "bytes": 119974,
+      "sha256": "9311d75c89056c2282e18ae0432413879341eafa91d9c349c75c749190efe9ba"
+    },
+    {
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\product.json",
+      "bytes": 387311,
+      "sha256": "a73bea91defd7d5f38d5672c19111681ba52244ee8b9b64cc59dc3e3992eed61"
+    },
+    {
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\product.internal.json",
+      "bytes": 41587,
+      "sha256": "fbd06290062a91dff4601b0bf6dc7875bc294b4f4923fa5bd895f5f377d8e4e3"
+    },
+    {
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\product.ioa.json",
+      "bytes": 68122,
+      "sha256": "6c3626cecd958e6ad40eef9bbede1f6f51b8b4a2ef8dd9f5eaf211f4b201a50b"
+    },
+    {
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\package.json",
+      "bytes": 26834,
+      "sha256": "3a58eeb08d1622c295786e2b11435d0b1188af962c48220e6dd9ebd75cb18de4"
+    },
+    {
+      "path": "D:/workBuddyAI/resources/app.asar::main/index.js",
+      "bytes": 310003,
+      "asarByteOffset": 10765774,
+      "sha256": "2524eb599c6bbbef09e4a479cb4f719ed6b3bf5f455453d95989a0edbaa63e72",
+      "asarDeclaredSHA256": "2524eb599c6bbbef09e4a479cb4f719ed6b3bf5f455453d95989a0edbaa63e72",
+      "integrity": "member digest matched ASAR declaration",
+      "inspectionScope": "metadata and bounded literal search only; no X-Request-ID,/v2/report,CLIENT_INFO_PLATFORM complete literals observed in this member"
+    }
+  ],
+  "defaultProductMetadata": {
+    "platform": "CLI",
+    "applicationName": "WorkBuddy",
+    "deploymentType": "SaaS",
+    "endpoint": "https://www.workbuddy.cn",
+    "authenticationType": "account-scoped-external-link",
+    "authPlatform": "workbuddy",
+    "prefixPath": "/plugin",
+    "gzip": true,
+    "modelCount": 58,
+    "modelsWithCustomURL": 0
+  },
+  "evidence": [
+    {
+      "id": "WB01",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Installed embedded CLI package metadata identifies the version.",
+      "comparison": "observed identity",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\package.json",
+      "sha256": "3a58eeb08d1622c295786e2b11435d0b1188af962c48220e6dd9ebd75cb18de4",
+      "byteOffset": 34,
+      "excerptByteStart": 14,
+      "excerptByteEnd": 134,
+      "excerpt": "genie/agent-cli\",\n  \"version\": \"2.165.0\",\n  \"description\": \"Use CodeBuddy, Tencent's AI assistant, right from your termi",
+      "projectReference": "src/lib/upstream/client.ts:32"
+    },
+    {
+      "id": "WB02",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Default shipped product enables RequestBodyGzip.",
+      "comparison": "matched feature purpose; project prior threshold differs",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\product.json",
+      "sha256": "a73bea91defd7d5f38d5672c19111681ba52244ee8b9b64cc59dc3e3992eed61",
+      "byteOffset": 369049,
+      "excerptByteStart": 369019,
+      "excerptByteEnd": 369169,
+      "excerpt": "eportAfterCancel\": false,\n    \"RequestBodyGzip\": true,\n    \"StandaloneTerminal\": true,\n    \"Skills\": true,\n    \"SkillSecurityScan\": true,\n    \"SelectC",
+      "projectReference": "src/lib/upstream/official-egress.ts:serializeRequest"
+    },
+    {
+      "id": "WB03",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Compression is gated by the merged product feature; remote/local configuration may override the shipped default.",
+      "comparison": "conditional behavior",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3884883,
+      "excerptByteStart": 3884863,
+      "excerptByteEnd": 3885203,
+      "excerpt": "waitConfiguration();if(!i.productFeatures?.[pB.ProductFeature.RequestBodyGzip])return void this.logger.debug(\"Request body gzip compression is disabled\");let n=await this.settingsManager.get(\"env\");if(n?.[h6.a1]||process.env[h6.a1])return void this.logger.debug(\"Skipping gzip compression: custom CODEBUDDY_BASE_URL is set\");let s=t.modelId",
+      "projectReference": "src/lib/upstream/official-egress.ts:serializeRequest"
+    },
+    {
+      "id": "WB04",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Custom CODEBUDDY_BASE_URL disables this gzip processor.",
+      "comparison": "project profile does not model every configuration exclusion",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3885061,
+      "excerptByteStart": 3885051,
+      "excerptByteEnd": 3885401,
+      "excerpt": "et(\"env\");if(n?.[h6.a1]||process.env[h6.a1])return void this.logger.debug(\"Skipping gzip compression: custom CODEBUDDY_BASE_URL is set\");let s=t.modelId||this.extractModelId(t.data);if(s&&i.models?.some(t=>t.url&&t.id===s))return void this.logger.debug(`Skipping gzip compression for model with custom URL: ${s}`);let c=await this.productEnvService.g",
+      "projectReference": "src/lib/upstream/official-egress.ts:serializeRequest"
+    },
+    {
+      "id": "WB05",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "A matching model with any custom URL disables gzip.",
+      "comparison": "conditional behavior",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3885233,
+      "excerptByteStart": 3885223,
+      "excerptByteEnd": 3885573,
+      "excerpt": "d(t.data);if(s&&i.models?.some(t=>t.url&&t.id===s))return void this.logger.debug(`Skipping gzip compression for model with custom URL: ${s}`);let c=await this.productEnvService.getCurrent();if(c&&!n6.GZIP_SUPPORTED_ENVS.has(c))return void this.logger.debug(`Skipping gzip compression for environment: ${c}`);if(!t.data)return;let p=(t.method||\"GET\").",
+      "projectReference": "src/lib/upstream/official-egress.ts:serializeRequest"
+    },
+    {
+      "id": "WB06",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Gzip supports Internal, External and IOA environments.",
+      "comparison": "conditional behavior",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3884635,
+      "excerptByteStart": 3884615,
+      "excerptByteEnd": 3884965,
+      "excerpt": "atic{n6=this}static{this.GZIP_SUPPORTED_ENVS=new Set([pQ.ProductEnviroment.Internal,pQ.ProductEnviroment.External,pQ.ProductEnviroment.IOA])}init(){this.logger.setContext(\"GzipRequestProcessor\")}async process(t){try{let i=await this.productManager.waitConfiguration();if(!i.productFeatures?.[pB.ProductFeature.RequestBodyGzip])return void this.logger",
+      "projectReference": "src/lib/upstream/official-egress.ts:serializeRequest"
+    },
+    {
+      "id": "WB07",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "The allowed environment strings resolve to external, internal and iOA.",
+      "comparison": "observed values",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7232043,
+      "excerptByteStart": 7232033,
+      "excerptByteEnd": 7232403,
+      "excerpt": "nction(t){t.External=\"external\",t.Internal=\"internal\",t.IOA=\"iOA\",t.Selfhosted=\"selfhosted\",t.Cloudhosted=\"cloudhosted\"}(p||(i.ProductEnviroment=p={})),i.ENV_KEY_CODEBUDDY_COPILOT_INTERNET_ENVIRONMENT=\"CODEBUDDY_COPILOT_INTERNET_ENVIRONMENT\",i.X_USER_ID=\"X-User-Id\",i.AuthErrorCode={OpenExternalLinkFailed:\"AUTH_OPEN_EXTERNAL_LINK_FAILED\",Sign:\"AUTH_SIGN_FAILED\",Timeout",
+      "projectReference": "src/lib/upstream/official-egress.ts:serializeRequest"
+    },
+    {
+      "id": "WB08",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Environment comes from the override env var, merged networkEnvironment or authentication domain; no user auth data was read.",
+      "comparison": "dynamic configuration remains unobserved",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7262357,
+      "excerptByteStart": 7262347,
+      "excerptByteEnd": 7262777,
+      "excerpt": "switch(i)}async getCurrent(){if(process.env[S.ENV_KEY_CODEBUDDY_COPILOT_INTERNET_ENVIRONMENT])return process.env[S.ENV_KEY_CODEBUDDY_COPILOT_INTERNET_ENVIRONMENT];let t=await this.productManager.waitConfiguration();if(t.networkEnvironment)return t.networkEnvironment;let i=p.ContainerUtil.get(S.AuthenticationManager).currentSessionSubject.getValue();return this.resolveEnvBySession(i)}async resolveEnvBySession(t){if(!t)return;le",
+      "projectReference": "src/lib/upstream/client.ts:chatBase"
+    },
+    {
+      "id": "WB09",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "For the supported default request path, every non-empty POST string/JSON body is gzipped; no 1024-byte threshold exists in this processor.",
+      "comparison": "prior project threshold mismatch",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3885531,
+      "excerptByteStart": 3885521,
+      "excerptByteEnd": 3885931,
+      "excerpt": "t: ${c}`);if(!t.data)return;let p=(t.method||\"GET\").toUpperCase();if(\"POST\"!==p)return;let h=\"string\"==typeof t.data?t.data:JSON.stringify(t.data);if(!h||0===h.length)return;let S=(0,Ir.gzipSync)(h);t.data=S,t.headers=t.headers||{},t.headers[\"Content-Encoding\"]=\"gzip\";let E=((1-S.length/h.length)*100).toFixed(2);this.logger.debug(`[GzipRequestProcessor] Compressed: ${h.length} \\u{2192} ${S.length} bytes (sa",
+      "projectReference": "src/lib/upstream/official-egress.ts:serializeRequest"
+    },
+    {
+      "id": "WB10",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "GzipRequestProcessor is registered under the model-request-processor injection token RD.TD.",
+      "comparison": "static assembly observed",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3887318,
+      "excerptByteStart": 3887218,
+      "excerptByteEnd": 3887388,
+      "excerpt": "adata(\"design:returntype\",void 0)],I3.prototype,\"init\",null),I3=n6=gzip_request_processor_decorate([(0,po.Component)(RD.TD)],I3);let I2=\"[Image unchanged] An identical im",
+      "projectReference": "src/lib/upstream/official-egress.ts:serializeRequest"
+    },
+    {
+      "id": "WB11",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "ModelProvider receives the same RD.TD processors through dependency injection.",
+      "comparison": "static assembly observed",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3857239,
+      "excerptByteStart": 3857079,
+      "excerptByteEnd": 3857329,
+      "excerpt": "h6.Vr&&h6.Vr)?n3:Object)],IJ.prototype,\"settingsManager\",void 0),model_provider_decorate([(0,po.Autowired)(RD.TD),model_provider_metadata(\"design:type\",Array)],IJ.prototype,\"modelRequestProcessors\",void 0),model_provider_decorate([(0,po.Autowired)(kg",
+      "projectReference": "src/lib/upstream/client.ts:chatStream"
+    },
+    {
+      "id": "WB12",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Chat/Responses request processors are filtered by wire, sorted by priority and awaited before network send; a processor without wires applies to both.",
+      "comparison": "static assembly observed",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3828726,
+      "excerptByteStart": 3828666,
+      "excerptByteEnd": 3829086,
+      "excerpt": ",maxContentLength:1/0},eh=ee?\"responses\":\"chat-completions\";for(let t of this.modelRequestProcessors.filter(t=>t.wires?.includes(eh)??!0).sort((t,i)=>(t.priority??1e3)-(i.priority??1e3)))await t.process(ep);if(this.applyPrivateDataHeaderPolicy(ep.headers,$,X,!!ed),ed||X){let t=new Set((ed?[...IL,...Object.keys(ea??{}),pQ.HTTP_HEADER_SKIP_AUTH_INTERCEPTOR]:[hK.PRIVATE_DATA_HEADER]).map(t=>t.toLowerCase())),i=ep.transf",
+      "projectReference": "src/lib/upstream/client.ts:chatStream"
+    },
+    {
+      "id": "WB13",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "The model-provider UUID helper alias go points to module34506.",
+      "comparison": "supports uuidv7 call tracing",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 2474809,
+      "excerptByteStart": 2474799,
+      "excerptByteEnd": 2474899,
+      "excerpt": "ice\");var go=n(34506),summary_service_decorate=function(t,i,n,s){var c,p=arguments.length,h=p<3?i:nu",
+      "projectReference": "src/lib/upstream/client.ts:newMessageID"
+    },
+    {
+      "id": "WB14",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Chat message/request ID uses uuidv7 with hyphens removed unless an explicit scoped message ID exists.",
+      "comparison": "prior timestamp-plus-random implementation not fully same shape",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3823493,
+      "excerptByteStart": 3823433,
+      "excerptByteEnd": 3823903,
+      "excerpt": "elContext,U=$.abortSignal,B=!!U?.aborted,W=R6.hd.getStore(),q=W?.messageId??(0,go.nH)().replace(/-/g,\"\"),G=W?W.conversationRequestId:(0,pn.x8w)($),z=W?W.purpose:(0,pn.Z_4)($);$.messageId=q,N[hK.CONVERSATION_ID_HEADER]=$.id,N[hK.CONVERSATION_REQUEST_ID_HEADER]=G||\"\",N[hK.CONVERSATION_MESSAGE_ID_HEADER]=$.messageId,N[hK.REQUEST_ID_HEADER]=$.messageId;let V=(0,RZ.i)($),J=(0,vd.kl)($);N[hK.AGENT_INTENT]=$.meta?.[\"codebuddy.ai/mode\"]??\"craft\",N[hK.AGENT_RUNTIME]=(0,vd.qt",
+      "projectReference": "src/lib/upstream/client.ts:newMessageID"
+    },
+    {
+      "id": "WB15",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Module34506 exports uuidv7 through nH.",
+      "comparison": "observed identity",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9855546,
+      "excerptByteStart": 9855511,
+      "excerptByteEnd": 9855796,
+      "excerpt": "\",onData)})})}},34506(t,i,n){let s;n.d(i,{nH:()=>uuidv7});let c=\"0123456789abcdef\";let UUID=class UUID{constructor(t){this.bytes=t}static ofInner(t){if(16===t.length)return new UUID(t);throw TypeError(\"not 128-bit length\")}static fromFieldsV7(t,i,n,s){if(!Number.isInteger(t)||!Number.",
+      "projectReference": "src/lib/upstream/client.ts:newMessageID"
+    },
+    {
+      "id": "WB16",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "UUIDv7 fixes the version nibble to7 and the RFC variant bits.",
+      "comparison": "prior project implementation lacked these bits",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9856087,
+      "excerptByteStart": 9855987,
+      "excerptByteEnd": 9856387,
+      "excerpt": "(16);return c[0]=t/0x10000000000,c[1]=t/0x100000000,c[2]=t/0x1000000,c[3]=t/65536,c[4]=t/256,c[5]=t,c[6]=112|i>>>8,c[7]=i,c[8]=128|n>>>24,c[9]=n>>>16,c[10]=n>>>8,c[11]=n,c[12]=s>>>24,c[13]=s>>>16,c[14]=s>>>8,c[15]=s,new UUID(c)}static parse(t){var i,n,s,c;let p;switch(t.length){case 32:p=null==(i=/^[0-9a-f]{32}$/i.exec(t))?void 0:i[0];break;case 36:p=null==(n=/^([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f",
+      "projectReference": "src/lib/upstream/client.ts:newMessageID"
+    },
+    {
+      "id": "WB17",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "UUIDv7 uses a42-bit monotonic counter, 48-bit milliseconds,10-second rollback allowance and counter overflow timestamp increment.",
+      "comparison": "prior project implementation lacked monotonic counter",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9858434,
+      "excerptByteStart": 9858414,
+      "excerptByteEnd": 9858894,
+      "excerpt": "OrAbortWithTs(t)),i}generateOrAbortWithTs(t){let i=0x3ffffffffff;if(!Number.isInteger(t)||t<0||t>0xffffffffffff)throw RangeError(\"`unixTsMs` must be a 48-bit unsigned integer\");if(++t>this.timestampBiased)this.timestampBiased=t,this.resetCounter();else{if(!(t+this.rollbackAllowance>=this.timestampBiased))return;this.counter++,this.counter>i&&(this.timestampBiased++,this.resetCounter())}return UUID.fromFieldsV7(this.timestampBiased-1,Math.trunc(this.counter/0x40000000),this.co",
+      "projectReference": "src/lib/upstream/client.ts:newMessageID"
+    },
+    {
+      "id": "WB18",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "The uuidv7 monotonic counter starts from randomized42-bit state; the low32 bits are additionally random per ID.",
+      "comparison": "algorithm detail",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9859289,
+      "excerptByteStart": 9859269,
+      "excerptByteEnd": 9859569,
+      "excerpt": "ollbackAllowance=n}}resetCounter(){this.counter=1024*this.random.nextUint32()+(1023&this.random.nextUint32())}generateV4(){let t=new Uint8Array(Uint32Array.of(this.random.nextUint32(),this.random.nextUint32(),this.random.nextUint32(),this.random.nextUint32()).buffer);return t[6]=64|t[6]>>>4,t[8]=128",
+      "projectReference": "src/lib/upstream/client.ts:newMessageID"
+    },
+    {
+      "id": "WB19",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Trace headers derive from one active OpenTelemetry span and optional parent span, with sampled0/1; not independent hardcoded context.",
+      "comparison": "structural match but runtime context not proven",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3822176,
+      "excerptByteStart": 3822166,
+      "excerptByteEnd": 3822636,
+      "excerpt": "IZE))}}}}}injectOtelSpanHeaders(t,i,n){let s=i.spanContext(),c=(s.traceFlags&RH.X.SAMPLED)===RH.X.SAMPLED;this.setHeaderCaseInsensitive(t,\"traceparent\",`00-${s.traceId}-${s.spanId}-${c?\"01\":\"00\"}`),this.setHeaderCaseInsensitive(t,\"b3\",`${s.traceId}-${s.spanId}-${c?\"1\":\"0\"}${n?`-${n}`:\"\"}`),this.setHeaderCaseInsensitive(t,\"X-B3-TraceId\",s.traceId),n&&this.setHeaderCaseInsensitive(t,\"X-B3-ParentSpanId\",n),this.setHeaderCaseInsensitive(t,\"X-B3-SpanId\",s.spanId),this.se",
+      "projectReference": "src/lib/upstream/client.ts:injectConversationHeaders"
+    },
+    {
+      "id": "WB20",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "A generic exported helper preserves existing request ID, then copies trace ID, else uses UUIDv4. Wiring of this exact helper into report is not established by this bounded inspection.",
+      "comparison": "pending report-path wiring",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 8715677,
+      "excerptByteStart": 8715667,
+      "excerptByteEnd": 8716057,
+      "excerpt": "turn t[i]}function injectRequestIdHeader(t){if(getHeaderCaseInsensitive(t,c.REQUEST_ID_HEADER))return;let i=getHeaderCaseInsensitive(t,c.TRACE_ID_HEADER);t[c.REQUEST_ID_HEADER]=\"string\"==typeof i&&i?i:(0,s.generateUUUID)().replace(/-/g,\"\")}function withRequestIdHeaders(t){let i={...t?.headers};return injectRequestIdHeader(i),{...t,headers:i}}},51147(t,i,n){var s=this&&this.__createBindin",
+      "projectReference": "src/lib/upstream/report.ts:reportHeaders"
+    },
+    {
+      "id": "WB21",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Generic generateUUUID uses crypto.randomUUID or UUIDv4 version/variant bit construction. This is distinct from chat uuidv7.",
+      "comparison": "do not replace every request-ID use with v7",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 111910,
+      "excerptByteStart": 111910,
+      "excerptByteEnd": 112380,
+      "excerpt": "i.generateUUUID=function(){let t;if(\"object\"==typeof crypto&&\"function\"==typeof crypto.randomUUID)return crypto.randomUUID.bind(crypto);t=\"object\"==typeof crypto&&\"function\"==typeof crypto.getRandomValues?crypto.getRandomValues.bind(crypto):function(t){for(let i=0;i<t.length;i++)t[i]=Math.floor(256*Math.random());return t};let i=new Uint8Array(16),n=[];for(let t=0;t<256;t++)n.push(t.toString(16).padStart(2,\"0\"));return function(){t(i),i[6]=15&i[6]|64,i[8]=63&i[8]|12",
+      "projectReference": "src/lib/upstream/desktop.ts:reportDesktopEvent"
+    },
+    {
+      "id": "WB22",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "RPC User-Agent merges platform/version, product/version and an optional incoming/extension segment dynamically.",
+      "comparison": "project default resembles one profile; not arbitrary runtime equivalence",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 8881891,
+      "excerptByteStart": 8881881,
+      "excerptByteEnd": 8882311,
+      "excerpt": "&A.has(t)}async buildUserAgent(t=\"\"){let i=t?[t]:[],n=await this.clientInfoProvider.get()||{},s=n.applicationName||n.productName;return s&&i.unshift(`${s}/${n.productVersion||\"unknown\"}`),n.platform&&i.unshift(`${n.platform}/${n.platformVersion||\"unknown\"}`),n.userAgentExtension&&i.push(n.userAgentExtension),i.join(\" \")}};i.UserAgentHttpInterceptor=R,s([(0,p.Autowired)(E.ClientInfoProvider),c(\"design:type\",Object)],R.prototype",
+      "projectReference": "src/lib/upstream/client.ts:rpcUserAgent"
+    },
+    {
+      "id": "WB23",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "The packaged OpenAI SDK reports JS package6.25.0.",
+      "comparison": "match",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\lazy-lite-wb\\1885.6c6f1797.mjs",
+      "sha256": "d15afe063921908b603fa82f715fd0f4e680720acaa05c5493877617ac52e268",
+      "byteOffset": 114546,
+      "excerptByteStart": 114486,
+      "excerptByteEnd": 114766,
+      "excerpt": "ctedPlatform();if(\"deno\"===e)return{\"X-Stainless-Lang\":\"js\",\"X-Stainless-Package-Version\":\"6.25.0\",\"X-Stainless-OS\":normalizePlatform(Deno.build.os),\"X-Stainless-Arch\":normalizeArch(Deno.build.arch),\"X-Stainless-Runtime\":\"deno\",\"X-Stainless-Runtime-Version\":\"string\"==typeof Deno.",
+      "projectReference": "src/lib/upstream/client.ts:injectClientSDKHeaders"
+    },
+    {
+      "id": "WB24",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "SDK OS,arch and runtime version come from the real process; current project pins one Windows/x64/Node profile.",
+      "comparison": "static versus runtime profile distinction",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\lazy-lite-wb\\1885.6c6f1797.mjs",
+      "sha256": "d15afe063921908b603fa82f715fd0f4e680720acaa05c5493877617ac52e268",
+      "byteOffset": 115154,
+      "excerptByteStart": 115054,
+      "excerptByteEnd": 115494,
+      "excerpt": "rocess.version};if(\"node\"===e)return{\"X-Stainless-Lang\":\"js\",\"X-Stainless-Package-Version\":\"6.25.0\",\"X-Stainless-OS\":normalizePlatform(globalThis.process.platform??\"unknown\"),\"X-Stainless-Arch\":normalizeArch(globalThis.process.arch??\"unknown\"),\"X-Stainless-Runtime\":\"node\",\"X-Stainless-Runtime-Version\":globalThis.process.version??\"unknown\"};let t=getBrowserInfo();return t?{\"X-Stainless-Lang\":\"js\",\"X-Stainless-Package-Version\":\"6.25.0\",\"X",
+      "projectReference": "src/lib/upstream/client.ts:injectClientSDKHeaders"
+    },
+    {
+      "id": "WB25",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "X-Private-Data is the inverse of resolved model-optimization setting, not simply global/enterprise membership.",
+      "comparison": "mismatch",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 3806465,
+      "excerptByteStart": 3806295,
+      "excerptByteEnd": 3806675,
+      "excerpt": "etValue()?.account;E=(0,pB.isEnterpriseEditionAccount)(t)}let A=(0,pB.resolveModelOptimizationEnabled)({explicitEnabled:S,productDefaultEnabled:i,isEnterpriseEdition:E});p[hK.PRIVATE_DATA_HEADER]=A?\"false\":\"true\";let R={};try{let t=mT.Context.getRequest()?.body;if(t?.header){let i=hL.HeaderUtils.convertHeaderArrayToObject(t.header);i&&(R=i)}}catch(t){}let I={};try{let t=this.se",
+      "projectReference": "src/lib/upstream/client.ts:chatHeaders"
+    },
+    {
+      "id": "WB26",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Default desktop auth uses platform=workbuddy and /plugin prefix, not CLI.",
+      "comparison": "mismatch",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\product.json",
+      "sha256": "a73bea91defd7d5f38d5672c19111681ba52244ee8b9b64cc59dc3e3992eed61",
+      "byteOffset": 1785,
+      "excerptByteStart": 1765,
+      "excerptByteEnd": 1885,
+      "excerpt": ".cn\"\n      ],\n      \"platform\": \"workbuddy\"\n    }\n  },\n  \"updates\": {\n    \"apiVersion\": \"v2\",\n    \"download\": {\n      \"s",
+      "projectReference": "src/lib/login.ts:loginEndpoints"
+    },
+    {
+      "id": "WB27",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Auth/state uses authentication.attributes.platform then configuration.platform.",
+      "comparison": "mismatch with fixed CLI query",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7184673,
+      "excerptByteStart": 7184513,
+      "excerptByteEnd": 7184823,
+      "excerpt": "ty(){try{let t=this.configuration.authentication?.attributes?.platform??this.configuration.platform;return await this.restOperations.post(`/v2${this.prefixPath}/auth/state?platform=${t}`,null,{timeout:5e3}),[null,!0]}catch(i){let t=i instanceof Error?i.message:String(i);return this.logger.error(`Account-scope",
+      "projectReference": "src/lib/login.ts:loginEndpoints"
+    },
+    {
+      "id": "WB28",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Refresh requests post an empty object and include refresh-token/source headers.",
+      "comparison": "core field match; trace headers/identity remain contextual",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 7186265,
+      "excerptByteStart": 7186085,
+      "excerptByteEnd": 7186505,
+      "excerpt": ".auth;if(n)try{let n=await this.restOperations.post(`/v2${this.prefixPath}/auth/token/refresh`,{},{headers:{...this.enterpriseHeaders(t.auth),\"X-Refresh-Token\":t.auth.refreshToken,\"X-Auth-Refresh-Source\":\"plugin\",...i.traceSpan.requestHeaders}})||{data:{data:void 0}};if(!n.data.data)throw new N.SignError(\"Failed to refresh token\");(s=n.data.data).lastRefreshTime=Date.now(),this.calculateExpiresAt(s)}catch(t){if(this.",
+      "projectReference": "src/lib/upstream/client.ts:refreshHeaders"
+    },
+    {
+      "id": "WB29",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Native web-search constructs its own direct-fetch header family, not the full OpenAI SDK chat headers.",
+      "comparison": "mismatch",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 5990540,
+      "excerptByteStart": 5990530,
+      "excerptByteEnd": 5990990,
+      "excerpt": " empty.\")}async performWebSearch(t,i){let n,s=await this.productManager.waitConfiguration(),c=`${s.endpoint}${this.WEB_SEARCH_API_PATH}`,p=(0,a7.nH)().replace(/-/g,\"\"),{ideType:h,platform:S,platformVersion:E}=await this.clientInfoProvider.get(),A=this.authenticationManager.currentSessionSubject.getValue(),R=A?.account,I=(0,cH.Gp)(),P=I?.auth?.accessToken??A?.auth?.accessToken,O=Object.keys((0,cH.Gp)()?.headers??{}).some(t=>\"authorization\"===t.toLowerCase()",
+      "projectReference": "src/lib/upstream/agenttool.ts:agentTool"
+    },
+    {
+      "id": "WB30",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Native web search fixes max_results=5, adding allowed_domains/freshness conditionally; gateway exposes configurable counts.",
+      "comparison": "partial match by design",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 5993217,
+      "excerptByteStart": 5993097,
+      "excerptByteEnd": 5993477,
+      "excerpt": "n,blocked_domains:s}=t,c=s?.length?` (${s.map(t=>`-site:${t}`).join(\" \")})`:\"\";return{query:`${i}${c}`,type:\"text2text\",max_results:5,...n?.length?{allowed_domains:n}:{},...t.freshness?{freshness:t.freshness}:{}}}buildStructuredResult(t,i){return{type:\"web_search_tool_result\",query:t,searchType:\"text2text\",provider:i?.provider||\"\",results:i?.results||[],totalResults:i?.total_re",
+      "projectReference": "src/lib/upstream/agenttool.ts:webSearch"
+    },
+    {
+      "id": "WB31",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Native remote webfetch sends format,prompt,timeout,max_length and optional model_name in addition to URL.",
+      "comparison": "mismatch with URL-only gateway fetch",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 5971954,
+      "excerptByteStart": 5971934,
+      "excerptByteEnd": 5972254,
+      "excerpt": "CurrentModelName(n),V={url:t,format:\"markdown\",prompt:i,timeout:Math.floor(dl/1e3),max_length:dd,...z?{model_name:z}:{}},J=new AbortController;s?.aborted?J.abort(s.reason):s?.addEventListener(\"abort\",()=>J.abort(s.reason),{once:!0});try{S=await fetch(A,{method:\"POST\",headers:B,body:JSON.stringify(V),signal:J.signal})}c",
+      "projectReference": "src/lib/upstream/agenttool.ts:webFetch"
+    },
+    {
+      "id": "WB32",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "v3/config sends Connection:close and repo parameters via RestOperations. Auth interceptor may add identity when a session exists.",
+      "comparison": "startup fixture is only one configuration state",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 8886991,
+      "excerptByteStart": 8886891,
+      "excerptByteEnd": 8887241,
+      "excerpt": "FIGURATION_REQUEST_KEY]:!0,timeout:s,baseURL:n??h.ContainerUtil.get(I.ProductManager).getEndpoint(),headers:{Connection:\"close\"},params:{repos:S},...c?.fallbackAddress?{[R.CONFIG_FETCH_FALLBACK_ADDRESS_KEY]:c.fallbackAddress}:{}},A=await this.restOperations.get(t,E),O=A?.data?.data??{};if(!this.isPersistableProductConfiguration(O))throw(0,R.createC",
+      "projectReference": "src/lib/upstream/modelCatalog.ts:fetchCloudProduct"
+    },
+    {
+      "id": "WB33",
+      "authority": "local-observed-shipped-artifact",
+      "method": "read-only-static-byte-inspection",
+      "claim": "Standard report emits batched event arrays through RestOperations or an optional configured transport.",
+      "comparison": "partial match; final report wire/trace ID remains dynamic",
+      "path": "D:\\workBuddyAI\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs",
+      "sha256": "c57a02ee3f2ef813004262cd003774a6e71bd2a6f5005481359301b407977ea5",
+      "byteOffset": 9153360,
+      "excerptByteStart": 9153350,
+      "excerptByteEnd": 9153810,
+      "excerpt": "headers)}}async send(t,i){try{let n=await this.getUrl();if(!n)return;this.prepareEvents(t);let s={...await this.getHeaders(),...i,[h.HttpHeaders.CONTENT_TYPE]:h.MediaType.APPLICATION_JSON_UTF8};if(this.transport?.accepts(n))return void await this.transport.send(n,t,s);await this.restOperations.post(n,t,{headers:s})}catch(t){this.logger.error(\"Failed to send report\",t)}}async sendSync(t){let i=await this.getUrl();if(!i)throw Error(\"Telemetry endpoint not co",
+      "projectReference": "src/lib/upstream/report.ts:reportChatActivityModel"
+    }
+  ],
+  "negativeSearch": {
+    "terms": [
+      "prompt_cache_key",
+      "/console/enterprises/personal/models"
+    ],
+    "fileCount": 107,
+    "hits": [],
+    "limitation": "Absence of complete literal strings in these selected main/lazy files does not rule out dynamic construction,other entrypoints or external assets."
+  },
+  "summary": {
+    "conclusion": "The project implements a pinned RPC profile and API translation, not a statically or dynamically established complete WorkBuddy client clone.",
+    "matchedOrPartiallyMatched": [
+      "Installed CN desktop5.9.3 and embedded CLI2.165.0 match gateway default version constants.",
+      "OpenAI SDK6.25.0 matches.",
+      "Conversation/request/message headers and W3C/B3 families exist in both, although actual contexts and parent relationships are runtime-dependent.",
+      "Refresh-token/source-plugin/empty-JSON core fields match."
+    ],
+    "rootReportedFixes": [
+      "Default chat non-empty POST bodies now gzip, matching enabled shipped-default processor rather than the old1024-byte cutoff.",
+      "Message IDs now use version7/variant bits and42-bit monotonic sequence.",
+      "16-hex B3 trace identifiers are normalized to32-hex for W3C traceparent."
+    ],
+    "remainingDifferences": [
+      {
+        "topic": "Login",
+        "evidence": [
+          "WB26",
+          "WB27"
+        ],
+        "observation": "Installed desktop auth configuration selects platform=workbuddy; gateway selects platform=CLI and an older fixed CLI/CodeBuddy UA."
+      },
+      {
+        "topic": "X-Private-Data",
+        "evidence": [
+          "WB25"
+        ],
+        "observation": "Native value follows resolved model-optimization settings and custom-request policy; gateway follows account enterprise/global flags."
+      },
+      {
+        "topic": "Agent tools",
+        "evidence": [
+          "WB29",
+          "WB30",
+          "WB31"
+        ],
+        "observation": "Native search/fetch use dedicated headers, direct fetch and additional conditional body fields; gateway reuses chat headers and exposes simplified APIs."
+      },
+      {
+        "topic": "Configuration/telemetry lifecycle",
+        "evidence": [
+          "WB20",
+          "WB32",
+          "WB33"
+        ],
+        "observation": "Native configuration repo params, auth/session conditionals, batched report transport and trace/context propagation are not fully modeled by fixed fixtures."
+      },
+      {
+        "topic": "Extra body/cache fields",
+        "evidence": [],
+        "observation": "No prompt_cache_key or console personal-model endpoint complete literal was observed in the107 selected CLI files. This bounded negative result is not proof of whole-client absence."
+      }
+    ],
+    "pendingDynamicVerification": [
+      "No genuine logged-in client chat,token-refresh,agenttool or telemetry request was captured.",
+      "No claim is made for global desktop5.9.4 or remote feature/config changes.",
+      "Root runtime TLS probe matches a local handshake profile only, not real upstream acceptance or all-client traffic."
+    ]
+  }
+}

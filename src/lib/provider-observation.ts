@@ -1,5 +1,6 @@
 // 供应商响应只观测，不规范化/改写内容，也不推断 CodeBuddy 积分。
 import { usageTokensFromResponse, usageCacheHitTokens, usageCacheMissTokens } from "./upstream/usage";
+import { toolCallIndex } from "./upstream/sse";
 
 export class ProviderObservation {
   promptTokens = 0;
@@ -24,6 +25,16 @@ export class ProviderObservation {
   private data: string[] = [];
 
   constructor(private started: number) {}
+
+  private toolIndex(value: unknown): number | null {
+    try {
+      return toolCallIndex(value);
+    } catch (error) {
+      this.errKind ||= "provider_invalid_tool_index";
+      this.errorBody ||= error instanceof Error ? error.message : String(error);
+      return null;
+    }
+  }
 
   private mergeToolCall(merged: Record<string, unknown>, delta: Record<string, unknown>): void {
     for (const key of ["id", "type"]) {
@@ -53,6 +64,7 @@ export class ProviderObservation {
     }
     if (Array.isArray(message.tool_calls)) {
       for (let i = 0; i < message.tool_calls.length; i++) {
+        if (this.toolIndex(i) === null) break;
         const call = message.tool_calls[i];
         if (!call || typeof call !== "object" || Array.isArray(call)) continue;
         while (this.responseToolCalls.length <= i) this.responseToolCalls.push({});
@@ -91,10 +103,8 @@ export class ProviderObservation {
     for (const call of delta.tool_calls) {
       if (!call || typeof call !== "object" || Array.isArray(call)) continue;
       const source = call as Record<string, unknown>;
-      const rawIndex = source.index;
-      const index = typeof rawIndex === "number" && Number.isFinite(rawIndex) && rawIndex >= 0
-        ? Math.floor(rawIndex)
-        : 0;
+      const index = this.toolIndex(source.index);
+      if (index === null) continue;
       while (this.responseToolCalls.length <= index) this.responseToolCalls.push({});
       this.mergeToolCall(this.responseToolCalls[index], source);
     }
@@ -172,6 +182,10 @@ export class ProviderObservation {
   }
 }
 
+// An adapter that already consumed [DONE] can close its reader without
+// classifying a completed upstream generation as a client disconnect.
+export const CHAT_SSE_CONSUMED = Symbol("chat-sse-consumed");
+
 // 与客户端同一路读取：无 tee 后台继续消费、无整段响应缓冲；断开会取消上游。
 export function observeProviderStream(
   body: ReadableStream<Uint8Array>,
@@ -204,7 +218,8 @@ export function observeProviderStream(
     },
     async cancel(reason) {
       cancelled = true;
-      stats.errKind ||= "client_cancelled";
+      if (reason === CHAT_SSE_CONSUMED) stats.end();
+      else stats.errKind ||= "client_cancelled";
       // 先释放网络连接，不能被慢数据库拖住上游取消。
       await reader.cancel(reason).catch(() => undefined);
       await finish();

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import {
   classify,
   gatewayHint,
-} from "file:///C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next/src/lib/upstream/errors.ts";
+} from "../src/lib/upstream/errors.ts";
 
 // 上游实际返回的 401 原文（截取关键结构）。
 const apisix401 =

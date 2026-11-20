@@ -1,5 +1,8 @@
 // 面板 API 公共辅助：统一响应形态 + BigInt 序列化兜底。
 import { createHash, timingSafeEqual } from "crypto";
+import { getConfig } from "./config";
+import { verifyBearer } from "./auth-guard";
+import { verifyLocalPanelSession } from "./panel-local-session";
 
 export const ok = (data: Record<string, unknown> = {}) =>
   jsonify({ ok: true, ...data }, 200);
@@ -11,12 +14,16 @@ export const fail = (status: number, msg: string) =>
 export function jsonify(v: unknown, status = 200): Response {
   return new Response(
     JSON.stringify(v, (_, x) => (typeof x === "bigint" ? Number(x) : x)),
-    { status, headers: { "Content-Type": "application/json" } },
+    { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } },
   );
 }
 
-// 面板入口与面板 API 均直接开放；超级密码仍用于指定的二次确认操作。
-export async function panelAuth(_req: Request): Promise<Response | null> {
+// 本机开发会话单独验证；其余管理请求仍只接受主密钥。
+export async function panelAuth(req: Request): Promise<Response | null> {
+  if (verifyLocalPanelSession(req)) return null;
+  const cfg = await getConfig();
+  if (!cfg.api_key) return fail(503, "请先配置 WB2A_API_KEY，再访问管理面板");
+  if (!verifyBearer(req, cfg.api_key)) return fail(401, "invalid or missing panel api key");
   return null;
 }
 

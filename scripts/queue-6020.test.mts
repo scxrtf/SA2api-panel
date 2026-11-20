@@ -9,7 +9,7 @@ import {
   isQueueWait,
   parseQueuePosition,
   parseQueueRetryAfter,
-} from "file:///C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next/src/lib/upstream/errors.ts";
+} from "../src/lib/upstream/errors.ts";
 
 // 用户现场 body（data 被截断也照判，分类只依赖正则）。
 const liveBody =

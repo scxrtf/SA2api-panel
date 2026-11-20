@@ -1,0 +1,103 @@
+{
+  "schema": "review.artifact-summary.v1",
+  "authority": "local-observed-shipped-artifact",
+  "artifact": {
+    "name": "app.asar",
+    "digest": {
+      "sha256": "dcabcd90f07a627a06f1fd55bc872a1c25a79aab43c3012930b6287840ab3d20"
+    },
+    "local_path": "D:\\workBuddyAI\\resources\\app.asar",
+    "format": "asar",
+    "architecture": null
+  },
+  "parentEvidence": "ev_383bf95ba9ddddb670f16c045cecf039722da0dafbfda9f2c7f743027b843893",
+  "selection": {
+    "requested_paths": [
+      "package.json",
+      "cli/package.json",
+      "main/axios.js"
+    ],
+    "unselected_files": 6933
+  },
+  "limitations": [
+    "Artifact integrity metadata contradicts observed bytes at cli/bin/native/win32-x64/job-object.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/node_modules/@lydell/node-pty-win32-x64/prebuilds/win32-x64/conpty.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/node_modules/@lydell/node-pty-win32-x64/prebuilds/win32-x64/conpty/OpenConsole.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/node_modules/@lydell/node-pty-win32-x64/prebuilds/win32-x64/conpty_console_list.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/node_modules/@lydell/node-pty/package.json; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/node_modules/koffi/build/koffi/win32_x64/koffi.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/node_modules/koffi/package.json; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/node_modules/koffi/src/cnoke/package.json; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/genie-trash/win32-x64.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/ripgrep/x64-win32/rg.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/ripgrep/x64-win32/ripgrep.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/betterleaks.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/sandbox-center.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/sandbox-cli-gc.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/sandbox-cli.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/sandbox_ffi.dll; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/tsbx.dll; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/tsbx_sdk.dll; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/tsbx_x86.dll; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/tsbxldr.dll; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/tsbxldr_x86.dll; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/sandbox/5.9.5/tsbxlow.dll; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at cli/vendor/wecom-cli/wecom-cli.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at native/perf-metrics/build/Release/perf_metrics.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at native/turing-sdk/build/Release/turing_sdk.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at native/wechat-copydata-decoder/build/Release/wechat_copydata_decoder.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at node_modules/@ban-dal/os-bridge-win32-x64-msvc/os-bridge.win32-x64-msvc.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at node_modules/@genie/agent-harness/cli/bin/native/win32-x64/job-object.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at node_modules/@genie/agent-harness/cli/vendor/genie-trash/win32-x64.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at node_modules/@genie/agent-harness/cli/vendor/ripgrep/x64-win32/rg.exe; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at node_modules/@genie/agent-harness/cli/vendor/ripgrep/x64-win32/ripgrep.node; the observed bytes are untrusted.",
+    "Artifact integrity metadata contradicts observed bytes at node_modules/@tencent/qimei-node/build/Release/qimei.node; the observed bytes are untrusted.",
+    "264 additional limitations omitted from this view; consult source parent Evidence ev_383bf95ba9ddddb670f16c045cecf039722da0dafbfda9f2c7f743027b843893 for the complete list (the caller-supplied record, or its retaining session)."
+  ],
+  "fuses": {
+    "evidence_id": "ev_a5c6bec408ba265a7d0147862076a172fbcbc5669302fef2606b9e09188b8433",
+    "artifact": {
+      "name": "WorkBuddy.exe",
+      "digest": {
+        "sha256": "bbf504003825e0e22dd8c401b396d79db78ec603558088565d1b2e81561704a0"
+      },
+      "local_path": "D:/workBuddyAI/WorkBuddy.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "implications": [
+      {
+        "relationship": "derivation",
+        "slice_index": 0,
+        "sentinel_offset": 168886096,
+        "subject": "node_cli_inspect_arguments",
+        "fuse_index": 3,
+        "outcome": "honored"
+      },
+      {
+        "relationship": "derivation",
+        "slice_index": 0,
+        "sentinel_offset": 168886096,
+        "subject": "electron_run_as_node",
+        "fuse_index": 0,
+        "outcome": "honored"
+      },
+      {
+        "relationship": "derivation",
+        "slice_index": 0,
+        "sentinel_offset": 168886096,
+        "subject": "embedded_asar_integrity_validation",
+        "fuse_index": 4,
+        "outcome": "enforced"
+      },
+      {
+        "relationship": "derivation",
+        "slice_index": 0,
+        "sentinel_offset": 168886096,
+        "subject": "only_load_app_from_asar",
+        "fuse_index": 5,
+        "outcome": "restricted_to_app_asar"
+      }
+    ]
+  }
+}

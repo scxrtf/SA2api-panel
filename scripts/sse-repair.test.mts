@@ -1,7 +1,7 @@
 // sse-repair.test.mts — 流式管线（sse.ts streamPassthrough + MarkupRepair）集成测试。
 import assert from "node:assert/strict";
-import { streamPassthrough } from "file:///C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next/src/lib/upstream/sse.ts";
-import { MarkupRepair } from "file:///C:/Users/16321/Downloads/workbuddy2api-panel-main/wb2api-next/src/lib/upstream/dsml.ts";
+import { streamPassthrough } from "../src/lib/upstream/sse.ts";
+import { MarkupRepair } from "../src/lib/upstream/dsml.ts";
 
 type Obj = Record<string, unknown>;
 const PIPE = "｜｜";

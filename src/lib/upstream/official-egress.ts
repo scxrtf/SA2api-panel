@@ -1,10 +1,11 @@
-// Official desktop egress: Node HTTP/1.1 transport with wire-exact headers.
+// Desktop RPC egress: HTTP/1.1 transport preserving the configured header profile.
 // Global fetch/undici normalizes header spelling/order, so the official routes
-// use this module instead of fetch. The local uTLS helper reproduces the official
-// Node/OpenSSL ClientHello without depending on the host's OpenSSL version.
+// use this module instead of fetch. The local uTLS helper pins a Node/OpenSSL-like
+// ClientHello; matching this fixture is not proof of whole-client equivalence.
 import { spawn } from "child_process";
 import { Socket } from "net";
-import { PassThrough, Readable, Transform } from "stream";
+import { validateHeaderName, validateHeaderValue } from "http";
+import { PassThrough, Readable, pipeline } from "stream";
 import {
   createBrotliDecompress,
   createGunzip,
@@ -139,6 +140,8 @@ const HEADER_ORDERS: Record<string, string[]> = {
 
 const IDLE_TIMEOUT_MS = 30_000;
 const MAX_HEADER_BYTES = 64 * 1024;
+const MAX_IDLE_PER_ORIGIN = 8;
+const MAX_IDLE_CONNECTIONS = 64;
 
 const TLS_HELPER_TIMEOUT_MS = 10_000;
 
@@ -194,22 +197,36 @@ function orderedHeaders(path: string, entries: HeaderEntry[]): HeaderEntry[] {
 function serializeRequest(url: URL, init: OfficialEgressInit): Buffer {
   const path = url.pathname;
   const method = (init.method ?? "GET").toUpperCase();
+  if (!/^[!#$%&'*+.^_`|~0-9A-Z-]+$/.test(method)) throw new TypeError("invalid HTTP method");
+  if (url.username || url.password) throw new TypeError("URL credentials are not supported");
   let body = init.body === undefined
     ? Buffer.alloc(0)
     : Buffer.isBuffer(init.body)
       ? init.body
       : Buffer.from(init.body);
-  const headers: HeaderEntry[] = Object.entries(init.headers ?? {}).map(([name, value]) => ({
-    name: OFFICIAL_HEADER_SPELLING[name.toLowerCase()] ?? name,
-    value,
-  }));
+  const seen = new Set<string>();
+  const headers: HeaderEntry[] = Object.entries(init.headers ?? {}).map(([name, value]) => {
+    validateHeaderName(name);
+    validateHeaderValue(name, value);
+    const lower = name.toLowerCase();
+    if (seen.has(lower)) throw new TypeError(`duplicate request header: ${name}`);
+    seen.add(lower);
+    return { name: OFFICIAL_HEADER_SPELLING[lower] ?? name, value };
+  });
   const has = (name: string) => headers.some((h) => h.name.toLowerCase() === name.toLowerCase());
+  if (has("Transfer-Encoding")) throw new TypeError("request Transfer-Encoding is not supported");
 
-  if (path === "/v2/chat/completions" && body.length > 1024 && !has("Content-Encoding")) {
+  // WorkBuddy 5.9.3's enabled RequestBodyGzip processor compresses every nonempty
+  // default chat POST body; it has no 1024-byte threshold.
+  if (path === "/v2/chat/completions" && method === "POST" && body.length > 0 && !has("Content-Encoding")) {
     body = gzipSync(body);
     headers.push({ name: "Content-Encoding", value: "gzip" });
   }
-  if (init.body !== undefined && !has("Content-Length")) {
+  const length = headers.find((h) => h.name.toLowerCase() === "content-length");
+  if (length && (!/^\d+$/.test(length.value) || Number(length.value) !== body.length)) {
+    throw new TypeError("request Content-Length does not match serialized body");
+  }
+  if (init.body !== undefined && !length) {
     headers.push({ name: "Content-Length", value: String(body.length) });
   }
   if (path === "/v2/chat/completions" && !has("Accept-Encoding")) {
@@ -228,14 +245,15 @@ function serializeRequest(url: URL, init: OfficialEgressInit): Buffer {
 
 function noProxyMatch(url: URL): boolean {
   const list = process.env.NO_PROXY ?? process.env.no_proxy ?? "";
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   return list.split(",").map((v) => v.trim().toLowerCase()).some((item) => {
     if (!item) return false;
     if (item === "*") return true;
     const [entryHost, entryPort] = item.startsWith("[")
       ? [item.slice(1, item.indexOf("]")), item.includes("]:") ? item.split("]:")[1] : ""]
       : item.split(":");
-    if (entryPort && entryPort !== url.port && !(entryPort === "443" && !url.port && url.protocol === "https:")) {
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    if (entryPort && entryPort !== port) {
       return false;
     }
     const domain = entryHost.replace(/^\./, "");
@@ -244,7 +262,7 @@ function noProxyMatch(url: URL): boolean {
 }
 
 function proxyFor(url: URL, explicit?: string | null): URL | null {
-  if (explicit === null || noProxyMatch(url)) return null;
+  if (explicit === null || (explicit === undefined && noProxyMatch(url))) return null;
   const value = explicit ?? (url.protocol === "https:"
     ? process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
     : process.env.HTTP_PROXY ?? process.env.http_proxy);
@@ -262,7 +280,7 @@ function helperPath(): string {
 async function officialTLSConnection(url: URL, proxy: URL | null, signal?: AbortSignal, connectHost?: string, rootCA?: string): Promise<Socket> {
   if (signal?.aborted) throw abortReason(signal);
   return await new Promise<Socket>((resolveSocket, reject) => {
-    const helper = spawn(helperPath(), [], { stdio: ["pipe", "pipe", "pipe"] });
+    const helper = spawn(helperPath(), [], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     const socket = new OfficialTLSSocket(helper);
     let ready = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
@@ -323,8 +341,8 @@ async function officialTLSConnection(url: URL, proxy: URL | null, signal?: Abort
     helper.once("exit", onExit);
     signal?.addEventListener("abort", onAbort, { once: true });
     helper.stdin?.write(JSON.stringify({
-      serverName: url.hostname,
-      host: connectHost ?? url.hostname,
+      serverName: url.hostname.replace(/^\[|\]$/g, ""),
+      host: connectHost ?? url.hostname.replace(/^\[|\]$/g, ""),
       port: Number(url.port || 443),
       ...(proxy ? { proxy: proxy.toString() } : {}),
       ...(rootCA ? { rootCA } : {}),
@@ -350,7 +368,7 @@ async function openSocket(url: URL, proxy: URL | null, signal?: AbortSignal, con
     socket.once("connect", onConnect);
     socket.once("error", fail);
     signal?.addEventListener("abort", onAbort, { once: true });
-    socket.connect(Number(endpoint.port || (endpoint.protocol === "https:" ? 443 : 80)), endpoint.hostname);
+    socket.connect(Number(endpoint.port || (endpoint.protocol === "https:" ? 443 : 80)), endpoint.hostname.replace(/^\[|\]$/g, ""));
   });
   return plain;
 }
@@ -361,12 +379,13 @@ class PooledConnection {
   // Buffer<ArrayBufferLike>，赋值处会报 TS2322。
   private buffer: Buffer = Buffer.alloc(0);
   private parser: ResponseParser | null = null;
-  private state: "head" | "length" | "chunk-size" | "chunk-data" | "chunk-trailer" | "eof" = "head";
+  private state: "head" | "length" | "chunk-size" | "chunk-data" | "chunk-crlf" | "chunk-trailer" | "eof" = "head";
   private remaining = 0;
   private reusable = true;
   private requestReusable = true;
   private idleTimer: NodeJS.Timeout | null = null;
   private closed = false;
+  private method = "GET";
 
   constructor(readonly key: string, private socket: Socket, private onIdle: (conn: PooledConnection) => void) {
     socket.on("data", (chunk: Buffer) => this.consume(chunk));
@@ -374,6 +393,7 @@ class PooledConnection {
     socket.on("close", () => {
       this.closed = true;
       this.clearIdle();
+      removeIdle(this);
       if (this.parser) {
         if (this.state === "eof") {
           this.parser.end();
@@ -385,7 +405,7 @@ class PooledConnection {
 
   get idle(): boolean { return !this.closed && !this.parser && !this.socket.destroyed; }
 
-  start(parser: ResponseParser, requestReusable: boolean): void {
+  start(parser: ResponseParser, requestReusable: boolean, method: string): void {
     if (!this.idle) throw new Error("upstream connection is not idle");
     this.clearIdle();
     this.parser = parser;
@@ -393,10 +413,15 @@ class PooledConnection {
     this.remaining = 0;
     this.reusable = true;
     this.requestReusable = requestReusable;
+    this.method = method;
     this.buffer = Buffer.alloc(0);
+    this.socket.resume();
   }
 
   write(data: Buffer): void { this.socket.write(data); }
+  pause(): void { this.socket.pause(); }
+  resume(): void { this.socket.resume(); }
+  owns(parser: ResponseParser): boolean { return this.parser === parser; }
   destroy(error?: unknown): void {
     if (error) this.fail(error);
     this.socket.destroy();
@@ -418,6 +443,7 @@ class PooledConnection {
     this.parser = null;
     this.closed = true;
     this.clearIdle();
+    removeIdle(this);
     parser?.fail(error);
     this.socket.destroy();
   }
@@ -425,6 +451,9 @@ class PooledConnection {
   private complete(): void {
     const parser = this.parser;
     this.parser = null;
+    // This transport does not pipeline: unsolicited bytes after a response must
+    // never be reused as the next request's response.
+    if (this.buffer.length > 0) this.reusable = false;
     this.buffer = Buffer.alloc(0);
     parser?.end();
     if (!this.closed && this.reusable && !this.socket.destroyed) this.onIdle(this);
@@ -447,15 +476,23 @@ class PooledConnection {
       const colon = line.indexOf(":");
       if (colon > 0) headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
     }
-    const connection = (headers.get("connection") ?? "").toLowerCase();
-    this.reusable = this.requestReusable && !connection.includes("close");
-    const result = { status, statusText: match[2] ?? "", headers };
-    this.parser?.head(result);
-    const noBody = status === 204 || status === 205 || status === 304;
-    if (noBody) { this.complete(); return true; }
+    if (status < 200 || status > 599) { this.fail(new Error("unsupported upstream HTTP status")); return false; }
+    const connection = (headers.get("connection") ?? "").toLowerCase().split(",").map((v) => v.trim());
+    this.reusable = this.requestReusable && !connection.includes("close") &&
+      (lines[0].startsWith("HTTP/1.1") || connection.includes("keep-alive"));
     const transfer = (headers.get("transfer-encoding") ?? "").toLowerCase();
     const length = headers.get("content-length");
-    if (transfer.includes("chunked")) this.state = "chunk-size";
+    if (length !== null && (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length)))) {
+      this.fail(new Error("invalid upstream Content-Length framing")); return false;
+    }
+    if (transfer && (transfer !== "chunked" || length !== null)) {
+      this.fail(new Error("ambiguous or unsupported upstream response framing")); return false;
+    }
+    const result = { status, statusText: match[2] ?? "", headers };
+    this.parser?.head(result);
+    const noBody = this.method === "HEAD" || status === 204 || status === 205 || status === 304;
+    if (noBody) { this.complete(); return true; }
+    if (transfer === "chunked") this.state = "chunk-size";
     else if (length !== null && /^\d+$/.test(length)) {
       this.remaining = Number(length);
       if (this.remaining === 0) { this.complete(); return true; }
@@ -473,10 +510,10 @@ class PooledConnection {
     try {
       while (this.parser && this.buffer.length > 0) {
         if (this.state === "head") {
-          if (this.buffer.length > MAX_HEADER_BYTES && !this.buffer.includes("\r\n\r\n")) {
+          const end = this.buffer.indexOf("\r\n\r\n");
+          if (end > MAX_HEADER_BYTES || (end < 0 && this.buffer.length > MAX_HEADER_BYTES)) {
             this.fail(new Error("upstream response headers too large")); return;
           }
-          const end = this.buffer.indexOf("\r\n\r\n");
           if (end < 0) return;
           if (!this.parseHead(end)) return;
         } else if (this.state === "length") {
@@ -488,19 +525,29 @@ class PooledConnection {
           else return;
         } else if (this.state === "chunk-size") {
           const end = this.buffer.indexOf("\r\n");
+          if (end > MAX_HEADER_BYTES || (end < 0 && this.buffer.length > MAX_HEADER_BYTES)) {
+            this.fail(new Error("upstream chunk header too large")); return;
+          }
           if (end < 0) return;
           const sizeText = this.buffer.subarray(0, end).toString("latin1").split(";")[0];
           if (!/^[0-9a-fA-F]+$/.test(sizeText)) { this.fail(new Error("invalid chunk size")); return; }
           this.remaining = parseInt(sizeText, 16);
+          if (!Number.isSafeInteger(this.remaining)) { this.fail(new Error("upstream chunk size too large")); return; }
           this.buffer = this.buffer.subarray(end + 2);
           this.state = this.remaining === 0 ? "chunk-trailer" : "chunk-data";
         } else if (this.state === "chunk-data") {
-          if (this.buffer.length < this.remaining + 2) return;
-          this.parser.data(this.buffer.subarray(0, this.remaining));
-          if (this.buffer[this.remaining] !== 13 || this.buffer[this.remaining + 1] !== 10) {
+          const size = Math.min(this.remaining, this.buffer.length);
+          this.parser.data(this.buffer.subarray(0, size));
+          this.buffer = this.buffer.subarray(size);
+          this.remaining -= size;
+          if (this.remaining > 0) return;
+          this.state = "chunk-crlf";
+        } else if (this.state === "chunk-crlf") {
+          if (this.buffer.length < 2) return;
+          if (this.buffer[0] !== 13 || this.buffer[1] !== 10) {
             this.fail(new Error("invalid chunk terminator")); return;
           }
-          this.buffer = this.buffer.subarray(this.remaining + 2);
+          this.buffer = this.buffer.subarray(2);
           this.state = "chunk-size";
         } else if (this.state === "chunk-trailer") {
           if (this.buffer.length >= 2 && this.buffer[0] === 13 && this.buffer[1] === 10) {
@@ -508,6 +555,9 @@ class PooledConnection {
             this.complete();
           } else {
             const end = this.buffer.indexOf("\r\n\r\n");
+            if (end > MAX_HEADER_BYTES || (end < 0 && this.buffer.length > MAX_HEADER_BYTES)) {
+              this.fail(new Error("upstream trailers too large")); return;
+            }
             if (end < 0) return;
             this.buffer = this.buffer.subarray(end + 4);
             this.complete();
@@ -524,10 +574,19 @@ class PooledConnection {
 
 const pools = new Map<string, PooledConnection[]>();
 
+function removeIdle(conn: PooledConnection): void {
+  const pool = pools.get(conn.key);
+  if (!pool) return;
+  const index = pool.indexOf(conn);
+  if (index >= 0) pool.splice(index, 1);
+  if (pool.length === 0) pools.delete(conn.key);
+}
+
 function takeIdle(key: string): PooledConnection | null {
   const pool = pools.get(key);
   while (pool?.length) {
-    const conn = pool.shift()!;
+    const conn = pool.pop()!;
+    if (pool.length === 0) pools.delete(key);
     if (conn.idle) return conn;
   }
   return null;
@@ -535,14 +594,20 @@ function takeIdle(key: string): PooledConnection | null {
 
 function releaseIdle(conn: PooledConnection): void {
   const pool = pools.get(conn.key) ?? [];
+  const total = [...pools.values()].reduce((count, entries) => count + entries.length, 0);
+  if (pool.length >= MAX_IDLE_PER_ORIGIN || total >= MAX_IDLE_CONNECTIONS) {
+    conn.destroy();
+    return;
+  }
   pool.push(conn);
   pools.set(conn.key, pool);
   conn.idleLater();
 }
 
 export function closeOfficialEgressConnections(): void {
-  for (const pool of pools.values()) for (const conn of pool) conn.destroy();
+  const idle = [...pools.values()].flat();
   pools.clear();
+  for (const conn of idle) conn.destroy();
 }
 
 function rawResponseStream(conn: PooledConnection, signal?: AbortSignal): {
@@ -552,6 +617,7 @@ function rawResponseStream(conn: PooledConnection, signal?: AbortSignal): {
 } {
   let controller: ReadableStreamDefaultController<Uint8Array>;
   let settled = false;
+  let completed = false;
   let resolveHead!: (value: { status: number; statusText: string; headers: Headers }) => void;
   let rejectHead!: (reason: unknown) => void;
   const head = new Promise<{ status: number; statusText: string; headers: Headers }>((resolve, reject) => {
@@ -559,18 +625,23 @@ function rawResponseStream(conn: PooledConnection, signal?: AbortSignal): {
   });
   const stream = new ReadableStream<Uint8Array>({
     start(c) { controller = c; },
+    pull() { conn.resume(); },
     cancel(reason) {
       cleanupAbort();
-      conn.destroy(reason ?? new DOMException("Response body cancelled", "AbortError"));
+      if (!completed) conn.destroy(reason ?? new DOMException("Response body cancelled", "AbortError"));
     },
   });
   const abort = () => conn.destroy(abortReason(signal!));
   const cleanupAbort = () => signal?.removeEventListener("abort", abort);
   const parser: ResponseParser = {
     head(value) { settled = true; resolveHead(value); },
-    data(chunk) { controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)); },
-    end() { cleanupAbort(); controller.close(); },
+    data(chunk) {
+      controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+      if ((controller.desiredSize ?? 0) <= 0) conn.pause();
+    },
+    end() { completed = true; cleanupAbort(); controller.close(); },
     fail(error) {
+      completed = true;
       cleanupAbort();
       controller.error(error);
       if (!settled) { settled = true; rejectHead(error); }
@@ -584,79 +655,93 @@ function rawResponseStream(conn: PooledConnection, signal?: AbortSignal): {
 function decodeResponse(stream: ReadableStream<Uint8Array>, encoding: string): ReadableStream<Uint8Array> {
   const normalized = encoding.trim().toLowerCase();
   if (!normalized || normalized === "identity") return stream;
+  const encodings = normalized.split(",").map((value) => value.trim());
+  if (encodings.length > 1) {
+    return encodings.reduceRight((body, value) => decodeResponse(body, value), stream);
+  }
+  if (!["gzip", "x-gzip", "br", "deflate"].includes(normalized)) {
+    throw new Error(`unsupported upstream Content-Encoding: ${normalized}`);
+  }
+  const source = Readable.fromWeb(stream as import("stream/web").ReadableStream<Uint8Array>);
+  const strategy = {
+    highWaterMark: 64 * 1024,
+    size: (chunk: Uint8Array) => chunk.byteLength,
+  };
+  if (normalized !== "deflate") {
+    const decoder = normalized === "br" ? createBrotliDecompress() : createGunzip();
+    // pipeline propagates errors, backpressure and consumer cancellation both ways.
+    pipeline(source, decoder, () => undefined);
+    return Readable.toWeb(decoder, { strategy }) as ReadableStream<Uint8Array>;
+  }
+  // Deflate may be zlib-wrapped or raw. Sniff only the first two bytes, lazily,
+  // so returning the response headers never waits for body data.
   const output = new PassThrough();
-  let decoder: ReturnType<typeof createGunzip> | ReturnType<typeof createBrotliDecompress> |
-    ReturnType<typeof createInflate> | ReturnType<typeof createInflateRaw> | null = null;
-  let prefix = Buffer.alloc(0);
-  const input = new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      try {
-        if (!decoder) {
-          prefix = Buffer.concat([prefix, chunk]);
-          if (normalized === "deflate" && prefix.length < 2) { callback(); return; }
-          if (normalized === "gzip" || normalized === "x-gzip") decoder = createGunzip();
-          else if (normalized === "br") decoder = createBrotliDecompress();
-          else {
-            const zlibHeader = (prefix[0] & 0x0f) === 8 && ((prefix[0] << 8) | prefix[1]) % 31 === 0;
-            decoder = zlibHeader ? createInflate() : createInflateRaw();
-          }
-          decoder.on("error", (error) => output.destroy(error));
-          decoder.pipe(output);
-          decoder.write(prefix, callback);
-          prefix = Buffer.alloc(0);
-          return;
-        }
-        decoder.write(chunk, callback);
-      } catch (error) { callback(error as Error); }
-    },
-    flush(callback) { if (decoder) decoder.end(callback); else callback(); },
-  });
-  input.on("error", (error) => output.destroy(error));
-  const pump = (async () => {
-    const reader = stream.getReader();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!input.write(value)) await new Promise<void>((resolve) => input.once("drain", resolve));
-      }
-      input.end();
-    } catch (error) { output.destroy(error as Error); }
-  })();
-  void pump.catch(() => undefined);
-  return Readable.toWeb(output) as ReadableStream<Uint8Array>;
+  output.once("close", () => source.destroy());
+  void (async () => {
+    const iterator = source[Symbol.asyncIterator]();
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    while (bytes < 2) {
+      const next = await iterator.next();
+      if (next.done) break;
+      const chunk = Buffer.from(next.value);
+      chunks.push(chunk); bytes += chunk.length;
+    }
+    if (bytes < 2) throw new Error("unexpected end of compressed deflate body");
+    if (output.destroyed) return;
+    const prefix = Buffer.concat(chunks);
+    const wrapped = (prefix[0] & 0x0f) === 8 && ((prefix[0] << 8) | prefix[1]) % 31 === 0;
+    const input = Readable.from((async function* () {
+      yield prefix;
+      for await (const chunk of iterator) yield chunk;
+    })(), { objectMode: false });
+    pipeline(input, wrapped ? createInflate() : createInflateRaw(), output, () => source.destroy());
+  })().catch((error: unknown) => output.destroy(error instanceof Error ? error : new Error(String(error))));
+  return Readable.toWeb(output, { strategy }) as ReadableStream<Uint8Array>;
 }
 
 export async function officialEgress(input: string | URL, init: OfficialEgressInit = {}): Promise<Response> {
   const url = typeof input === "string" ? new URL(input) : input;
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error(`unsupported URL protocol: ${url.protocol}`);
   if (init.signal?.aborted) throw abortReason(init.signal);
+  const serialized = serializeRequest(url, init);
   const proxy = proxyFor(url, init.proxy);
-  const key = `${url.origin}|${proxy?.origin ?? "direct"}`;
-  let conn = takeIdle(key);
-  if (!conn) conn = new PooledConnection(key, await openSocket(url, proxy, init.signal, init.connectHost, init.rootCA), releaseIdle);
-
-  const { stream, parser, head } = rawResponseStream(conn, init.signal);
-  const connection = Object.entries(init.headers ?? {})
-    .find(([name]) => name.toLowerCase() === "connection")?.[1] ?? "keep-alive";
-  conn.start(parser, !connection.toLowerCase().split(",").some((token) => token.trim() === "close"));
+  // Never share sockets across proxy credentials, test dial targets or trust roots.
+  const key = JSON.stringify([url.origin, proxy?.href ?? "direct", init.connectHost ?? "", init.rootCA ?? ""]);
+  const timeout = new AbortController();
+  const signal = init.signal ? AbortSignal.any([init.signal, timeout.signal]) : timeout.signal;
   const timer = init.timeoutMs && init.timeoutMs > 0
-    ? setTimeout(() => conn?.destroy(new DOMException("upstream header timeout", "TimeoutError")), init.timeoutMs)
+    ? setTimeout(() => timeout.abort(new DOMException("upstream header timeout", "TimeoutError")), init.timeoutMs)
     : null;
   timer?.unref();
+  let conn = takeIdle(key);
+  let owner: ResponseParser | undefined;
   try {
-    const target = proxy && url.protocol === "http:" ? new URL(url) : url;
-    const serialized = serializeRequest(target, init);
+    if (!conn) conn = new PooledConnection(key, await openSocket(url, proxy, signal, init.connectHost, init.rootCA), releaseIdle);
+    if (signal.aborted) throw abortReason(signal);
+    const { stream, parser, head } = rawResponseStream(conn, signal);
+    owner = parser;
+    const connection = Object.entries(init.headers ?? {})
+      .find(([name]) => name.toLowerCase() === "connection")?.[1] ?? "keep-alive";
+    const method = (init.method ?? "GET").toUpperCase();
+    conn.start(parser, !connection.toLowerCase().split(",").some((token) => token.trim() === "close"), method);
     if (proxy && url.protocol === "http:") {
       // Plain HTTP proxies require absolute-form. Rebuild only the request line.
       const end = serialized.indexOf("\r\n");
-      const line = `${(init.method ?? "GET").toUpperCase()} ${url.toString()} HTTP/1.1`;
+      const line = `${method} ${url.origin}${url.pathname}${url.search} HTTP/1.1`;
       conn.write(Buffer.concat([Buffer.from(line, "latin1"), serialized.subarray(end)]));
     } else conn.write(serialized);
     const result = await head;
     if (timer) clearTimeout(timer);
-    const body = decodeResponse(stream, result.headers.get("content-encoding") ?? "");
-    const noBody = result.status === 204 || result.status === 205 || result.status === 304;
+    const noBody = method === "HEAD" || result.status === 204 || result.status === 205 || result.status === 304;
+    const encoding = result.headers.get("content-encoding") ?? "";
+    const body = noBody ? null : decodeResponse(stream, encoding);
+    // These headers describe compressed/framed wire bytes, not the decoded body.
+    result.headers.delete("transfer-encoding");
+    if (!noBody && encoding && encoding.toLowerCase() !== "identity") {
+      result.headers.delete("content-encoding");
+      result.headers.delete("content-length");
+    }
     return new Response(noBody ? null : body, {
       status: result.status,
       statusText: result.statusText,
@@ -664,7 +749,7 @@ export async function officialEgress(input: string | URL, init: OfficialEgressIn
     });
   } catch (error) {
     if (timer) clearTimeout(timer);
-    conn.destroy(error);
+    if (conn && (!owner || conn.owns(owner))) conn.destroy(error);
     throw error;
   }
 }

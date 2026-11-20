@@ -27,6 +27,25 @@ export interface StreamStats {
 
 type Obj = Record<string, unknown>;
 
+export const MAX_TOOL_CALLS = 1024;
+
+export class ToolCallIndexError extends RangeError {
+  constructor(value: unknown) {
+    super(`invalid tool_call index (${typeof value === "number" ? value : typeof value}); expected an integer from 0 to ${MAX_TOOL_CALLS - 1}`);
+    this.name = "ToolCallIndexError";
+  }
+}
+
+// 一些兼容上游省略单个工具调用的 index，仍按 0 处理；显式非法值不再取整、
+// 钳制或扩张稀疏数组，避免错误索引把一个小响应放大到数 GB 内存。
+export function toolCallIndex(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value >= MAX_TOOL_CALLS) {
+    throw new ToolCallIndexError(value);
+  }
+  return value;
+}
+
 export class StreamPassthroughError extends Error {
   readonly stats: StreamStats;
 
@@ -170,7 +189,7 @@ function observeAssistantFrame(stats: StreamStats, obj: Obj): void {
         for (const call of toolCalls) {
           if (!call || typeof call !== "object") continue;
           const tc = call as Obj;
-          const idx = num(tc["index"]);
+          const idx = toolCallIndex(tc["index"]);
           while (stats.assistantToolCalls.length <= idx) stats.assistantToolCalls.push({});
           mergeObservedToolCall(stats.assistantToolCalls[idx], tc);
         }
@@ -331,8 +350,8 @@ export async function streamPassthrough(
       if (!Array.isArray(tcs)) continue;
       for (const tci of tcs) {
         if (!tci || typeof tci !== "object") continue;
-        const v = (tci as Obj)["index"];
-        if (typeof v === "number" && v > maxToolIdx) maxToolIdx = v;
+        const v = toolCallIndex((tci as Obj)["index"]);
+        if (v > maxToolIdx) maxToolIdx = v;
       }
     }
   };
@@ -405,6 +424,7 @@ export async function streamPassthrough(
       }
       if (doneSeen) break;
     }
+    const incomplete = !doneSeen && !stats.finishReason;
     // 标记修复的尾部收尾：流结束时仍未判定的字节一律原文回吐（绝不吞字节，
     // 未闭合的块连起始标记一起交还）；若本流还原过调用、但上游从未给出收尾帧，
     // 补一帧 finish_reason: tool_calls，保证客户端不会把「工具调用回合」读成
@@ -421,7 +441,7 @@ export async function streamPassthrough(
         await write(JSON.stringify(normalized));
         stats.validFrames++;
       }
-      if (synthIdx > 0 && !toolFinishSent) {
+      if (synthIdx > 0 && !toolFinishSent && !incomplete) {
         const normalized = normalizeFrame(finishOnlyFrame({}, "tool_calls"));
         observeAssistantFrame(stats, normalized);
         await write(JSON.stringify(normalized));
@@ -431,10 +451,25 @@ export async function streamPassthrough(
     if (stats.validFrames === 0) {
       stats.errorFrame = '{"error":{"code":"upstream_parse"}}';
       await write('{"error":{"message":"empty upstream stream","type":"upstream_error","code":"upstream_parse"}}');
+    } else if (incomplete && !stats.errorFrame) {
+      stats.errorFrame = JSON.stringify({ error: {
+        message: "upstream stream ended before finish_reason or [DONE]",
+        type: "upstream_error", code: "upstream_stream_incomplete",
+      } });
+      await write(stats.errorFrame);
     }
     await writer.write(enc.encode("data: [DONE]\n\n"));
   } catch (e) {
-    throw new StreamPassthroughError(e, stats);
+    if (!(e instanceof ToolCallIndexError)) throw new StreamPassthroughError(e, stats);
+    stats.errorFrame = JSON.stringify({ error: {
+      message: e.message, type: "upstream_error", code: "upstream_invalid_tool_index",
+    } });
+    try {
+      await write(stats.errorFrame);
+      await writer.write(enc.encode("data: [DONE]\n\n"));
+    } catch (writeError) {
+      throw new StreamPassthroughError(writeError, stats);
+    }
   } finally {
     // 关闭 writable 让下游读到 done（releaseLock 不关流，下游会一直挂起）。
     // 客户端断连时 close 抛错，吞掉即可。
@@ -550,7 +585,7 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
             for (const tc of tcs) {
               if (!tc || typeof tc !== "object") continue;
               const t = tc as Obj;
-              const idx = num(t["index"]);
+              const idx = toolCallIndex(t["index"]);
               while (toolCalls.length <= idx) toolCalls.push({});
               mergeToolCallDelta(toolCalls[idx], t);
             }
@@ -565,39 +600,49 @@ export async function aggregate(upstream: ReadableStream<Uint8Array>): Promise<{
     if (u) usageObj = u;
   };
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, idx).replace(/\r$/, "");
-      buf = buf.slice(idx + 1);
-      if (line.startsWith("data: [DONE]")) {
-        sawDone = true;
-        break;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).replace(/\r$/, "");
+        buf = buf.slice(idx + 1);
+        if (line.startsWith("data: [DONE]")) {
+          sawDone = true;
+          break;
+        }
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6);
+        let obj: Obj;
+        try {
+          obj = JSON.parse(payload) as Obj;
+        } catch {
+          continue;
+        }
+        if (obj["error"]) {
+          stats.errorFrame = payload;
+          continue;
+        }
+        stats.validFrames++;
+        mergeChunk(obj);
       }
-      if (!line.startsWith("data: ")) continue;
-      const payload = line.slice(6);
-      let obj: Obj;
-      try {
-        obj = JSON.parse(payload) as Obj;
-      } catch {
-        continue;
-      }
-      if (obj["error"]) {
-        stats.errorFrame = payload;
-        continue;
-      }
-      stats.validFrames++;
-      mergeChunk(obj);
+      if (sawDone) break;
     }
+  } finally {
+    // 正常 DONE 和协议错误都及时释放底流；尤其索引校验失败时不遗留账号连接。
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
   if (stats.validFrames === 0) {
     throw new Error(stats.errorFrame ? "upstream error frame: " + stats.errorFrame.slice(0, 200) : "empty upstream stream");
   }
   if (stats.errorFrame) {
     throw new Error("upstream error frame: " + stats.errorFrame.slice(0, 200));
+  }
+  if (!sawDone && !finishReason) {
+    throw new Error("upstream stream ended before finish_reason or [DONE]");
   }
   // 截断丢弃（对齐 Go sse.go：finish_reason==length 或未见 [DONE] 说明流被掐断，
   // 此时末尾 tool_call 的 arguments 很可能残缺，直接丢弃防止客户端执行半残调用）。

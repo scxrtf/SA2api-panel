@@ -22,10 +22,13 @@ export interface AppConfig {
   session_sticky: boolean; // 会话粘性开关
   passthrough_ip: boolean; // 客户端 IP 透传
   client_name: string; // 用量归属名（默认 WorkBuddy；SaaS 还原旧行为）
-  client_version: string; // 出站客户端版本段（空=内置默认 5.5.4）
-  cli_version: string; // 出站 CLI 版本段（空=内置默认 2.137.1）
+  client_version: string; // 出站客户端版本段（空=CN 5.9.3 / Global 5.9.4）
+  cli_version: string; // 出站 CLI 版本段（空=内置默认 2.165.0）
   user_agent: string; // 显式 UA 覆盖（空=官方桌面端默认形态）
   device_token: string; // 全局 X-Device-Token（空=按账号）
+  enable_model_optimization: boolean | null; // null=客户端默认策略；显式布尔值覆盖默认
+  model_optimization_default_enabled: boolean; // 已解析产品/AB 默认；本机 DefaultModelOptimizationOff=false
+  model_optimization_accounts: Record<string, boolean>; // 每 UID 显式偏好，优先于全局设置
   prompt_mode: string; // passthrough | custom | append
   prompt_text: string;
   header_timeout_ms: number; // 上游响应头超时
@@ -93,6 +96,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   cli_version: "",
   user_agent: "",
   device_token: "",
+  enable_model_optimization: null,
+  model_optimization_default_enabled: true,
+  model_optimization_accounts: {},
   prompt_mode: "passthrough",
   prompt_text: "",
   header_timeout_ms: 120_000, // 对齐 Go upstream.header_timeout_seconds 缺省 120s
@@ -124,6 +130,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 };
 
 import { prisma } from "./db";
+import { validateModelOptimizationAccounts } from "./upstream/privacy";
 
 let cache: { cfg: AppConfig; at: number } | null = null;
 const CACHE_TTL_MS = 30_000;
@@ -154,6 +161,13 @@ export async function getConfig(force = false): Promise<AppConfig> {
     // DB 未就绪/表未建：回落默认值（部署迁移前的引导窗口）。
   }
   const cfg: AppConfig = { ...DEFAULT_CONFIG, ...stored };
+  if (typeof cfg.enable_model_optimization !== "boolean") cfg.enable_model_optimization = null;
+  if (typeof cfg.model_optimization_default_enabled !== "boolean") cfg.model_optimization_default_enabled = true;
+  try {
+    cfg.model_optimization_accounts = validateModelOptimizationAccounts(cfg.model_optimization_accounts);
+  } catch {
+    cfg.model_optimization_accounts = {};
+  }
   normalizeCapacityConfig(cfg);
   // 环境变量覆盖主密钥（Railway 部署首选方式；面板里的密钥仍走 Setting）。
   if (process.env.WB2A_API_KEY) cfg.api_key = process.env.WB2A_API_KEY;
@@ -208,7 +222,12 @@ export async function saveConfig(raw: unknown): Promise<AppConfig> {
     if (!(k in src)) continue;
     const v = src[k];
     const def = DEFAULT_CONFIG[k];
-    if (Array.isArray(def)) {
+    if (k === "enable_model_optimization") {
+      if (v !== null && typeof v !== "boolean") throw new Error("enable_model_optimization 必须为布尔值或 null");
+      next.enable_model_optimization = v;
+    } else if (k === "model_optimization_accounts") {
+      next.model_optimization_accounts = validateModelOptimizationAccounts(v);
+    } else if (Array.isArray(def)) {
       // 整点小时数组：必须全为 0-23 整数（对齐 validateScheduleHours fail-fast）。
       if (!Array.isArray(v) || v.some((h) => typeof h !== "number" || !Number.isInteger(h) || h < 0 || h > 23)) {
         throw new Error(`字段 ${k} 必须是 0-23 的整数小时数组；如要关闭该任务请设对应的 *_disabled=true`);

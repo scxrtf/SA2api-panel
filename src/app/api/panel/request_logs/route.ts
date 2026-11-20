@@ -1,6 +1,8 @@
 // GET /api/panel/request_logs — RequestLog 分页/过滤（limit 默认 50 上限 500）。
-import { panelAuth, ok } from "@/lib/panel-auth";
+import { cbRpc, isCloudbaseRestEnabled } from "@/lib/cloudbase-rest";
+import { panelAuth, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
+import type { RequestLogSession } from "@/lib/request-log-sessions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +45,7 @@ export async function GET(req: Request) {
   let limit = parseInt(q.get("limit") ?? "", 10);
   if (!Number.isFinite(limit) || limit <= 0) limit = 50;
   if (limit > 500) limit = 500;
+  if (q.get("view") === "sessions" || q.has("group")) return sessionPage(q, Math.min(100, limit));
 
   const where: Record<string, unknown> = {};
   const uid = q.get("account") ?? "";
@@ -98,12 +101,7 @@ export async function GET(req: Request) {
       }),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const entries = rows.map((row) => ({
-      ...row,
-      errMsg: row.errMsg.length > LIST_ERR_MSG_MAX
-        ? row.errMsg.slice(0, LIST_ERR_MSG_MAX) + "…（详情页看全文）"
-        : row.errMsg,
-    }));
+    const entries = rows.map(clipListEntry);
     return ok({ entries, total, page, pageSize, totalPages, limit, mode: "page" });
   }
 
@@ -115,23 +113,76 @@ export async function GET(req: Request) {
   });
   // 列表侧截断 errMsg：上游报错正文常带整段 JSON/HTML，单条可达数 KB。
   // 面板只用它做行内提示，完整原文在 GET /request_logs/[id] 的 errorDetail。
-  const entries = rows.map((row) => ({
-    ...row,
-    errMsg: row.errMsg.length > LIST_ERR_MSG_MAX
-      ? row.errMsg.slice(0, LIST_ERR_MSG_MAX) + "…（详情页看全文）"
-      : row.errMsg,
-  }));
+  const entries = rows.map(clipListEntry);
   return ok({ entries, limit, mode: since ? "delta" : "full" });
 }
 
 const LIST_ERR_MSG_MAX = 512;
+
+function clipListEntry<T extends { errMsg: string }>(row: T) {
+  return {
+    ...row,
+    errMsg: row.errMsg.length > LIST_ERR_MSG_MAX
+      ? row.errMsg.slice(0, LIST_ERR_MSG_MAX) + "…（详情页看全文）"
+      : row.errMsg,
+  };
+}
+
+type SessionPageResult<T> = { total: number; entries: T[] };
+
+async function sessionPage(q: URLSearchParams, pageSize: number) {
+  const group = q.get("group");
+  const singleRequest = group?.startsWith("r:") && group.length > 2 && group.length <= 514 && !group.includes("\0");
+  if (group !== null && !singleRequest && !/^s:[0-9a-f]{32}$/.test(group)) {
+    return fail(400, "会话标识无效");
+  }
+  const requestedPage = Number(q.get("page"));
+  const page = Number.isSafeInteger(requestedPage) ? Math.max(1, Math.min(1_000_000, requestedPage)) : 1;
+  const now = Date.now();
+  const scope = {
+    from: (parseTime(q.get("from")) ?? new Date(now - 7 * 86400_000)).toISOString(),
+    to: (parseTime(q.get("to")) ?? new Date(now)).toISOString(),
+  };
+  const filters = Object.fromEntries(["account", "model", "client_ip", "user_agent", "key", "err", "outcome"]
+    .map((name) => [name, (q.get(name) ?? "").replace(/\0/g, "")]));
+  const offset = (page - 1) * pageSize;
+  const read = async <T>(): Promise<SessionPageResult<T>> => {
+    if (isCloudbaseRestEnabled()) {
+      return cbRpc<SessionPageResult<T>>("wb2_request_log_session_page", {
+        p_filters: filters, p_from: scope.from, p_to: scope.to, p_limit: pageSize, p_offset: offset, p_group: group,
+        // See parseDbDate in dal.ts: CloudBase's timezone-less values represent Shanghai wall time.
+        p_storage_zone: "Asia/Shanghai",
+      });
+    }
+    const [{ result }] = await prisma.$queryRaw<{ result: SessionPageResult<T> }[]>`
+      SELECT public.wb2_request_log_session_page(${JSON.stringify(filters)}::jsonb, ${scope.from}::timestamp,
+        ${scope.to}::timestamp, ${pageSize}::integer, ${offset}::integer, ${group}::text, 'UTC'::text) AS result`;
+    return result;
+  };
+  const pageInfo = (total: number) => ({ page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)), scope });
+  try {
+    if (group === null) {
+      const { total, entries } = await read<RequestLogSession>();
+      return ok({ ...pageInfo(total), entries });
+    }
+    const { total, entries: ids } = await read<string>();
+    const rows = ids.length === 0 ? [] : await prisma.requestLog.findMany({
+      where: { id: { in: ids } }, select: listSelect, orderBy: [{ at: "desc" }, { id: "desc" }], take: pageSize,
+    });
+    return ok({ ...pageInfo(total), entries: rows.map(clipListEntry) });
+  } catch {
+    // Do not send raw SQL/service errors to the panel. The original request view is independent.
+    return fail(503, "会话日志暂不可用，请重试或检查数据库会话迁移是否已应用。");
+  }
+}
 
 // parseTime 兼容 unix 秒/毫秒 与 RFC3339；非法值不设界。
 function parseTime(v: string | null): Date | null {
   if (!v) return null;
   const n = Number(v);
   if (Number.isFinite(n) && n > 0) {
-    return new Date(n > 1e12 ? n : n * 1000);
+    const date = new Date(n > 1e12 ? n : n * 1000);
+    return Number.isFinite(date.getTime()) ? date : null;
   }
   const t = Date.parse(v);
   return Number.isNaN(t) ? null : new Date(t);

@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+/* shadcn/ui uses the panel palette instead of a second set of colors. */
+@theme inline {
+  --color-background: var(--bg-card);
+  --color-foreground: var(--fg);
+  --color-border: var(--border);
+  --color-input: var(--border-soft);
+  --color-primary: var(--accent);
+  --color-primary-foreground: #271508;
+  --color-secondary: var(--bg-soft);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--surface);
+  --color-muted-foreground: color-mix(in srgb, var(--fg) 50%, var(--fg-dim));
+  --color-ring: var(--accent);
+  --color-destructive: var(--err);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    CloseRouter 风格令牌（精确对齐 Android 原作 RackScene.Pal /
    ControlPanel 配色）：冷灰底 + 墨黑 + 橙色强调 + 等宽编号
@@ -470,51 +486,6 @@ body {
 
 .main { flex: 1; min-width: 0; padding: 0 24px 60px; }
 
-/* ─── CloseRouter 机柜（RackScene 复刻：单元 + LED + 底座）───── */
-.rack { padding: 20px 4px 0; margin-bottom: 4px; }
-.rack-units {
-  display: grid; grid-template-columns: repeat(9, 1fr);
-  gap: 8px; min-width: 0;
-}
-.rack-unit {
-  position: relative; border: 1px solid var(--border-soft); border-radius: 10px;
-  background: var(--bg-card); cursor: pointer; padding: 10px 8px 8px;
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  transition: border-color .2s, background .2s, transform .2s cubic-bezier(.34, 1.4, .64, 1), box-shadow .2s;
-}
-.rack-unit:hover { border-color: var(--fg-dim); transform: translateY(-2px); }
-.rack-unit.on {
-  border-color: var(--accent); background: var(--accent-soft);
-  box-shadow: 0 4px 14px rgba(232, 116, 28, .14); transform: translateY(-3px);
-}
-.rack-unit .ru-num {
-  font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .8px;
-  color: var(--fg-dim);
-}
-.rack-unit.on .ru-num { color: var(--accent); }
-.rack-unit .ru-led {
-  width: 22px; height: 4px; border-radius: 2px; background: var(--border-soft);
-  transition: background .2s, box-shadow .2s;
-}
-.rack-unit.on .ru-led { background: var(--accent); box-shadow: 0 0 8px rgba(232, 116, 28, .5); }
-.rack-unit .ru-lbl {
-  font-size: 12px; color: var(--fg-dim); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; max-width: 100%;
-}
-.rack-unit.on .ru-lbl { color: var(--ink); font-weight: 600; }
-/* 机柜底座 */
-.rack-base {
-  height: 8px; border-radius: 4px; margin: 6px 4px 0;
-  background: linear-gradient(to bottom, var(--border-soft), var(--border));
-}
-/* 机柜与内容页连接线（点亮单元向下延伸） */
-.rack-link { position: relative; height: 14px; margin: 0 4px 2px; }
-.rack-link::before {
-  content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1.5px;
-  background: linear-gradient(to bottom, var(--accent), transparent);
-  transform: translateX(-50%);
-}
-
 /* ─── CloseRouter ControlHeader 分页式顶栏 ───────────────────── */
 .topbar {
   display: flex; flex-direction: column; align-items: stretch; gap: 6px;
@@ -530,7 +501,6 @@ body {
   letter-spacing: .6px; text-transform: uppercase; font-weight: 700;
 }
 .tb-idx { color: var(--accent); }
-.tb-dot-sep { opacity: .5; }
 .tb-slug { color: var(--fg); }
 .tb-dots { display: inline-flex; gap: 0; align-items: center; margin-left: 8px; }
 .tb-dot {
@@ -1242,12 +1212,6 @@ body {
 .log-detail-table .wrap { white-space: normal; overflow-wrap: anywhere; }
 
 /* ═══ 动效 ═════════════════════════════════════════════════════ */
-/* 视图切换：淡入上移 */
-.view-anim { animation: viewIn .28s cubic-bezier(.22, .9, .36, 1); }
-@keyframes viewIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 .view-pane[hidden] { display: none !important; }
 .view-host { min-width: 0; }
 
@@ -1295,14 +1259,6 @@ body {
 }
 .dist-chart-foot b { color: var(--fg); font-weight: 500; }
 
-/* 卡片错落入场 */
-.view-anim > .box, .view-anim > .stat-grid, .view-anim > * > .box {
-  animation: cardIn .4s cubic-bezier(.22, .9, .36, 1) both;
-}
-.view-anim > *:nth-child(2), .view-anim > * > .box:nth-child(2) { animation-delay: .05s; }
-.view-anim > *:nth-child(3), .view-anim > * > .box:nth-child(3) { animation-delay: .1s; }
-.view-anim > *:nth-child(4), .view-anim > * > .box:nth-child(4) { animation-delay: .15s; }
-.view-anim > *:nth-child(5), .view-anim > * > .box:nth-child(5) { animation-delay: .2s; }
 @keyframes cardIn {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1324,13 +1280,8 @@ body {
 }
 .login-wrap .card-title { font-size: 15px; letter-spacing: 2px; color: var(--ink); }
 
-/* 窄屏：机柜单元压缩 */
-@media (max-width: 1080px) {
-  .rack-units { grid-template-columns: repeat(5, 1fr); }
-}
 @media (max-width: 720px) {
   .main { padding: 0 12px 60px; }
-  .rack-units { grid-template-columns: repeat(3, 1fr); gap: 6px; }
 }
 
 /* ═══ 移动端适配 ═══════════════════════════════════════════════ */
@@ -1384,10 +1335,6 @@ button, a, input, select, textarea {
   .tb-meta { gap: 8px; font-size: 9.5px; }
   .tb-sub { font-size: 10.5px; }
   .sidenav-toggle { width: 40px; height: 40px; font-size: 16px; }
-
-  .rack { padding-top: 14px; }
-  .rack-units { gap: 6px; }
-  .rack-unit { padding: 8px 6px 6px; }
 
   /* iOS 聚焦不缩放；触控目标不小于 40px */
   input, select, textarea,
@@ -1506,20 +1453,6 @@ select:focus-visible, textarea:focus-visible {
 }
 
 @media (max-width: 640px) {
-  /* 机柜：3×3 → 单行横向滚动，保留 CloseRouter 识别特征 */
-  .rack { padding: 10px 0 0; }
-  .rack-units {
-    display: flex; grid-template-columns: none; gap: 6px;
-    overflow-x: auto; scroll-snap-type: x proximity;
-    -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
-    padding-bottom: 4px; scrollbar-width: none;
-  }
-  .rack-units::-webkit-scrollbar { display: none; }
-  .rack-unit {
-    flex: 0 0 82px; min-width: 82px; scroll-snap-align: center; padding: 8px 6px;
-  }
-  .rack-link { display: none; }
-
   /* 用量时序图：固定读图宽度，横向滑动看刻度 */
   .uschart-body {
     overflow-x: auto; -webkit-overflow-scrolling: touch;
@@ -1533,7 +1466,6 @@ select:focus-visible, textarea:focus-visible {
   }
 
   /* 宽表：保留可读列宽，交给 .tbl-wrap 横向滚动 */
-  .tbl.tbl-logs { min-width: 1100px; }
   .tbl.tbl-models { min-width: 980px; }
   .tbl.tbl-accounts { min-width: 820px; }
   .tbl.tbl-locks { min-width: 640px; }
@@ -1586,7 +1518,6 @@ select:focus-visible, textarea:focus-visible {
 /* 375px：顶栏只留页码/页面名、刷新和菜单 */
 @media (max-width: 480px) {
   .topbar .tb-meta .meta,
-  .topbar .tb-dot-sep { display: none; }
   .tb-meta { gap: 6px 8px; }
   .tb-title { font-size: 18px; }
 }

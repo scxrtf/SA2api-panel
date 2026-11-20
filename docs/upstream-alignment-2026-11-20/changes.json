@@ -1,0 +1,207 @@
+{
+  "schema": "workbuddy.alignment-changes.v1",
+  "created_at": "2026-11-20T03:49:23.946Z",
+  "workspace": "C:\\Users\\16321\\Downloads\\workbuddy2api-panel-main\\wb2api-next",
+  "backup": ".codex-backup/alignment-20261120-110929",
+  "files": [
+    {
+      "path": "src/lib/login.ts",
+      "kind": "modified",
+      "before_sha256": "decf2f2ff7179588646c27e4034fce9b6701c81b20c369cc543fe974c1848d1d",
+      "after_sha256": "1d8577a2e9e70df1f938f244bff5e0e1bdae94714aff4cf5e35cb82397d6b616",
+      "before_bytes": 2919,
+      "after_bytes": 6849,
+      "backup": "src/lib/login.ts"
+    },
+    {
+      "path": "src/lib/config.ts",
+      "kind": "modified",
+      "before_sha256": "54a7e28409b5c737fc96865dc818b79685a7fec81627b0be4ee6b599272314fe",
+      "after_sha256": "03a1bb63dad8e0e42335210ddf040af0c2ff92e65964d977c571c5a42d1d17a5",
+      "before_bytes": 14379,
+      "after_bytes": 15647,
+      "backup": "src/lib/config.ts"
+    },
+    {
+      "path": "src/lib/upstream/client.ts",
+      "kind": "modified",
+      "before_sha256": "b2848f65618356c5b0632dcfe59c24b72f6dfab4861c60562257ee1190b6b247",
+      "after_sha256": "7006a9bbf15315d580e78cf8f2c1d4e509592de67be817d92919ed8de8d05075",
+      "before_bytes": 40002,
+      "after_bytes": 39961,
+      "backup": "src/lib/upstream/client.ts"
+    },
+    {
+      "path": "src/lib/upstream/agenttool.ts",
+      "kind": "modified",
+      "before_sha256": "dd53703c8883eacfbcf38e40bc388372f89c9dfc07fb0a54ff07c6fca6743bcd",
+      "after_sha256": "148e42d3f560d447f12eedf9b0f7737d33cdc3cfffef856be404cd3860aad6ab",
+      "before_bytes": 3659,
+      "after_bytes": 8184,
+      "backup": "src/lib/upstream/agenttool.ts"
+    },
+    {
+      "path": "src/app/api/panel/login/start/route.ts",
+      "kind": "modified",
+      "before_sha256": "e49c93bf64bac6eb7d1ccec3b9ccee9810f7267334f26af507d6885e4d31faa2",
+      "after_sha256": "a9015681cf8ac34dfe7ffa916e85f01745b3004c7d772421c063e90e57760ce2",
+      "before_bytes": 1932,
+      "after_bytes": 2256,
+      "backup": "src/app/api/panel/login/start/route.ts"
+    },
+    {
+      "path": "src/app/api/panel/login/poll/route.ts",
+      "kind": "modified",
+      "before_sha256": "2f6d74202410e163eb1ca6605dfefd94e043388b2292526aecf5d61896977451",
+      "after_sha256": "c084b1df0d9781cfc040a6ad96ef75183d6f7d7aebe2bafa9c1c529aa0e5d8be",
+      "before_bytes": 6446,
+      "after_bytes": 7813,
+      "backup": "src/app/api/panel/login/poll/route.ts"
+    },
+    {
+      "path": "src/app/api/v1/search/route.ts",
+      "kind": "modified",
+      "before_sha256": "13cbde180e76ccb5f4050387c5adcfae415756152d333027d8578bc6ff974dba",
+      "after_sha256": "6bdc6b397fbe2a97a9d20f792f70e3700d80cc48f2bd2c52ac707e9b84b8b28a",
+      "before_bytes": 2736,
+      "after_bytes": 4572,
+      "backup": "src/app/api/v1/search/route.ts"
+    },
+    {
+      "path": "src/app/api/v1/fetch/route.ts",
+      "kind": "modified",
+      "before_sha256": "87d002108b603032963426843bb98431665af0e49c5caa4dd3a18227594826c4",
+      "after_sha256": "b41e31dae7cdb5f2aad6a9ac11073d4225873832096693f85ff362fedc0e5122",
+      "before_bytes": 3391,
+      "after_bytes": 5124,
+      "backup": "src/app/api/v1/fetch/route.ts"
+    },
+    {
+      "path": "scripts/agenttool-upstream.test.mts",
+      "kind": "modified",
+      "before_sha256": "e5f89ea6b56356113f63d722ed145b31b5bc7544481bbfef6eef3516622d7fb4",
+      "after_sha256": "d1e4c379f301bd24adaaea565ddcfadcc242801a0c2e0c42b21db4132925ecc9",
+      "before_bytes": 1605,
+      "after_bytes": 2236,
+      "backup": "scripts/agenttool-upstream.test.mts"
+    },
+    {
+      "path": "package.json",
+      "kind": "modified",
+      "before_sha256": "0269bd50fdefa4b347c999f7df5482ad2857d0ecf6d7834e8618735edc52ed52",
+      "after_sha256": "d6f4c41e0b75e8a17223269f7bd27edb369b1c4aea44ed05aa0ffa621d2dc302",
+      "before_bytes": 1819,
+      "after_bytes": 2031,
+      "backup": "package.json"
+    },
+    {
+      "path": "README.md",
+      "kind": "modified",
+      "before_sha256": "5bed385817014e939a6f3b95f4c2588568f3ff98aa5acdae359917bbedfd8967",
+      "after_sha256": "e1e8ad2ce7125e2a367d1b39d761a05ec3cb14fa1ea7fef59834f50f21b6cde1",
+      "before_bytes": 9594,
+      "after_bytes": 9717,
+      "backup": "README.md"
+    },
+    {
+      "path": "REVIEW.md",
+      "kind": "modified",
+      "before_sha256": "5532013e22e84f3578239803c71571d563e9a00ad43db1638c83afeda8ded644",
+      "after_sha256": "2f9490030f429015126a469c47fa2d7e8ab5f7276fe34732d9d3cd23de0a0060",
+      "before_bytes": 14930,
+      "after_bytes": 15282,
+      "backup": "REVIEW.md"
+    },
+    {
+      "path": "src/lib/upstream/privacy.ts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "f969a95d0371586a409c82d35146b990f715bbf277db759ecc94373b9c72541e",
+      "before_bytes": 0,
+      "after_bytes": 2328,
+      "backup": null
+    },
+    {
+      "path": "scripts/workbuddy-login.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "000349f954519f15fa4a5b751d8bf2ab21425806da00befd35e055f67f7a300f",
+      "before_bytes": 0,
+      "after_bytes": 12821,
+      "backup": null
+    },
+    {
+      "path": "scripts/workbuddy-privacy.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "1f037b4309bb9a6ccccf92b36fd264ff11463adfe79c06f9f79288d6949833fd",
+      "before_bytes": 0,
+      "after_bytes": 4798,
+      "backup": null
+    },
+    {
+      "path": "scripts/workbuddy-agenttool.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "5e0d2b6f19ddbdb670c3f576e19ff751f37ec31fc8376f5ed411fb283504f4f3",
+      "before_bytes": 0,
+      "after_bytes": 12647,
+      "backup": null
+    },
+    {
+      "path": "scripts/official-egress-alignment.test.mts",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "ff14dfd2dab854082970c907ca297917e39eb62daaf181a3cae0a6a2a10b5d4e",
+      "before_bytes": 0,
+      "after_bytes": 7076,
+      "backup": null
+    },
+    {
+      "path": "UPSTREAM_ALIGNMENT.md",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "d15deb0ba7a6e9fabc95c8edc059586bb9d534a56bd21e8b193ddc079052179d",
+      "before_bytes": 0,
+      "after_bytes": 7785,
+      "backup": null
+    },
+    {
+      "path": "docs/upstream-alignment-2026-11-20/login-evidence.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "39b3f587c9706ae7ccdaf5040861166b88d635acfe92f09e86aefb60be4274ea",
+      "before_bytes": 0,
+      "after_bytes": 26076,
+      "backup": null
+    },
+    {
+      "path": "docs/upstream-alignment-2026-11-20/privacy-evidence.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "6d8b0a82cdd32f598c5898744a8b75c382ad1314163889e1b885e886976f0c5a",
+      "before_bytes": 0,
+      "after_bytes": 2854,
+      "backup": null
+    },
+    {
+      "path": "docs/upstream-alignment-2026-11-20/agenttool-evidence.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "3307ca5d71ccabd6c0a007d566a1f5f6aae51a77431b24fcde4ab1c2d1036ebc",
+      "before_bytes": 0,
+      "after_bytes": 12836,
+      "backup": null
+    },
+    {
+      "path": "docs/upstream-alignment-2026-11-20/verification.json",
+      "kind": "added",
+      "before_sha256": null,
+      "after_sha256": "c77edd7c5526b2e80de81ba7600b36bbb8e4bfdb27343e8ce627457516377122",
+      "before_bytes": 0,
+      "after_bytes": 2411,
+      "backup": null
+    }
+  ],
+  "note": "Source/config files only; generated build/type caches have separate recorded preimages. This file's self-hash lives in the local restore manifest."
+}

@@ -23,7 +23,7 @@ interface Field {
 }
 
 const SERVICE: Field[] = [
-  { key: "api_key", label: "API 密钥", type: "password", hint: "留空 = 不鉴权（立即生效，含面板自身）" },
+  { key: "api_key", label: "API 密钥", type: "password", hint: "管理面板必须配置主密钥；WB2A_API_KEY 环境变量优先生效" },
   { key: "package_detail_limit", label: "单账号明细默认展示条数", type: "number", hint: "积分构成页按最早到期展示，其余未用完包聚合" },
 ];
 

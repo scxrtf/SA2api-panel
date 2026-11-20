@@ -7,6 +7,7 @@ import { idleMonitorBody } from "./idle";
 import { prepareBodyOpt, ensureConsoleSystem, globalEffortMap, realmKey } from "./payload";
 import { effortsSnapshot as catalogEffortsSnapshot } from "./modelCatalog";
 import { officialEgress } from "./official-egress";
+import { privateDataHeader } from "./privacy";
 
 // 端点常量（realm 感知）
 export const CHAT_BASE_CN = "https://www.workbuddy.cn";
@@ -43,6 +44,9 @@ export interface AuthShape {
   domain: string;
   enterpriseId: string;
   deviceToken: string;
+  /** Native account edition when available; legacy records may omit it. */
+  accountType?: string;
+  type?: string;
 }
 
 export const isGlobal = (a: AuthShape) => a.realm === "global";
@@ -68,14 +72,30 @@ export function needsRefresh(a: AuthShape, skewSec: number): boolean {
 }
 
 // 会话头族 ID（形态对齐上游 issue #51 真机取证，见上游 internal/session/ids.go）：
-// - newMessageID：32 hex，前 12 hex 为毫秒时间戳（官方 X-Request-ID /
-//   X-Conversation-Message-ID 前 48 bit 是毫秒时间、同会话严格单调；纯随机构成
-//   可聚类批次特征）。
+// - newMessageID：去横线的 UUIDv7；48-bit 毫秒时间 + version/variant +
+//   42-bit 单调计数 + 32-bit 随机尾段（本机 5.9.3 内嵌 CLI 的形态）。
 // - newConversationID：UUID v4 带横线 36 字符（官方 X-Conversation-ID 形态），
 //   只给网关自建会话用；真实用户会话必须透传客户端声明的 conversationId。
 // - newTraceID / newSpanID：纯随机（官方 X-Trace-ID / X-B3-SpanId 与 request id 无关）。
+const idGlobals = globalThis as unknown as { __wbMessageId?: { ms: number; counter: number } };
 export function newMessageID(): string {
-  return Date.now().toString(16).padStart(12, "0") + randomBytes(10).toString("hex");
+  const random = randomBytes(16);
+  const now = Date.now();
+  const state = idGlobals.__wbMessageId ?? { ms: -1, counter: 0 };
+  if (now > state.ms || now + 10_000 < state.ms) {
+    state.ms = now;
+    state.counter = random.readUInt32BE(0) * 1024 + (random.readUInt16BE(4) & 1023);
+  } else if (++state.counter > 0x3ffffffffff) {
+    state.ms++;
+    state.counter = 0;
+  }
+  idGlobals.__wbMessageId = state;
+  random.writeUIntBE(state.ms, 0, 6);
+  const high = Math.floor(state.counter / 0x40000000);
+  random[6] = 0x70 | (high >>> 8);
+  random[7] = high & 0xff;
+  random.writeUInt32BE(((state.counter % 0x40000000) | 0x80000000) >>> 0, 8);
+  return random.toString("hex");
 }
 
 export function newConversationID(): string {
@@ -106,7 +126,7 @@ function deriveAccountStableID(uid: string, purpose: string): string {
 }
 
 function validTraceID(s: string): boolean {
-  return /^[0-9a-fA-F]{16}$/.test(s) || /^[0-9a-fA-F]{32}$/.test(s);
+  return (/^[0-9a-fA-F]{16}$/.test(s) || /^[0-9a-fA-F]{32}$/.test(s)) && !/^0+$/.test(s);
 }
 
 export interface ChatMeta {
@@ -117,7 +137,7 @@ export interface ChatMeta {
 }
 
 // 请求头构造
-function clientVersion(cfg: AppConfig, a: AuthShape): string {
+export function clientVersion(cfg: AppConfig, a: AuthShape): string {
   if (cfg.client_version) return cfg.client_version;
   return isGlobal(a) ? DEFAULT_CLIENT_VERSION_GLOBAL : DEFAULT_CLIENT_VERSION_CN;
 }
@@ -126,10 +146,7 @@ function cliVersion(cfg: AppConfig): string {
 }
 
 function userAgent(cfg: AppConfig, a: AuthShape): string {
-  if (cfg.user_agent) return cfg.user_agent;
-  const version = clientVersion(cfg, a);
-  const brand = isGlobal(a) ? "workbuddy-ai" : "WorkBuddy";
-  return `WorkBuddy/${version} ${brand}/${version} CLI/${cliVersion(cfg)}`;
+  return rpcUserAgent(cfg, a);
 }
 
 export function commonHeaders(cfg: AppConfig, a: AuthShape): Record<string, string> {
@@ -203,17 +220,17 @@ function injectConversationHeaders(h: Record<string, string>, uid: string, meta:
   const messageID = newMessageID();
   if (meta.conversationID) h["X-Conversation-ID"] = meta.conversationID;
   else if (cacheKeySource(meta)) h["X-Conversation-ID"] = buildStableUUID(uid, cacheKeySource(meta));
-  else h["X-Conversation-ID"] = newMessageID();
+  else h["X-Conversation-ID"] = newConversationID();
   h["X-Conversation-Request-ID"] = convReqID;
   h["X-Conversation-Message-ID"] = messageID;
   h["X-Request-ID"] = messageID;
   h["X-Root-Request-ID"] = convReqID;
   // X-Trace-ID 与 request id 互不回落（上游 issue #51 真机实测两族恒不相等）；
   // 入站透传值优先，否则独立随机。
-  const traceID = meta.traceID || newTraceID();
+  const traceID = validTraceID(meta.traceID) ? meta.traceID.toLowerCase() : newTraceID();
   h["X-Trace-ID"] = traceID;
   // B3 跟随 trace（官方 X-B3-TraceId == X-Trace-ID）；透传值非法时回落恒 32 hex 的消息级 ID。
-  const b3Trace = validTraceID(traceID) ? traceID : messageID;
+  const b3Trace = traceID;
   h["X-B3-TraceId"] = b3Trace;
   // SpanId / ParentSpanId 独立随机（官方 span 与 trace/request 均无关系；
   // 不能切片 messageID——那会带出 12 hex 时间前缀）。
@@ -224,7 +241,7 @@ function injectConversationHeaders(h: Record<string, string>, uid: string, meta:
   h["X-B3-Sampled"] = "1";
   // B3 单头与 W3C traceparent：官方两版都双发，客户端从不只发 X-B3-* 三件套。
   h["b3"] = `${b3Trace}-${spanID}-1-${parentSpanID}`;
-  h["traceparent"] = `00-${b3Trace}-${spanID}-01`;
+  h["traceparent"] = `00-${b3Trace.padStart(32, "0")}-${spanID}-01`;
   // acp-connection-id：官方与 X-Conversation-ID 同批设置（会话注册表 acpConnectionId，
   // 每 session 一次、同会话稳定、与会话 ID 不同值）。按「同 (账号,会话) 稳定」派生。
   h["acp-connection-id"] = cacheKeySource(meta)
@@ -282,7 +299,7 @@ export function chatHeaders(
   if (!isGlobal(a) && a.enterpriseId) h["X-Enterprise-Id"] = a.enterpriseId;
   h["X-Domain"] = new URL(chatBase(a)).host;
   injectAttribution(h, cfg, a);
-  h["X-Private-Data"] = a.enterpriseId || isGlobal(a) ? "true" : "false";
+  h["X-Private-Data"] = privateDataHeader(cfg, a);
   injectIdentityHeaders(h, a);
   if (cfg.passthrough_ip && clientIP) {
     h["X-Forwarded-For"] = clientIP;

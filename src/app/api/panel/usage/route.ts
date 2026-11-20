@@ -44,7 +44,7 @@ export async function GET(req: Request) {
       new Map(accounts.map((a) => [a.uid, a.nickname])),
       { dayScope, groupDim, windowFrom, windowTo },
     );
-  });
+  }, q.get("refresh") === "1");
   return ok(snapshot);
 }
 

@@ -3,8 +3,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-import { verifyAny } from "@/lib/auth-guard";
+import { identifyKeyIdentity } from "@/lib/auth-guard";
 import { handleChat, openAIError } from "@/lib/chat";
+import { isJSONObject, chatRequestError } from "@/lib/request-validation";
+import { observeGateway } from "@/lib/workspace/gateway-observer";
 
 function clientIP(req: Request): string {
   const xff = req.headers.get("x-forwarded-for");
@@ -13,21 +15,26 @@ function clientIP(req: Request): string {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  if (!(await verifyAny(req))) {
+  const identity = await identifyKeyIdentity(req);
+  if (!identity) {
     return openAIError(401, "invalid_api_key", "invalid or missing api key");
   }
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    const parsed: unknown = await req.json();
+    if (!isJSONObject(parsed)) return openAIError(400, "invalid_request", "JSON body must be an object");
+    body = parsed;
   } catch {
     return openAIError(400, "invalid_request", "invalid JSON body");
   }
-  return handleChat({
+  const validationError = chatRequestError(body);
+  if (validationError) return openAIError(400, "invalid_request", validationError);
+  return observeGateway(req, body, "chat", identity, () => handleChat({
     body,
     clientIP: clientIP(req),
     inboundHeaders: req.headers,
     ua: req.headers.get("user-agent") ?? "",
     path: "/v1/chat/completions",
     req,
-  });
+  }));
 }

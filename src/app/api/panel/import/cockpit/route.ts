@@ -11,6 +11,7 @@ import { globalCompleteRegistration } from "@/lib/upstream/global_register";
 import { runlogAccount } from "@/lib/runlog";
 import { label } from "@/lib/logfmt";
 import { authorizeMachineForAccount, getOrCreateMachineId } from "@/lib/machine-key";
+import { isJSONObject } from "@/lib/request-validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,13 @@ interface CockpitAccount {
   domain?: string;
 }
 
+function validAccountShape(value: unknown): value is CockpitAccount {
+  if (!isJSONObject(value)) return false;
+  const textFields = ["id", "email", "uid", "nickname", "access_token", "refresh_token", "domain"];
+  if (textFields.some((field) => value[field] != null && typeof value[field] !== "string")) return false;
+  return value.expires_at == null || (typeof value.expires_at === "number" && Number.isSafeInteger(value.expires_at));
+}
+
 function realmOf(domain: string): string {
   return /workbuddy\.ai/i.test(domain ?? "") ? "global" : "cn";
 }
@@ -35,16 +43,16 @@ export async function POST(req: Request) {
   const auth = await panelAuth(req);
   if (auth) return auth;
 
-  let accounts: CockpitAccount[];
+  let accounts: unknown[];
   const ct = req.headers.get("content-type") ?? "";
   try {
     if (ct.includes("multipart/form-data")) {
       const form = await req.formData();
       const f = form.get("file");
       if (!f || typeof f === "string") return fail(400, "missing file field");
-      accounts = JSON.parse(await f.text()) as CockpitAccount[];
+      accounts = JSON.parse(await f.text()) as unknown[];
     } else {
-      accounts = (await req.json()) as CockpitAccount[];
+      accounts = (await req.json()) as unknown[];
     }
   } catch (e) {
     return fail(400, "invalid json: " + (e instanceof Error ? e.message : String(e)));
@@ -59,7 +67,12 @@ export async function POST(req: Request) {
   const errs: string[] = [];
   runlogAccount("导入开始", "total=" + accounts.length);
 
-  for (const acc of accounts) {
+  for (const [index, acc] of accounts.entries()) {
+    if (!validAccountShape(acc)) {
+      skipped++;
+      errs.push("invalid account fields (index=" + index + ")");
+      continue;
+    }
     const uid = (acc.uid ?? "").trim();
     const at = (acc.access_token ?? "").trim();
     const rt = (acc.refresh_token ?? "").trim();
