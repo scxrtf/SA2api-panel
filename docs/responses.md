@@ -54,7 +54,14 @@ supports_websockets = false
 
 两条路径均使用 HTTP / SSE；没有 WebSocket 监听。兼容层只转换协议，实际识图、JSON Schema 约束和推理能力取决于所选模型。自定义工具在 Chat 通道用 `{ "input": "…" }` 函数参数桥接；自定义语法作为模型提示传入，不由网关执行。请求体与兼容层重放窗口上限为 8 MiB。
 
-### 配置原生通道
+## 遇到 HTTP 405
+
+- 创建响应使用 `POST /api/v1/responses`，查询模型使用 `GET /api/v1/models`；不要用浏览器地址栏的 GET 请求判断 Responses 生成是否可用。
+- SDK、Codex 和自定义 provider 的 Base URL 推荐填到 `/api/v1`（或 `/v1`）。如果客户端在已粘贴的完整接口地址后再拼接 `/responses` 或 `/v1/responses`，新版网关会兼容这些路径，仍走同一鉴权和请求处理。
+- Codex 使用 `supports_websockets = false`，流式请求走 HTTP POST + SSE。正在运行 `next start` 的实例须构建并重启新版，单独更新源文件不会更新旧的生产路由。
+- 收到 `responses_upstream_method_not_allowed`（HTTP 502）时，405 来自配置的原生上游，而非网关路由。核对 `WB2A_RESPONSES_UPSTREAM` 是否支持所调操作；仅提供 Chat Completions 的服务应走 Chat 兼容通道。
+
+## 配置原生通道
 
 | 环境变量 | 作用 |
 |---|---|

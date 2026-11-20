@@ -1,4 +1,5 @@
 import { panelAuth, fail } from "@/lib/panel-auth";
+import { responsesCollectionPath } from "@/lib/responses-native";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -26,7 +27,19 @@ export async function POST(
 
   const base = (req.headers.get("X-Target-Base-URL") ?? "").trim().replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(base)) return fail(400, "X-Target-Base-URL invalid");
-  const target = base + suffix;
+  let target = base + suffix;
+  if (kind === "responses") {
+    try {
+      const url = new URL(base);
+      if (url.username || url.password || url.search || url.hash) return fail(400, "X-Target-Base-URL invalid");
+      // Preserve the checker's existing origin-only default (/responses).
+      // HTTP/HTTPS targets and the panel authentication boundary are unchanged.
+      url.pathname = responsesCollectionPath(url.pathname, "");
+      target = url.href;
+    } catch {
+      return fail(400, "X-Target-Base-URL invalid");
+    }
+  }
 
   const preset = req.headers.get("X-Header-Preset") ?? "default";
   const headers = presetHeaders(preset);
@@ -43,6 +56,10 @@ export async function POST(
   const body = await req.text();
   try {
     let resp = await post(target, body, headers);
+    if (kind === "responses" && resp.status === 405) {
+      void resp.body?.cancel().catch(() => undefined);
+      return fail(502, "目标上游对 Responses POST 返回 HTTP 405；请核对上游地址和协议。");
+    }
     resp = await adaptMaxTokens(resp, target, body, headers, suffix);
     const raw = await resp.arrayBuffer();
     return new Response(raw, {

@@ -102,29 +102,63 @@ try {
   assert.ok(ready, output);
   const send = (path: string, method = "GET", body?: Obj) => fetch(gateway + path, {
     method, headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10_000),
+    body: body === undefined ? undefined : JSON.stringify(body), redirect: "error", signal: AbortSignal.timeout(10_000),
   });
   const modelList = await send("/v1/models");
   assert.equal(modelList.status, 200);
   assert.ok((await modelList.json()).data.some((model: Obj) => model.id === modelId));
+
+  // Commonly pasted Base URLs: clients append /responses (some append
+  // /v1/responses). Exercise real Next routing so the dynamic [id] handler's
+  // automatically generated POST 405 cannot regress.
+  for (const path of [
+    "/api/v1/responses/responses", "/v1/responses/responses", "/v1/responses/responses/",
+    "/api/v1/responses/v1/responses", "/v1/responses/v1/responses",
+    "/api/v1/chat/completions/responses", "/api/v1/chat/completions/v1/responses",
+    "/api/v1/v1/responses", "/v1/v1/responses", "/responses", "/api/responses",
+  ]) {
+    const alias = await send(path, "POST", { model: modelId, input: "alias smoke", store: false });
+    const payload = await alias.json().catch(() => null);
+    assert.equal(alias.status, 200, path + ": " + JSON.stringify(payload));
+    assert.equal(payload.output[0].content[0].text, "responses e2e ok");
+  }
+  for (const path of ["/models", "/api/v1/responses/models", "/v1/responses/v1/models"]) {
+    const catalog = await send(path);
+    assert.equal(catalog.status, 200, path);
+    assert.ok((await catalog.json()).data.some((model: Obj) => model.id === modelId));
+  }
+  const unsigned = await fetch(gateway + "/api/v1/responses/responses", {
+    method: "POST", body: "{}", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(unsigned.status, 401);
+  assert.equal((await unsigned.json()).error.code, "invalid_api_key");
+  const wrongMethod = await send("/v1/responses");
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get("allow"), "POST, OPTIONS");
+  assert.equal((await wrongMethod.json()).error.code, "method_not_allowed");
+  const preflight = await send("/api/v1/responses/responses", "OPTIONS");
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("allow"), "POST, OPTIONS");
+
   const reply = await send("/v1/responses", "POST", { model: modelId, input: "smoke test" });
   const result = await reply.json();
   assert.equal(reply.status, 200, JSON.stringify(result));
   assert.equal(result.output[0].content[0].text, "responses e2e ok");
   const lookup = await send(`/api/v1/responses/${result.id}`);
   assert.deepEqual(await lookup.json(), result);
-  const inputs = await send(`/v1/responses/${result.id}/input_items?limit=1`);
+  const inputs = await send(`/v1/responses/responses/${result.id}/input_items?limit=1`);
   assert.equal((await inputs.json()).data[0].content[0].text, "smoke test");
   const deleted = await send(`/v1/responses/${result.id}`, "DELETE");
   assert.equal((await deleted.json()).deleted, true);
   assert.equal((await send(`/v1/responses/${result.id}`)).status, 404);
   assert.equal(rows.size, 0);
-  const stream = await send("/api/v1/responses", "POST", { model: modelId, input: "stream smoke", stream: true, store: false });
+  const stream = await send("/api/v1/responses/responses", "POST", { model: modelId, input: "stream smoke", stream: true, store: false });
   assert.equal(stream.status, 200);
   assert.match(await stream.text(), /response\.output_text\.delta.*responses e2e ok.*response\.completed/s);
-  console.log(`PASS Next ${development ? "development" : "production"} HTTP aliases, CloudBase-style REST storage, retrieve/list/delete, and Responses SSE`);
+  console.log(`PASS Next ${development ? "development" : "production"} Responses 405 regressions, HTTP aliases, auth, storage, retrieve/list/delete, and SSE`);
 
   if (process.env.WB2A_TEST_CODEX === "1") {
+    const beforeCodex = chatCalls;
     const binary = findCodex();
     assert.ok(binary, "Codex CLI is required for WB2A_TEST_CODEX=1");
     home = await mkdtemp(join(tmpdir(), "wb2a-responses-codex-"));
@@ -133,7 +167,8 @@ try {
     await writeFile(join(home, "config.toml"), [
       `model = "${modelId}"`, 'model_provider = "fixture"', 'web_search = "disabled"',
       'sandbox_mode = "read-only"', 'approval_policy = "never"',
-      "[model_providers.fixture]", 'name = "Local gateway QA"', `base_url = "${gateway}/v1"`, 'wire_api = "responses"',
+      // Deliberately paste the full endpoint: the real CLI appends /responses.
+      "[model_providers.fixture]", 'name = "Local gateway QA"', `base_url = "${gateway}/v1/responses"`, 'wire_api = "responses"',
       'env_key = "WB2A_TEST_GATEWAY_KEY"', 'requires_openai_auth = false', 'supports_websockets = false', 'stream_max_retries = 0',
       "[analytics]", "enabled = false", "",
     ].join("\n"));
@@ -147,7 +182,7 @@ try {
     const events = stdout.split(/\r?\n/).filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
     assert.ok(events.some(({ type }) => type === "turn.completed"), stdout);
     assert.ok(events.some(({ item }) => item?.text === "responses e2e ok"), stdout);
-    assert.equal(chatCalls, 3);
+    assert.equal(chatCalls, beforeCodex + 1);
     console.log("PASS installed Codex CLI completed a real turn through the Chat-backed Responses endpoint");
   }
   assert.deepEqual(errors, []);

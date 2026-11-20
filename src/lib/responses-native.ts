@@ -9,12 +9,22 @@ import { rememberResponse, responseDigest } from "./responses-state";
 
 export type ResponsesOperation = "responses" | "compact" | "input_tokens" | "retrieve" | "delete" | "cancel" | "input_items";
 
+// A configured base can itself be a pasted API endpoint. Only strip known
+// terminal segments; a custom prefix (including earlier /responses) is part
+// of the provider's address and must not be reinterpreted.
+export function responsesCollectionPath(pathname: string, defaultBase = "/v1"): string {
+  const path = pathname.replace(/\/+$/, "");
+  const collection = path.replace(/(\/responses)(?:(?:\/v1)?\/responses)*(?:\/(?:compact|input_tokens))?$/, "$1");
+  if (collection.endsWith("/responses")) return collection;
+  if (path.endsWith("/chat/completions")) return path.slice(0, -"/chat/completions".length) + "/responses";
+  return (path || defaultBase) + "/responses";
+}
+
 export function responsesEndpoint(base: string, operation: ResponsesOperation, id?: string) {
   const url = new URL(base);
   if (!(url.protocol === "https:" || (url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))
       || url.username || url.password || url.search || url.hash) throw new Error("Invalid Responses upstream");
-  const path = url.pathname.replace(/\/+$/, "");
-  url.pathname = path.endsWith("/responses") ? path : (path || "/v1") + "/responses";
+  url.pathname = responsesCollectionPath(url.pathname);
   switch (operation) {
     case "responses": break;
     case "compact": case "input_tokens": url.pathname += "/" + operation; break;
@@ -130,6 +140,11 @@ export async function relayNativeResponses(req: Request, cfg: NativeConfig, oper
   }
   const safeHeaders = chatResponseHeaders(upstream);
   const cancelBody = () => { void upstream.body?.cancel().catch(() => undefined); };
+  if (upstream.status === 405) {
+    cancelBody();
+    return responsesError(new ResponsesError(502, "responses_upstream_method_not_allowed",
+      `The native Responses provider returned HTTP 405 for ${method}. Verify WB2A_RESPONSES_UPSTREAM supports the requested Responses operation.`), safeHeaders);
+  }
   if ((upstream.status >= 300 && upstream.status < 400) || upstream.status === 401 || upstream.status === 403) {
     cancelBody();
     return responsesError(new ResponsesError(502, "responses_upstream_configuration", "The Responses provider rejected the gateway configuration."), safeHeaders);
