@@ -32,8 +32,8 @@ function withEnv(t: TestContext, env: Record<string, string>) {
   });
 }
 
-function assertNativeRequirement(overrides: ResponseObject, param: RegExp) {
-  assert.throws(() => prepare(overrides), (error) => {
+async function assertNativeRequirement(overrides: ResponseObject, param: RegExp) {
+  await assert.rejects(() => prepare(overrides), (error) => {
     assert.ok(error instanceof ResponsesError);
     assert.equal(error.status, 400);
     assert.equal(error.code, "unsupported_parameter");
@@ -43,12 +43,12 @@ function assertNativeRequirement(overrides: ResponseObject, param: RegExp) {
   });
 }
 
-test("the WorkBuddy bridge skips optional hosted search without losing Codex's callable tools", () => {
+test("the WorkBuddy bridge skips optional hosted search without losing Codex's callable tools", async () => {
   const functions = Array.from({ length: 16 }, (_, i) => ({ ...fn, name: i === 0 ? "web_search" : "fixture_" + i }));
   const include = ["web_search_call.action.sources", "web_search_call.results", "reasoning.encrypted_content"];
   for (const hosted of hostedTypes) {
     const tools = [...functions, hosted];
-    const { chat, aliases, effectiveBody, omittedWebSearch } = prepare({ tools, include, tool_choice: "auto", stream: true });
+    const { chat, aliases, effectiveBody, omittedWebSearch } = await prepare({ tools, include, tool_choice: "auto", stream: true });
     assert.deepEqual(chat.tools, functions.map(({ name, parameters }) => ({
       type: "function", function: { name, parameters },
     })));
@@ -61,13 +61,54 @@ test("the WorkBuddy bridge skips optional hosted search without losing Codex's c
     assert.deepEqual(effectiveBody.include, ["reasoning.encrypted_content"]);
     assert.deepEqual(tools.at(16), hosted);
   }
-  assert.equal(prepare({ tools: [fn] }).omittedWebSearch, false);
+  assert.equal((await prepare({ tools: [fn] })).omittedWebSearch, false);
 });
 
-test("optional hosted-only declarations allow text, but forced search and replay still fail clearly", () => {
+test("tool result images become a following user message without breaking tool pairing", async () => {
+  const image = "data:image/png;base64,iVBORw0KGgo=";
+  const { chat } = await prepare({ input: [
+    { type: "function_call", id: "fc_fixture", call_id: "call_fixture", name: "lookup", arguments: "{}" },
+    { type: "function_call_output", call_id: "call_fixture", output: [
+      { type: "input_text", text: "Captured image:" },
+      { type: "input_image", image_url: image, detail: "high" },
+      { type: "input_text", text: "Continue from this result." },
+    ] },
+    { role: "user", content: "Describe the image." },
+  ] });
+  assert.deepEqual(chat.messages, [
+    { role: "assistant", content: null, tool_calls: [
+      { id: "call_fixture", type: "function", function: { name: "lookup", arguments: "{}" } },
+    ] },
+    { role: "tool", tool_call_id: "call_fixture", content: "Captured image:Continue from this result." },
+    { role: "user", content: [
+      { type: "text", text: "Image 1 from tool result call_fixture:" },
+      { type: "image_url", image_url: { url: image, detail: "high" } },
+    ] },
+    { role: "user", content: "Describe the image." },
+  ]);
+});
+
+test("parallel tool images stay after all matching tool results", async () => {
+  const output = (id: string) => ({ type: "function_call_output", call_id: id, output: [
+    { type: "input_image", image_url: `data:image/png;base64,${id}` },
+  ] });
+  const { chat } = await prepare({ input: [
+    { type: "function_call", call_id: "call_a", name: "lookup", arguments: "{}" },
+    { type: "function_call", call_id: "call_b", name: "lookup", arguments: "{}" },
+    output("call_a"), output("call_b"),
+  ] });
+  assert.deepEqual(chat.messages.slice(1).map((message) => message.role), ["tool", "tool", "user"]);
+  assert.deepEqual(chat.messages[1].tool_call_id, "call_a");
+  assert.deepEqual(chat.messages[2].tool_call_id, "call_b");
+  assert.equal(chat.messages[3].content.length, 4);
+  assert.match(String(chat.messages[3].content[0].text), /tool result call_a/);
+  assert.match(String(chat.messages[3].content[2].text), /tool result call_b/);
+});
+
+test("optional hosted-only declarations allow text and replayed search is converted to context", async () => {
   for (const hosted of hostedTypes) {
     for (const choice of ["auto", "none"]) {
-      const { chat, aliases, effectiveBody } = prepare({ tools: [hosted], tool_choice: choice });
+      const { chat, aliases, effectiveBody } = await prepare({ tools: [hosted], tool_choice: choice });
       assert.deepEqual(chat.messages, [{ role: "user", content: "hello" }]);
       assert.equal(aliases.size, 0);
       assert.equal(chat.tools, undefined);
@@ -75,20 +116,21 @@ test("optional hosted-only declarations allow text, but forced search and replay
       assert.deepEqual(effectiveBody.tools, []);
       assert.equal(effectiveBody.tool_choice, choice);
     }
-    assertNativeRequirement({ tools: [hosted, fn], tool_choice: { type: hosted.type } }, /^tool_choice/);
-    assertNativeRequirement({ tools: [hosted], tool_choice: "required" }, /^tool_choice/);
+    assert.equal((await prepare({ tools: [hosted, fn], tool_choice: { type: hosted.type } })).chat.tool_choice, "auto");
+    assert.equal((await prepare({ tools: [hosted], tool_choice: "required" })).chat.tool_choice, undefined);
   }
-  const required = prepare({ tools: [webSearch, fn], tool_choice: "required" }).chat;
+  const required = (await prepare({ tools: [webSearch, fn], tool_choice: "required" })).chat;
   assert.equal(required.tool_choice, "required");
-  assertNativeRequirement({ tools: [fn], include: ["web_search_call.action.sources"] }, /^include/);
-  assertNativeRequirement({
+  assert.equal((await prepare({ tools: [fn], include: ["web_search_call.action.sources"] })).chat.messages.length, 1);
+  const history = await prepare({
     input: [{ type: "web_search_call", id: "ws_fixture", status: "completed", action: { type: "search", query: "fixture" } }],
-  }, /^input/);
-  assertNativeRequirement({ tools: [webSearch, { type: "file_search", vector_store_ids: ["vs_fixture"] }] }, /^tools\[1\]/);
-  assertNativeRequirement({
+  });
+  assert.match(String(history.chat.messages[0].content), /fixture/);
+  await assertNativeRequirement({ tools: [webSearch, { type: "file_search", vector_store_ids: ["vs_fixture"] }] }, /^tools\[1\]/);
+  assert.equal((await prepare({
     tools: [webSearch, fn],
     tool_choice: { type: "allowed_tools", mode: "auto", tools: [{ type: "web_search" }] },
-  }, /^tool_choice/);
+  })).chat.tool_choice, "auto");
 });
 
 test("WorkBuddy forwards only callable tools and discloses omitted hosted search in JSON and SSE", async (t) => {

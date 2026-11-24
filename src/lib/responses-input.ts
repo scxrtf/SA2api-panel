@@ -4,30 +4,20 @@ import {
   ResponsesError, unsupportedResponseParam, type ResponseObject as Obj,
 } from "./responses-http";
 import { newResponseId, responseDigest, type ResponsesCodec } from "./responses-state";
+import { expandAttachments } from "./responses-attachments";
 
 export type ResponseTool = { name: string; namespace: string; custom: boolean };
 const functionName = /^[A-Za-z0-9_-]{1,64}$/;
 const prefixes: Record<string, string> = { function_call: "fc", function_call_output: "fco", custom_tool_call: "ctc",
-  custom_tool_call_output: "ctco", reasoning: "rs", compaction: "cmp" };
-const selectedFields = ["temperature", "top_p", "top_logprobs", "parallel_tool_calls", "service_tier", "prompt_cache_key",
+  custom_tool_call_output: "ctco", reasoning: "rs", compaction: "cmp", web_search_call: "ws" };
+const selectedFields = ["temperature", "top_p", "top_logprobs", "parallel_tool_calls", "prompt_cache_key",
   "prompt_cache_retention", "safety_identifier", "user"] as const;
 
 const specified = (value: unknown) => value !== undefined && value !== null;
 const hostedWebSearchTypes = new Set<unknown>(["web_search", "web_search_preview", "web_search_preview_2025_03_11"]);
 const hostedWebSearchIncludes = new Set<unknown>(["web_search_call.action.sources", "web_search_call.results"]);
 
-function requireNativeWebSearch(param: string, reason: string): never {
-  throw new ResponsesError(
-    400, "unsupported_parameter",
-    `${reason} requires a native Responses model. For WorkBuddy, set Codex web_search = "disabled" at the top level and start a new turn without hosted search items.`,
-    param,
-  );
-}
-
 function omitOptionalWebSearch(request: Obj) {
-  if (hostedWebSearchTypes.has(responseObject(request.tool_choice).type)) {
-    requireNativeWebSearch("tool_choice", "Forcing hosted web search");
-  }
   if (!Array.isArray(request.tools)) return { body: request, omittedWebSearch: false };
   const tools = request.tools.filter((tool) => !hostedWebSearchTypes.has(responseObject(tool).type));
   if (tools.length === request.tools.length) return { body: request, omittedWebSearch: false };
@@ -49,11 +39,10 @@ export function normalizeResponseInput(input: unknown, previous: Obj[]): Obj[] {
     const param = `input[${index}]`;
     if (!isJSONObject(raw)) invalidResponseRequest("Each input item must be an object.", param);
     const type = raw.type ?? (raw.role ? "message" : "");
-    if (type === "web_search_call") requireNativeWebSearch(`${param}.type`, "Replaying a hosted web search call");
     if (type === "item_reference") {
       const item = known.get(raw.id);
       if (!item) invalidResponseRequest("The referenced item was not found in this response chain.", `${param}.id`);
-      result.push(item);
+      result.push({ ...item });
       continue;
     }
     if (type === "message") {
@@ -76,10 +65,20 @@ export function normalizeResponseInput(input: unknown, previous: Obj[]): Obj[] {
   return result;
 }
 
-function chatContent(raw: unknown, role: string, param: string) {
+function hostedSearchText(item: Obj) {
+  const action = responseObject(item.action);
+  const results = responseArray(item.results).slice(0, 20).map((entry) => {
+    const result = responseObject(entry);
+    return { title: responseText(result.title), url: responseText(result.url), snippet: responseText(result.snippet ?? result.text).slice(0, 4000) };
+  });
+  const sources = responseArray(item.sources).slice(0, 20).map((entry) => responseText(responseObject(entry).url));
+  return "Hosted web search from an earlier turn:\n" + JSON.stringify({ action, results, sources });
+}
+
+function chatContent(raw: unknown, role: string, param: string, toolImages: Obj[] = []) {
   if (typeof raw === "string") return raw;
   if (!Array.isArray(raw)) invalidResponseRequest("Expected a string or an array of content parts.", param);
-  const parts: Obj[] = raw.map((value, index) => {
+  const parts = raw.map((value, index): Obj | null => {
     const part = responseObject(value);
     const path = `${param}[${index}]`;
     if ((part.type === "input_text" || part.type === "output_text") && typeof part.text === "string") {
@@ -88,12 +87,19 @@ function chatContent(raw: unknown, role: string, param: string) {
     if (part.type === "refusal" && typeof part.refusal === "string") return { type: "text", text: part.refusal };
     if (part.type === "input_image") {
       if (!responseText(part.image_url) || part.file_id != null) unsupportedResponseParam(`${path} (image file_id)`);
+      const image = { type: "image_url", image_url: { url: part.image_url, ...(part.detail == null ? {} : { detail: part.detail }) } };
+      if (role === "tool") {
+        // Chat Completions only permits multimodal content on user messages.
+        // Keep this image as an explicit continuation of the tool result below.
+        toolImages.push(image);
+        return null;
+      }
       if (role !== "user") unsupportedResponseParam(`${path} (image with role ${role})`);
-      return { type: "image_url", image_url: { url: part.image_url, ...(part.detail == null ? {} : { detail: part.detail }) } };
+      return image;
     }
     if (part.type === "input_file") unsupportedResponseParam(path);
     return invalidResponseRequest("Invalid content part for a Chat-backed model.", path);
-  });
+  }).filter((part): part is Obj => part !== null);
   return parts.every((item) => item.type === "text") ? parts.map((part) => part.text).join("") : parts;
 }
 
@@ -147,6 +153,15 @@ function toolDefinitions(raw: unknown) {
 function toChatToolChoice(raw: unknown, tools: Map<string, ResponseTool>): unknown {
   if (raw === "auto" || raw === "none" || raw === "required") return raw;
   const choice = responseObject(raw);
+  if (choice.type === "allowed_tools") {
+    const selected = responseArray(choice.tools).map(responseObject).filter((tool) => tool.type === "function" || tool.type === "custom");
+    if (choice.mode !== "auto" && choice.mode !== "none" && choice.mode !== "required") unsupportedResponseParam("tool_choice.mode");
+    if (selected.length !== 1) return choice.mode === "none" ? "none" : choice.mode === "required" && selected.length ? "required" : "auto";
+    const tool = selected[0];
+    const alias = toolAlias(toolName(tool.name, "tool_choice.tools[0].name"), responseText(tool.namespace));
+    if (tools.get(alias)?.custom !== (tool.type === "custom")) invalidResponseRequest("The requested tool was not declared.", "tool_choice");
+    return { type: "function", function: { name: alias } };
+  }
   if (choice.type !== "function" && choice.type !== "custom") unsupportedResponseParam("tool_choice");
   const alias = toolAlias(toolName(choice.name, "tool_choice.name"), responseText(choice.namespace));
   if (tools.get(alias)?.custom !== (choice.type === "custom")) invalidResponseRequest("The requested tool was not declared.", "tool_choice");
@@ -172,11 +187,20 @@ function chatMessages(input: Obj[], instructions: string, codec: ResponsesCodec)
     assistant = undefined;
   };
   const requireToolResults = () => {
-    if (pending.size) invalidResponseRequest("Each tool call in the input history needs a matching tool output before the next turn.", "input");
+    if (!pending.size) return;
+    for (const callId of pending) messages.push({ role: "tool", tool_call_id: callId, content: "[Tool result unavailable: the previous turn was interrupted.]" });
+    pending.clear();
+  };
+  const toolImages: Obj[][] = [];
+  const emitToolImages = () => {
+    if (!toolImages.length) return;
+    messages.push({ role: "user", content: toolImages.flat() });
+    toolImages.length = 0;
   };
   for (const [i, item] of input.entries()) {
     const path = `input[${i}]`;
     if (item.type === "reasoning") {
+      emitToolImages();
       const encrypted = responseText(item.encrypted_content);
       const reasoning = encrypted ? codec.open("reasoning", encrypted) : responseArray(item.content).map((part) => responseText(responseObject(part).text)).join("");
       if (reasoning) {
@@ -185,6 +209,7 @@ function chatMessages(input: Obj[], instructions: string, codec: ResponsesCodec)
         assistant.reasoning_content = responseText(assistant.reasoning_content) + reasoning;
       }
     } else if (item.type === "function_call" || item.type === "custom_tool_call") {
+      emitToolImages();
       const callId = responseText(item.call_id);
       const custom = item.type === "custom_tool_call";
       const args = custom && typeof item.input === "string" ? JSON.stringify({ input: item.input }) : item.arguments;
@@ -198,14 +223,24 @@ function chatMessages(input: Obj[], instructions: string, codec: ResponsesCodec)
     } else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       emitAssistant();
       const callId = responseText(item.call_id);
-      if (!pending.delete(callId)) invalidResponseRequest("No matching tool call in this response chain.", `${path}.call_id`);
-      messages.push({ role: "tool", tool_call_id: callId, content: chatContent(item.output, "tool", `${path}.output`) });
+      if (!pending.delete(callId)) continue;
+      const images: Obj[] = [];
+      let content = chatContent(item.output, "tool", `${path}.output`, images);
+      if (typeof content === "string" ? !content : content.length === 0) {
+        content = images.length ? "[Image-only tool result. See the following message.]" : "[Tool completed without text output.]";
+      }
+      messages.push({ role: "tool", tool_call_id: callId, content });
+      for (const [index, image] of images.entries()) toolImages.push([
+        { type: "text", text: `Image ${index + 1} from tool result ${callId}:` }, image,
+      ]);
     } else if (item.type === "compaction") {
+      emitToolImages();
       emitAssistant();
       requireToolResults();
       const summary = codec.open("compaction", responseText(item.encrypted_content));
       messages.push({ role: "assistant", content: "Conversation summary from an earlier window:\n" + summary });
     } else {
+      emitToolImages();
       const role = responseText(item.role);
       const content = chatContent(item.content, role, `${path}.content`);
       if (role === "assistant") {
@@ -220,27 +255,30 @@ function chatMessages(input: Obj[], instructions: string, codec: ResponsesCodec)
     }
   }
   emitAssistant();
+  requireToolResults();
+  // Images follow the entire tool result group, never interrupting its pairing.
+  emitToolImages();
   return { messages, pending };
 }
 
-export function prepareBridgeInput(request: Obj, history: Obj[], codec: ResponsesCodec, compact = false) {
+export async function prepareBridgeInput(request: Obj, history: Obj[], codec: ResponsesCodec, compact = false) {
   const { body, omittedWebSearch } = omitOptionalWebSearch(request);
   for (const key of ["conversation", "prompt", "context_management", "max_tool_calls", "background_options", "moderation", "personality"]) {
     if (specified(body[key]) && !(Array.isArray(body[key]) && body[key].length === 0)) unsupportedResponseParam(key);
   }
-  if (body.background === true) unsupportedResponseParam("background");
   if (specified(body.truncation) && body.truncation !== "disabled") unsupportedResponseParam("truncation");
   if (specified(body.instructions) && typeof body.instructions !== "string") invalidResponseRequest("instructions must be a string.", "instructions");
   if (specified(body.include) && !Array.isArray(body.include)) invalidResponseRequest("include must be an array.", "include");
   const include = responseArray(body.include);
-  for (const key of include) if (!["reasoning.encrypted_content", "message.output_text.logprobs"].includes(responseText(key))) unsupportedResponseParam(`include (${String(key)})`);
-  const input = [...history, ...normalizeResponseInput(body.input, history)];
+  for (const key of include) if (!hostedWebSearchIncludes.has(key) && !["reasoning.encrypted_content", "message.output_text.logprobs"].includes(responseText(key))) unsupportedResponseParam(`include (${String(key)})`);
+  const rawInput = [...history, ...normalizeResponseInput(body.input, history)].map((item) => item.type === "web_search_call"
+    ? { id: item.id, type: "message", role: "assistant", content: [{ type: "output_text", text: hostedSearchText(item) }], status: "completed" } : item);
+  const input = await expandAttachments(rawInput);
   if (input.length > 10_000 || Buffer.byteLength(JSON.stringify(input)) > MAX_RESPONSES_INPUT) {
     throw new ResponsesError(400, "context_length_exceeded", "The Responses replay window is too large. Compact or shorten the input.", "input");
   }
   const instructions = responseText(body.instructions);
-  const { messages, pending } = chatMessages(input, compact ? "" : instructions, codec);
-  if (pending.size) invalidResponseRequest("A tool call is missing its output.", "input");
+  const { messages } = chatMessages(input, compact ? "" : instructions, codec);
   if (!messages.length) invalidResponseRequest("An input item or instructions is required.", "input");
   const chat: Obj = { model: body.model, messages, stream: !compact && body.stream === true };
   const { chat: tools, aliases } = toolDefinitions(compact ? undefined : request.tools);
@@ -263,13 +301,12 @@ export function prepareBridgeInput(request: Obj, history: Obj[], codec: Response
   if (outputText.format != null) chat.response_format = toChatFormat(outputText.format);
   if (typeof outputText.verbosity === "string") chat.verbosity = outputText.verbosity;
   if (tools.length) chat.tools = tools;
-  if (omittedWebSearch && !tools.length && body.tool_choice === "required") {
-    requireNativeWebSearch("tool_choice", "Requiring a tool when hosted web search is the only available tool");
-  }
   if (specified(body.tool_choice)) {
-    const choice = toChatToolChoice(body.tool_choice, aliases);
-    // Chat providers can reject auto/none when no tool definitions accompany it.
-    if (!omittedWebSearch || tools.length || (choice !== "auto" && choice !== "none")) chat.tool_choice = choice;
+    const rawChoice = responseObject(body.tool_choice);
+    const choice = hostedWebSearchTypes.has(rawChoice.type) ? "auto" : toChatToolChoice(body.tool_choice, aliases);
+    if (tools.length) chat.tool_choice = choice;
+    // With no callable tools, forcing hosted search degrades to an ordinary
+    // response; auto/none are likewise omitted for strict Chat providers.
   }
   if (include.includes("message.output_text.logprobs") || specified(body.top_logprobs)) chat.logprobs = true;
   if (chat.stream) chat.stream_options = { include_usage: true };

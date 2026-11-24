@@ -141,7 +141,8 @@ before(async () => {
         assert.equal(ledger.has(data.id), false);
         ledger.set(data.id, { ...data, createdAt: new Date() } as Row);
       },
-      async upsert({ create }: Obj) { ledger.set(create.id, { ...create, createdAt: new Date() } as Row); },
+    async upsert({ create }: Obj) { ledger.set(create.id, { ...create, createdAt: new Date() } as Row); },
+      async update({ where, data }: Obj) { const row = ledger.get(where.id); if (!row) throw new Error("missing fixture"); Object.assign(row, data); return row; },
       async deleteMany({ where }: Obj) {
         if (where.id) return { count: ledger.delete(where.id) ? 1 : 0 };
         let count = 0;
@@ -284,7 +285,11 @@ test("chat failures, incomplete output, explicit compact and unsupported semanti
     } else assert.equal(terminal.type, "response.failed");
   }
   assert.equal((await expectJSON(await submit({ model: "fixture:rate", input: "hi" }), 429)).error.code, "rate_limited");
-  assert.equal((await expectJSON(await submit({ model: "fixture:chat", input: "hi", background: true }), 400)).error.param, "background");
+  const queued = await expectJSON(await submit({ model: "fixture:chat", input: "hi", background: true }));
+  assert.equal(queued.status, "queued");
+  const completed = await expectJSON(await retrieve(request("GET"), context(queued.id)));
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.background, true);
   assert.equal((await expectJSON(await count(request("POST", "/api/v1/responses/input_tokens", { model: "fixture:chat", input: "hi" })), 400)).error.code, "unsupported_parameter");
   const compacted = await expectJSON(await compact(request("POST", "/api/v1/responses/compact", { model: "fixture:chat", input: "prior question" })));
   assert.equal(compacted.object, "response.compaction");

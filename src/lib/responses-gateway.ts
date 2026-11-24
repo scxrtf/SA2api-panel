@@ -14,7 +14,7 @@ import {
 import { bridgeChatResponse } from "./responses-output";
 import {
   bridgeBackend, fetchStoredResponse, forgetResponse, newResponseId, readBridgeSnapshot, rememberResponse,
-  responseDigest, responsesCodec,
+  replaceResponse, responseDigest, responsesCodec,
 } from "./responses-state";
 
 export { responsesEndpoint } from "./responses-native";
@@ -60,12 +60,33 @@ async function routeStored(req: Request, operation: ResponsesOperation, id: stri
     if (!await forgetResponse(owner, id)) missingResponse(id);
     return Response.json({ id, object: "response.deleted", deleted: true }, { headers: responseHeaders() });
   }
-  if (operation === "cancel") throw new ResponsesError(400, "response_not_cancellable", "Only background responses can be cancelled.");
   const snapshot = readBridgeSnapshot(stored.snapshot);
+  if (operation === "cancel") {
+    if (snapshot.response.background !== true || !["queued", "in_progress"].includes(responseText(snapshot.response.status))) {
+      throw new ResponsesError(400, "response_not_cancellable", "Only a pending background response can be cancelled.");
+    }
+    snapshot.response = { ...snapshot.response, status: "cancelled", background: true,
+      completed_at: Math.floor(Date.now() / 1000), cancelled_at: Math.floor(Date.now() / 1000) };
+    await replaceResponse(owner, id, snapshot);
+    backgroundControllers.get(id)?.abort();
+    return Response.json(snapshot.response, { headers: responseHeaders() });
+  }
   if (operation === "input_items") return listInputItems(snapshot.input.slice(snapshot.offset), query);
+  if (operation === "retrieve" && snapshot.response.background === true && !snapshot.response.cancelled_at) {
+    const pending = backgroundRequests.get(id);
+    if (pending) await pending;
+    const latest = await fetchStoredResponse(owner, id);
+    if (latest) return Response.json(readBridgeSnapshot(latest.snapshot).response, { headers: responseHeaders() });
+  }
   if (query.get("stream") === "true" || query.has("starting_after")) unsupportedResponseParam("stream resume");
   return Response.json(snapshot.response, { headers: responseHeaders() });
 }
+
+// The Chat bridge has no native background API. Keep background tasks local and
+// persist terminal state so polling is cheap and survives worker rescheduling.
+const backgroundRuntime = globalThis as typeof globalThis & { wb2aBackgroundResponses?: Map<string, Promise<void>> };
+const backgroundRequests = backgroundRuntime.wb2aBackgroundResponses ??= new Map();
+const backgroundControllers = new Map<string, AbortController>();
 
 function validateCommon(body: Obj) {
   for (const field of ["stream", "store", "background"]) {
@@ -121,15 +142,18 @@ async function dispatch(req: Request, operation: ResponsesOperation, id?: string
   const last = previous && readBridgeSnapshot(previous.snapshot);
   const history = last ? [...last.input, ...responseArray(last.response.output).map(responseObject).filter((item) =>
     item.status !== "incomplete" || (item.type !== "function_call" && item.type !== "custom_tool_call"))] : [];
-  const input = prepareBridgeInput(local, history, codec, operation === "compact");
-  return observeGateway(req, local, operation, identity, async () => {
-    const result = await handleChat({ body: input.chat, sessionBody: local, req,
+  const input = await prepareBridgeInput(local, history, codec, operation === "compact");
+  const execute = async (background: { id: string; signal: AbortSignal } | null) => {
+    const activeReq = background?.signal ? new Request(req.url, { headers: req.headers, signal: background.signal }) : req;
+    const result = await handleChat({ body: input.chat, sessionBody: local, req: activeReq,
       inboundHeaders: req.headers, clientIP: (req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "").split(",", 1)[0].trim(),
       ua: req.headers.get("user-agent") ?? "", path: operation === "compact" ? "/v1/responses/compact" : "/v1/responses" });
     const responseBody = operation === "compact" ? { model, store: false } : input.effectiveBody;
     const converted = await bridgeChatResponse(result, responseBody, input.aliases, codec, async (response) => {
+      if (background) response.background = true;
       if (operation !== "compact" && body.store !== false) {
-        await rememberResponse(owner, responseText(response.id), bridgeBackend, model, { response, input: input.input, offset: input.offset });
+        if (background) await replaceResponse(owner, background.id, { response, input: input.input, offset: input.offset });
+        else await rememberResponse(owner, responseText(response.id), bridgeBackend, model, { response, input: input.input, offset: input.offset });
       }
     });
     if (input.omittedWebSearch) converted.headers.set("X-WB2A-Omitted-Tools", "web_search");
@@ -144,7 +168,38 @@ async function dispatch(req: Request, operation: ResponsesOperation, id?: string
     output.push({ type: "compaction", id: newResponseId("cmp"), encrypted_content: codec.seal("compaction", summary) });
     return Response.json({ id: newResponseId("resp"), object: "response.compaction", created_at: completion.created_at,
       output, usage: completion.usage }, { headers: converted.headers });
-  });
+  };
+  if (body.background === true && operation === "responses" && body.store !== false) {
+    if (body.stream === true) invalidResponseRequest("Background responses do not support stream:true; poll the response instead.", "stream");
+    const id = newResponseId("resp");
+    const initial = { id, object: "response", created_at: Math.floor(Date.now() / 1000), model, status: "queued", background: true,
+      output: [], error: null, incomplete_details: null, previous_response_id: previousId || null };
+    await rememberResponse(owner, id, bridgeBackend, model, { response: initial, input: input.input, offset: input.offset });
+    const controller = new AbortController();
+    const work = execute({ id, signal: controller.signal }).then(async (response) => {
+      if (response.ok) return;
+      const failure = await response.clone().json().catch(() => ({}));
+      const latest = await fetchStoredResponse(owner, id);
+      if (!latest) return;
+      const snapshot = readBridgeSnapshot(latest.snapshot);
+      if (snapshot.response.cancelled_at || !["queued", "in_progress"].includes(responseText(snapshot.response.status))) return;
+      snapshot.response = { ...snapshot.response, status: "failed", background: true, completed_at: Math.floor(Date.now() / 1000),
+        error: responseObject(failure.error), output: [] };
+      await replaceResponse(owner, id, snapshot);
+    }).catch(async () => {
+      const latest = await fetchStoredResponse(owner, id).catch(() => null);
+      if (!latest) return;
+      const snapshot = readBridgeSnapshot(latest.snapshot);
+      if (snapshot.response.cancelled_at || !["queued", "in_progress"].includes(responseText(snapshot.response.status))) return;
+      snapshot.response = { ...snapshot.response, status: "failed", background: true, completed_at: Math.floor(Date.now() / 1000),
+        error: { code: "background_request_failed", message: "The background Chat request failed." }, output: [] };
+      await replaceResponse(owner, id, snapshot);
+    }).finally(() => { backgroundRequests.delete(id); backgroundControllers.delete(id); });
+    backgroundRequests.set(id, work);
+    backgroundControllers.set(id, controller);
+    return Response.json(initial, { status: 200, headers: responseHeaders() });
+  }
+  return observeGateway(req, local, operation, identity, () => execute(null));
 }
 
 export async function forwardResponses(req: Request, operation: ResponsesOperation, id?: string) {
