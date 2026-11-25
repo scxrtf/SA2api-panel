@@ -4,9 +4,10 @@ import { getConfig } from "@/lib/config";
 import { observeGateway } from "@/lib/workspace/gateway-observer";
 import {
   invalidResponseRequest, isResponseId, missingResponse, readResponseJson, responseArray, responseHeaders, responseObject,
-  responseText, ResponsesError, responsesError, unsupportedResponseParam, type ResponseObject as Obj,
+  responseText, ResponsesError, responsesError, sseHeaders, type ResponseObject as Obj,
 } from "./responses-http";
 import { prepareBridgeInput } from "./responses-input";
+import { estimateResponseTokens } from "./responses-tokens";
 import {
   nativeAllowed, nativeModel, nativeResponsesConfig, nativeResponsesInput, relayNativeResponses, requireNativeQueryStream,
   type ResponsesOperation,
@@ -14,7 +15,7 @@ import {
 import { bridgeChatResponse } from "./responses-output";
 import {
   bridgeBackend, fetchStoredResponse, forgetResponse, newResponseId, readBridgeSnapshot, rememberResponse,
-  replaceResponse, responseDigest, responsesCodec,
+  completeBackgroundResponse, replaceResponse, responseDigest, responsesCodec,
 } from "./responses-state";
 
 export { responsesEndpoint } from "./responses-native";
@@ -74,11 +75,54 @@ async function routeStored(req: Request, operation: ResponsesOperation, id: stri
   if (operation === "input_items") return listInputItems(snapshot.input.slice(snapshot.offset), query);
   if (operation === "retrieve" && snapshot.response.background === true && !snapshot.response.cancelled_at) {
     const pending = backgroundRequests.get(id);
-    if (pending) await pending;
-    const latest = await fetchStoredResponse(owner, id);
-    if (latest) return Response.json(readBridgeSnapshot(latest.snapshot).response, { headers: responseHeaders() });
+    if (pending) {
+      await pending;
+      const latest = await fetchStoredResponse(owner, id);
+      if (latest) Object.assign(snapshot, readBridgeSnapshot(latest.snapshot));
+    }
   }
-  if (query.get("stream") === "true" || query.has("starting_after")) unsupportedResponseParam("stream resume");
+  if (query.get("stream") === "true" || query.has("starting_after")) {
+    const rawStartingAfter = query.get("starting_after");
+    if (rawStartingAfter !== null && !/^\d+$/.test(rawStartingAfter)) {
+      invalidResponseRequest("starting_after must be a non-negative integer.", "starting_after");
+    }
+    const startingAfter = rawStartingAfter === null ? -1 : Number(rawStartingAfter);
+    if (!Number.isSafeInteger(startingAfter)) {
+      invalidResponseRequest("starting_after must be a non-negative integer.", "starting_after");
+    }
+    const response = snapshot.response;
+    const frames: Obj[] = [
+      { type: "response.created", response: { ...response, status: "in_progress", output: [] } },
+    ];
+    for (const [index, raw] of responseArray(response.output).entries()) {
+      const item = responseObject(raw);
+      frames.push({ type: "response.output_item.added", output_index: index, item: { ...item, status: "in_progress" } });
+      if (item.type === "message") {
+        for (const [contentIndex, rawPart] of responseArray(item.content).entries()) {
+          const part = responseObject(rawPart);
+          const text = responseText(part.text);
+          frames.push({ type: "response.content_part.added", item_id: item.id, output_index: index, content_index: contentIndex,
+            part: { ...part, text: "" } });
+          if (text) frames.push({ type: "response.output_text.delta", item_id: item.id, output_index: index,
+            content_index: contentIndex, delta: text });
+          frames.push({ type: "response.output_text.done", item_id: item.id, output_index: index, content_index: contentIndex, text });
+          frames.push({ type: "response.content_part.done", item_id: item.id, output_index: index, content_index: contentIndex, part });
+        }
+      } else if (item.type === "function_call" || item.type === "custom_tool_call") {
+        if (item.type === "custom_tool_call") frames.push({ type: "response.custom_tool_call_input.done", output_index: index,
+          item_id: item.id, input: item.input ?? "" });
+        else
+        frames.push({ type: "response.function_call_arguments.done", output_index: index, item_id: item.id,
+          name: item.name, arguments: item.arguments ?? "{}" });
+      }
+      frames.push({ type: "response.output_item.done", output_index: index, item });
+    }
+    frames.push({ type: `response.${responseText(response.status) || "completed"}`, response });
+    const body = frames.map((frame, sequence): Obj => ({ ...frame, sequence_number: sequence }))
+      .filter((frame) => Number(frame.sequence_number) > startingAfter)
+      .map((frame) => `event: ${responseText(frame.type)}\ndata: ${JSON.stringify(frame)}\n\n`).join("");
+    return new Response(body, { headers: sseHeaders() });
+  }
   return Response.json(snapshot.response, { headers: responseHeaders() });
 }
 
@@ -135,7 +179,8 @@ async function dispatch(req: Request, operation: ResponsesOperation, id?: string
   if (cfg && model.startsWith(cfg.provider + ":")) {
     throw new ResponsesError(404, "model_not_found", "The model is not configured for native Responses.", "model");
   }
-  if (operation === "input_tokens") unsupportedResponseParam("input_tokens");
+  if (operation === "input_tokens") return Response.json({ object: "response.input_tokens",
+    input_tokens: estimateResponseTokens(body.input, responseText(body.instructions), body.tools) }, { headers: responseHeaders() });
 
   const local = { ...body, model };
   const codec = responsesCodec(owner, app.api_key);
@@ -152,11 +197,11 @@ async function dispatch(req: Request, operation: ResponsesOperation, id?: string
     const converted = await bridgeChatResponse(result, responseBody, input.aliases, codec, async (response) => {
       if (background) response.background = true;
       if (operation !== "compact" && body.store !== false) {
-        if (background) await replaceResponse(owner, background.id, { response, input: input.input, offset: input.offset });
+        if (background) await completeBackgroundResponse(owner, background.id, { response, input: input.input, offset: input.offset });
         else await rememberResponse(owner, responseText(response.id), bridgeBackend, model, { response, input: input.input, offset: input.offset });
       }
     });
-    if (input.omittedWebSearch) converted.headers.set("X-WB2A-Omitted-Tools", "web_search");
+    if (input.omittedTools.length) converted.headers.set("X-WB2A-Omitted-Tools", input.omittedTools.join(","));
     if (operation !== "compact" || !converted.ok) return converted;
     const completion = await converted.json() as Obj;
     const summary = responseArray(completion.output).flatMap((item) => responseArray(responseObject(item).content))
@@ -179,12 +224,13 @@ async function dispatch(req: Request, operation: ResponsesOperation, id?: string
     const work = execute({ id, signal: controller.signal }).then(async (response) => {
       if (response.ok) return;
       const failure = await response.clone().json().catch(() => ({}));
+      const error = responseObject(failure.error);
       const latest = await fetchStoredResponse(owner, id);
       if (!latest) return;
       const snapshot = readBridgeSnapshot(latest.snapshot);
       if (snapshot.response.cancelled_at || !["queued", "in_progress"].includes(responseText(snapshot.response.status))) return;
       snapshot.response = { ...snapshot.response, status: "failed", background: true, completed_at: Math.floor(Date.now() / 1000),
-        error: responseObject(failure.error), output: [] };
+        error: { code: responseText(error.code) || "background_request_failed", message: responseText(error.message) || "The background Chat request failed." }, output: [] };
       await replaceResponse(owner, id, snapshot);
     }).catch(async () => {
       const latest = await fetchStoredResponse(owner, id).catch(() => null);

@@ -39,24 +39,24 @@ requires_openai_auth = false
 supports_websockets = false
 ```
 
-如果工作在 WorkBuddy / Chat 兼容通道，Codex 自动声明的网页搜索工具会被忽略，普通请求与其他函数工具可继续使用。网关通过 `X-WB2A-Omitted-Tools: web_search` 表明本次没有启用托管搜索。强制网页搜索会降级为普通模型回复；历史 `web_search_call` 会转成文字上下文。Chat 通道不会在后台执行新的托管搜索。
+如果工作在 WorkBuddy / Chat 兼容通道，Codex 自动声明的网页搜索及其他托管工具会被忽略，普通请求与其他函数工具可继续使用。网关通过 `X-WB2A-Omitted-Tools` 返回逗号分隔的省略类型（例如 `web_search,tool_search`）。强制托管工具会降级为普通模型回复；历史托管调用会转成文字上下文。Chat 通道不会在后台执行新的托管工具。
 
 ## 能力对照
 
 | HTTP 路径 / 功能 | WorkBuddy / Chat 兼容层 | 原生 Responses 上游 |
 |---|---|---|
 | `POST /responses` | JSON、增量 SSE、多轮重放、图像 URL/内联数据、文本/PDF 附件、函数/自定义工具、结构化格式参数 | 原生 JSON 与 SSE；保留上游支持的参数和事件 |
-| `GET /responses/{id}` | 查询已存档的响应 | 原生查询，支持 `stream=true&starting_after=N` |
+| `GET /responses/{id}` | 查询已存档的响应；`stream=true` 时从存档重放 SSE，`starting_after=N` 按事件序号续传 | 原生查询，支持 `stream=true&starting_after=N` |
 | `GET /responses/{id}/input_items` | `limit`、`order`、`after` 分页 | 原生分页及 `include` 参数 |
 | `DELETE /responses/{id}` | 删除本条存档 | 删除上游响应并清除归属 |
 | `POST /responses/compact` | 生成模型摘要，返回可重放的网关加密项 | 原生压缩 |
-| `POST /responses/input_tokens` | — | 由上游返回真实 token 数 |
-| `background: true` / `POST /responses/{id}/cancel` | 本地后台执行、轮询与取消；需 `store:true`、`stream:false`，进程内执行 | 上游支持时可轮询/取消 |
+| `POST /responses/input_tokens` | 本地文本分词估算；图片按固定 85/765 估算 | 由上游返回真实 token 数 |
+| `background: true` / `POST /responses/{id}/cancel` | 本地后台执行、轮询与取消；需 `store:true`、`stream:false`，进程重启后未完成项保留最近状态 | 上游支持时可轮询/取消 |
 | 上游托管工具、Conversations 引用和自动压缩 | 网页搜索声明与历史按上文降级；其余取决于原生通道 | 取决于原生供应商；独立的 Files/Conversations API 不在这些路由内 |
 
 两条路径均使用 HTTP / SSE；没有 WebSocket 监听。兼容层只转换协议，实际识图、JSON Schema 约束和推理能力取决于所选模型。工具结果图片会按调用 ID 分组转发；缺失的调用/结果与纯图片空结果会在重放时修复。自定义工具在 Chat 通道用 `{ "input": "…" }` 函数参数桥接；自定义语法作为模型提示传入，不由网关执行。请求体与兼容层重放窗口上限为 8 MiB。
 
-附件支持 `file_data` 与 HTTPS `file_url`（环回测试地址可用 HTTP），单个最大 8 MiB；文本与代码直接展开，普通文本型 PDF 提取正文，每轮提取文本合计最多 1 MiB。图像文件需可识别的图片 MIME 类型。独立的上游 `file_id`、扫描版 PDF OCR、音频转写与二进制 Office 文档使用原生 Responses 通道；Chat 通道会给出明确的参数错误。后台 Chat 任务依赖当前进程，重启后以保存的最近状态为准。
+附件支持 `file_data` 与 HTTPS `file_url`（环回测试地址可用 HTTP），单个最大 8 MiB；文本与代码直接展开，普通文本型 PDF 提取正文，每轮提取文本合计最多 1 MiB。图像文件需可识别的图片 MIME 类型，PNG/JPEG 会校验文件魔数。独立的 `file_id`、扫描版 PDF OCR、音频转写与二进制 Office 文档在 Chat 通道会返回明确的参数错误和替代操作说明。后台 Chat 任务依赖当前进程，重启后以保存的最近状态为准。
 
 ## 遇到 HTTP 405
 

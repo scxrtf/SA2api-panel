@@ -18,13 +18,16 @@ function tokenCount(raw: unknown) {
 }
 
 function outputUsage(raw: Obj | null) {
-  if (!raw) return null;
-  const input = tokenCount(raw.prompt_tokens ?? raw.input_tokens);
-  const output = tokenCount(raw.completion_tokens ?? raw.output_tokens);
-  return {
-    input_tokens: input, output_tokens: output, total_tokens: tokenCount(raw.total_tokens) || input + output,
-    input_tokens_details: { cached_tokens: bestUsageCacheHitTokens(raw) ?? 0 },
-    output_tokens_details: { reasoning_tokens: tokenCount(responseObject(raw.completion_tokens_details ?? raw.output_tokens_details).reasoning_tokens) },
+    if (!raw) return null;
+    const input = tokenCount(raw.prompt_tokens ?? raw.input_tokens);
+    const output = tokenCount(raw.completion_tokens ?? raw.output_tokens);
+    const nestedInput = responseObject(raw.input_tokens_details);
+    const nestedOutput = responseObject(raw.output_tokens_details);
+    return {
+      input_tokens: input, output_tokens: output, total_tokens: tokenCount(raw.total_tokens) || input + output,
+      input_tokens_details: { cached_tokens: bestUsageCacheHitTokens(raw) ?? tokenCount(nestedInput.cached_tokens) },
+      output_tokens_details: { reasoning_tokens: tokenCount(responseObject(raw.completion_tokens_details ?? raw.output_tokens_details).reasoning_tokens
+        ?? nestedOutput.reasoning_tokens) },
   };
 }
 
@@ -61,6 +64,9 @@ class ResponseAssembler {
       temperature: body.temperature ?? 1, tool_choice: body.tool_choice ?? "auto", tools: body.tools ?? [],
       top_p: body.top_p ?? 1, top_logprobs: body.top_logprobs ?? 0, truncation: body.truncation ?? "disabled",
       text: { format: { type: "text" }, ...responseObject(body.text) }, user: body.user ?? null,
+      service_tier: body.service_tier ?? null, conversation: body.conversation ?? null, prompt: body.prompt ?? null,
+      context_management: body.context_management ?? null,
+      background_options: body.background_options ?? null, moderation: body.moderation ?? null, personality: body.personality ?? null,
     };
   }
 

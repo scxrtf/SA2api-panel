@@ -54,6 +54,14 @@ export async function replaceResponse(owner: string, id: string, snapshot: Bridg
   } catch { throw storeFailure(); }
 }
 
+export async function completeBackgroundResponse(owner: string, id: string, snapshot: BridgeSnapshot) {
+  const data = JSON.stringify(snapshot);
+  if (Buffer.byteLength(data) > MAX_RESPONSES_OUTPUT) throw new ResponsesError(400, "context_length_exceeded", "This Responses history is too large to store.", "input");
+  const result = await prisma.gatewayResponse.updateMany({ where: { id: recordKey(owner, id), snapshot: { not: { contains: '"cancelled_at"' } } },
+    data: { snapshot: data } });
+  return result.count > 0;
+}
+
 export async function forgetResponse(owner: string, id: string) {
   try { return (await prisma.gatewayResponse.deleteMany({ where: { id: recordKey(owner, id) } })).count > 0; }
   catch { throw storeFailure(); }

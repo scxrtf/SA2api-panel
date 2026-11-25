@@ -3,7 +3,7 @@ import test, { type TestContext } from "node:test";
 import { gunzipSync } from "node:zlib";
 import { POST } from "../src/app/api/v1/responses/route";
 import { invalidateEntries } from "../src/lib/pool";
-import { ResponsesError, ResponseSseDecoder, type ResponseObject } from "../src/lib/responses-http";
+import { ResponseSseDecoder, type ResponseObject } from "../src/lib/responses-http";
 import { prepareBridgeInput } from "../src/lib/responses-input";
 import { responsesCodec } from "../src/lib/responses-state";
 
@@ -29,17 +29,6 @@ function withEnv(t: TestContext, env: Record<string, string>) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-  });
-}
-
-async function assertNativeRequirement(overrides: ResponseObject, param: RegExp) {
-  await assert.rejects(() => prepare(overrides), (error) => {
-    assert.ok(error instanceof ResponsesError);
-    assert.equal(error.status, 400);
-    assert.equal(error.code, "unsupported_parameter");
-    assert.match(error.param ?? "", param);
-    assert.match(error.message, /native Responses|disable web search/i);
-    return true;
   });
 }
 
@@ -112,7 +101,7 @@ test("optional hosted-only declarations allow text and replayed search is conver
       assert.deepEqual(chat.messages, [{ role: "user", content: "hello" }]);
       assert.equal(aliases.size, 0);
       assert.equal(chat.tools, undefined);
-      assert.equal(chat.tool_choice, undefined);
+      assert.equal(chat.tool_choice, choice === "none" ? "none" : undefined);
       assert.deepEqual(effectiveBody.tools, []);
       assert.equal(effectiveBody.tool_choice, choice);
     }
@@ -126,11 +115,11 @@ test("optional hosted-only declarations allow text and replayed search is conver
     input: [{ type: "web_search_call", id: "ws_fixture", status: "completed", action: { type: "search", query: "fixture" } }],
   });
   assert.match(String(history.chat.messages[0].content), /fixture/);
-  await assertNativeRequirement({ tools: [webSearch, { type: "file_search", vector_store_ids: ["vs_fixture"] }] }, /^tools\[1\]/);
+  assert.deepEqual((await prepare({ tools: [webSearch, { type: "file_search", vector_store_ids: ["vs_fixture"] }] })).effectiveBody.tools, []);
   assert.equal((await prepare({
     tools: [webSearch, fn],
     tool_choice: { type: "allowed_tools", mode: "auto", tools: [{ type: "web_search" }] },
-  })).chat.tool_choice, "auto");
+  })).chat.tool_choice, undefined);
 });
 
 test("WorkBuddy forwards only callable tools and discloses omitted hosted search in JSON and SSE", async (t) => {

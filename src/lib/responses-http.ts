@@ -33,7 +33,7 @@ export function invalidResponseRequest(message: string, param: string | null = n
 }
 
 export function unsupportedResponseParam(param: string): never {
-  throw new ResponsesError(400, "unsupported_parameter", `${param} requires a native Responses model.`, param);
+  throw new ResponsesError(400, "unsupported_parameter", `${param} is not supported by this Chat-backed model.`, param);
 }
 
 export function missingResponse(id: string, previous = false): never {

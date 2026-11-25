@@ -13,6 +13,7 @@ import { PATCH as grant } from "../src/app/api/panel/keys/[name]/route";
 import { invalidateEntries } from "../src/lib/pool";
 import { responsesEndpoint } from "../src/lib/responses-gateway";
 import { ResponseSseDecoder } from "../src/lib/responses-http";
+import { completeBackgroundResponse, responseDigest } from "../src/lib/responses-state";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Assertions inspect the dynamic wire JSON.
 type Obj = Record<string, any>;
@@ -143,6 +144,15 @@ before(async () => {
       },
     async upsert({ create }: Obj) { ledger.set(create.id, { ...create, createdAt: new Date() } as Row); },
       async update({ where, data }: Obj) { const row = ledger.get(where.id); if (!row) throw new Error("missing fixture"); Object.assign(row, data); return row; },
+      async updateMany({ where, data }: Obj) {
+        if (stateOffline) throw new Error("fixture storage offline");
+        const row = ledger.get(where.id);
+        if (!row) return { count: 0 };
+        const excluded = where.snapshot?.not?.contains;
+        if (typeof excluded === "string" && String(row.snapshot ?? "").includes(excluded)) return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
+      },
       async deleteMany({ where }: Obj) {
         if (where.id) return { count: ledger.delete(where.id) ? 1 : 0 };
         let count = 0;
@@ -290,7 +300,14 @@ test("chat failures, incomplete output, explicit compact and unsupported semanti
   const completed = await expectJSON(await retrieve(request("GET"), context(queued.id)));
   assert.equal(completed.status, "completed");
   assert.equal(completed.background, true);
-  assert.equal((await expectJSON(await count(request("POST", "/api/v1/responses/input_tokens", { model: "fixture:chat", input: "hi" })), 400)).error.code, "unsupported_parameter");
+  const resumed = await retrieve(request("GET", "/api/v1/responses/x?stream=true&starting_after=2"), context(queued.id));
+  assert.equal(resumed.headers.get("Content-Type"), "text/event-stream; charset=utf-8");
+  const replay = (await resumed.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
+  assert.ok(replay.length > 0);
+  assert.ok(replay.every((event) => event.sequence_number > 2));
+  assert.equal(replay.at(-1).type, "response.completed");
+  assert.equal((await expectJSON(await retrieve(request("GET", "/api/v1/responses/x?starting_after=bad"), context(queued.id)), 400)).error.param, "starting_after");
+  assert.ok((await expectJSON(await count(request("POST", "/api/v1/responses/input_tokens", { model: "fixture:chat", input: "hi" })))).input_tokens > 0);
   const compacted = await expectJSON(await compact(request("POST", "/api/v1/responses/compact", { model: "fixture:chat", input: "prior question" })));
   assert.equal(compacted.object, "response.compaction");
   assert.equal(compacted.output.at(-1).type, "compaction");
@@ -302,6 +319,21 @@ test("chat failures, incomplete output, explicit compact and unsupported semanti
     assert.equal((await expectJSON(await submit({ model: "fixture:chat", input: "stored" }), 503)).error.code, "responses_storage_unavailable");
     await expectJSON(await submit({ model: "fixture:chat", input: "stateless", store: false }));
   } finally { stateOffline = false; }
+});
+
+test("background completion cannot overwrite a cancelled snapshot", async () => {
+  const id = "resp_cancelled_fixture";
+  const owner = responseDigest("gateway-key", KEY);
+  const key = responseDigest("wb2a-response-v1", owner, id);
+  const cancelled = { response: { id, object: "response", status: "cancelled", background: true, cancelled_at: 1, output: [] }, input: [], offset: 0 };
+  ledger.set(key, { id: key, backend: "chat", model: "fixture:chat", snapshot: JSON.stringify(cancelled), createdAt: new Date() });
+  try {
+    const completed = { ...cancelled, response: { ...cancelled.response, status: "completed", cancelled_at: undefined } };
+    assert.equal(await completeBackgroundResponse(owner, id, completed), false);
+    assert.equal(JSON.parse(ledger.get(key)!.snapshot).response.status, "cancelled");
+  } finally {
+    ledger.delete(key);
+  }
 });
 
 test("native Responses provides exact HTTP lifecycle forwarding and caller-scoped IDs", async () => {

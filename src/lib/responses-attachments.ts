@@ -4,7 +4,6 @@ import { invalidResponseRequest, responseObject, responseText, type ResponseObje
 const MAX_ATTACHMENT = 8 * 1024 * 1024;
 const MAX_TEXT = 1024 * 1024;
 const textExtensions = /\.(?:c|cc|cfg|conf|cpp|cs|css|csv|go|h|html|java|js|json|jsx|log|md|php|py|rb|rs|sh|sql|svg|toml|ts|tsx|txt|xml|yaml|yml)$/i;
-
 function decodeDataURL(value: string) {
   const match = /^data:([^,]*?),(.*)$/s.exec(value);
   if (!match) return null;
@@ -125,7 +124,7 @@ function attachmentText(bytes: Buffer, mime: string, filename: string, param: st
   }
   if (mime && !mime.startsWith("text/") && !/(?:json|xml|javascript|yaml|x-sh|plain)/.test(mime)
       && !textExtensions.test(filename) && bytes.includes(0)) {
-    invalidResponseRequest(`Attachment type ${mime || "unknown"} has no text bridge; use a native Responses model for this format.`, param);
+    invalidResponseRequest(`Attachment type ${mime || "unknown"} cannot be converted to text by the Chat bridge; convert it to text first.`, param);
   }
   const text = bytes.toString("utf8");
   if (!text.trim()) invalidResponseRequest("The text attachment is empty.", param);
@@ -141,27 +140,35 @@ export async function expandAttachments(input: Obj[]) {
       const part = responseObject(raw);
       const path = `${param}[${index}]`;
       const type = part.type;
-      if (type !== "input_file" && type !== "input_audio" && !(type === "input_image" && part.file_id != null)) {
+      const inlineImage = type === "input_image" && (part.file_id != null || part.file_data != null || part.image_data != null);
+      if (type !== "input_file" && type !== "input_audio" && !inlineImage) {
         output.push(raw);
         continue;
       }
-      const inline = responseText(part.file_data ?? part.audio_data ?? part.data ?? part.image_url);
+      const inline = responseText(part.file_data ?? part.audio_data ?? part.data ?? part.image_url ?? part.image_data);
       const url = responseText(part.file_url ?? part.audio_url);
       const filename = responseText(part.filename ?? part.name);
       if (!inline && !url) {
-        invalidResponseRequest("This attachment needs file_data, data, or an HTTPS file_url; standalone file_id requires a native Responses model.", path);
+        invalidResponseRequest("This attachment needs file_data, data, or an HTTPS file_url; standalone file_id values are resolved only by an upstream Files API.", path);
       }
       const source = inline ? encoded(inline) : await fetchAttachment(url, path);
       if (source.bytes.byteLength > MAX_ATTACHMENT) invalidResponseRequest("The attachment exceeds 8 MiB.", path);
       const mime = responseText(part.mime_type ?? part.media_type).toLowerCase() || source.mime;
-      const image = type === "input_image" || type === "input_audio" && mime.startsWith("image/")
-        || mime.startsWith("image/") || /\.(?:png|jpe?g|gif|webp)$/i.test(filename);
+      const image = (type === "input_image" || mime.startsWith("image/") || /\.(?:png|jpe?g|gif|webp)$/i.test(filename))
+        && type !== "input_audio";
       if (image) {
         if (!mime.startsWith("image/")) invalidResponseRequest("An image attachment needs an image MIME type.", path);
+        if (!source.bytes.length) invalidResponseRequest("The image attachment is empty.", path);
+        if (mime === "image/png" && !source.bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+          invalidResponseRequest("The PNG attachment has invalid content.", path);
+        }
+        if ((mime === "image/jpeg" || mime === "image/jpg") && !source.bytes.subarray(0, 2).equals(Buffer.from([255, 216]))) {
+          invalidResponseRequest("The JPEG attachment has invalid content.", path);
+        }
         output.push({ type: "input_image", image_url: `data:${mime};base64,${source.bytes.toString("base64")}`, ...(part.detail == null ? {} : { detail: part.detail }) });
         continue;
       }
-      if (type === "input_audio") invalidResponseRequest("Audio transcription requires a native Responses model; attach a transcript as text instead.", path);
+      if (type === "input_audio") invalidResponseRequest("Audio transcription is not available on the Chat bridge; send a transcript as text.", path);
       const text = attachmentText(source.bytes, mime, filename, path);
       if (text.length > textBudget) invalidResponseRequest("Extracted attachment text exceeds the 1 MiB per-request budget.", path);
       textBudget -= text.length;
@@ -169,11 +176,12 @@ export async function expandAttachments(input: Obj[]) {
     }
     return output;
   }
-  for (const [index, item] of input.entries()) {
-    if (item.type === "message") item.content = await visit(item.content, `input[${index}].content`);
-    else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
-      item.output = await visit(item.output, `input[${index}].output`);
-    }
+  for (const [index, original] of input.entries()) {
+    const item = { ...original };
+    if (Array.isArray(item.content)) item.content = await visit(item.content, `input[${index}].content`);
+    if (Array.isArray(item.output)) item.output = await visit(item.output, `input[${index}].output`);
+    if (Array.isArray(item.input)) item.input = await visit(item.input, `input[${index}].input`);
+    input[index] = item;
   }
   return input;
 }
