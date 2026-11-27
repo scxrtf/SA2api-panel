@@ -2,7 +2,7 @@
 // state 会话存 LoginSession 表（15 分钟 TTL），poll 同 realm 完成落库。
 import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
-import { loginEndpoints, loginDoJSON, alignLoginAuthURL } from "@/lib/login";
+import { loginEndpoints, loginDoJSON, alignLoginAuthURL, loginClientIP } from "@/lib/login";
 import { getConfig } from "@/lib/config";
 import { runlogAccount } from "@/lib/runlog";
 
@@ -21,7 +21,10 @@ export async function POST(req: Request) {
   const cfg = await getConfig();
   let data: unknown;
   try {
-    data = await loginDoJSON("POST", ep.state, "", "{}", ep.origin, cfg, { signal: req.signal });
+    data = await loginDoJSON("POST", ep.state, "", "{}", ep.origin, cfg, {
+      clientIP: loginClientIP(req.headers),
+      signal: req.signal,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     runlogAccount("发起添加账号失败", "realm=" + realm + ": " + msg);

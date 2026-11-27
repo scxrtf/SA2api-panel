@@ -74,7 +74,7 @@ mock.module(new URL("../src/lib/runlog.ts", import.meta.url).href, { namedExport
 mock.module(new URL("../src/lib/machine-key.ts", import.meta.url).href, {
   namedExports: { getOrCreateMachineId: async () => ({ id: "test-machine" }), authorizeMachineForAccount: async () => {} },
 });
-const { loginEndpoints, loginHeaders, loginDoJSON, alignLoginAuthURL, LoginUpstreamError } = await import("../src/lib/login.ts");
+const { loginEndpoints, loginHeaders, loginDoJSON, alignLoginAuthURL, loginClientIP, LoginUpstreamError } = await import("../src/lib/login.ts");
 const start = await import("../src/app/api/panel/login/start/route.ts");
 const poll = await import("../src/app/api/panel/login/poll/route.ts");
 const envelope = (data: unknown, code = 0) => Response.json({ code, data });
@@ -120,6 +120,17 @@ test("登录头使用 RPC UA、匿名哨兵及 UUIDv4，不带浏览器或聊天
   assert.equal(account.Authorization, "Bearer test-bearer");
   assert.equal(account["X-Domain"], "copilot.tencent.com");
   assert.equal(account["X-No-Authorization"], undefined);
+});
+
+test("创建授权会话透传登录机 IP，其他登录请求不携带转发头", () => {
+  const ep = loginEndpoints("cn");
+  const h = loginHeaders(ep.state, "", "{}", ep.origin, cfg, { clientIP: "203.0.113.42" });
+  for (const name of ["X-Forwarded-For", "X-Real-IP", "X-Client-IP"]) assert.equal(h[name], "203.0.113.42");
+  const token = loginHeaders(ep.token + "state", "", null, ep.origin, cfg, { clientIP: "203.0.113.42" });
+  for (const name of ["X-Forwarded-For", "X-Real-IP", "X-Client-IP"]) assert.equal(token[name], undefined);
+  assert.equal(loginClientIP(new Headers({ "X-Forwarded-For": "203.0.113.42, 10.0.0.1", "X-Real-IP": "198.51.100.7" })), "203.0.113.42");
+  assert.equal(loginClientIP(new Headers({ "X-Real-IP": "2001:db8::42" })), "2001:db8::42");
+  assert.equal(loginClientIP(new Headers({ "X-Forwarded-For": "invalid, 10.0.0.1", "X-Real-IP": "also-invalid" })), "");
 });
 
 test("登录 URL 仅在原生三个可信 CN origin 间对齐", () => {
@@ -183,20 +194,26 @@ test("过期登录会话在本地结束，不继续发上游请求", async () =>
   assert.equal(calls.length, 0);
 });
 
-test("Global 使用 workbuddy-ai 客户端并采用配置 UA，支持原生绝对毫秒过期时间", async () => {
+test("Global 使用 workbuddy-ai 客户端并透传登录机 IP，支持原生绝对毫秒过期时间", async () => {
   putSession("global");
   const expiresAt = Date.now() + 3_600_000;
   responses.push(envelope({ state: "global-state", authUrl: "https://www.workbuddy.ai/login?platform=workbuddy-ai&state=global-state" }));
-  const begun = await start.POST(startRequest("global"));
+  const request = startRequest("global");
+  request.headers.set("X-Forwarded-For", "203.0.113.42, 10.0.0.1");
+  const begun = await start.POST(request);
   assert.equal(begun.status, 200);
   assert.equal((await begun.json()).url, "https://www.workbuddy.ai/login?platform=workbuddy-ai&state=global-state");
   assert.equal(calls[0].url.searchParams.get("platform"), "workbuddy-ai");
+  assert.equal(headers(calls[0]).get("x-forwarded-for"), "203.0.113.42");
+  assert.equal(headers(calls[0]).get("x-real-ip"), "203.0.113.42");
+  assert.equal(headers(calls[0]).get("x-client-ip"), "203.0.113.42");
   responses.push(envelope({ accessToken: "offline-global", expiresAt, domain: "www.codebuddy.ai" }),
     envelope({ uid: "global-user", nickname: "Global" }));
   const response = await poll.GET(pollRequest());
   assert.equal(response.status, 200);
   assert.ok(calls.every((call) => call.url.origin === "https://www.workbuddy.ai"));
   assert.equal(headers(calls[1]).get("user-agent"), "workbuddy-ai/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0");
+  assert.equal(headers(calls[1]).get("x-forwarded-for"), null);
   assert.equal(writes[0].create.expiresAt, BigInt(Math.floor(expiresAt / 1000)));
   assert.equal(writes[0].create.realm, "global");
 });

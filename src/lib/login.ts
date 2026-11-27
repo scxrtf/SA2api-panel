@@ -1,6 +1,7 @@
 // WorkBuddy 5.9.3 / CLI 2.165.0 AccountScopedExternalLink 登录请求。
 // 证据：.runtime/alignment-login-evidence.json；不读取桌面端登录凭据。
 import { randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import { DEFAULT_CONFIG, type AppConfig } from "./config";
 import { rpcUserAgent, type AuthShape } from "./upstream/client";
 import { officialEgress } from "./upstream/official-egress";
@@ -58,7 +59,15 @@ export function alignLoginAuthURL(authURL: string, apiOrigin: string): string {
 export interface LoginRequestContext {
   /** /account 使用 token 返回的 domain；未给时使用选定 API authority。 */
   domain?: string;
+  /** 创建授权会话时透传登录机的公网 IP。 */
+  clientIP?: string;
   signal?: AbortSignal;
+}
+
+export function loginClientIP(headers: Headers): string {
+  const forwarded = headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim();
+  const real = headers.get("x-real-ip")?.trim();
+  return [forwarded, real].find((value): value is string => !!value && isIP(value) > 0) ?? "";
 }
 
 export function loginHeaders(
@@ -83,6 +92,11 @@ export function loginHeaders(
     headers["X-No-User-Id"] = "true";
     headers["X-No-Enterprise-Id"] = "true";
     headers["X-No-Department-Info"] = "true";
+  }
+  if (url.pathname.endsWith("/auth/state") && context.clientIP) {
+    headers["X-Forwarded-For"] = context.clientIP;
+    headers["X-Real-IP"] = context.clientIP;
+    headers["X-Client-IP"] = context.clientIP;
   }
   // CommonHeaderHttpInterceptor：无现存 trace/request context 时使用 UUIDv4。
   headers["User-Agent"] = rpcUserAgent(cfg, loginAuthShape(realm));

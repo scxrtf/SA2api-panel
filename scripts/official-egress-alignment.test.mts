@@ -34,7 +34,8 @@ async function capture(run: (base: string, packets: Packet[]) => Promise<void>) 
 test("登录原生HTTP出口实收 state/token/account 路径、正文和独立头", { timeout: 5000 }, async () => {
   await capture(async (base, packets) => {
     const origin = "https://www.workbuddy.cn";
-    await loginDoJSON("POST", base + "/v2/plugin/auth/state?platform=workbuddy", "", "{}", origin);
+    await loginDoJSON("POST", base + "/v2/plugin/auth/state?platform=workbuddy", "", "{}", origin,
+      DEFAULT_CONFIG, { clientIP: "203.0.113.42" });
     await loginDoJSON("GET", base + "/v2/plugin/auth/token?state=offline-state", "", null, origin);
     await loginDoJSON("GET", base + "/v2/plugin/account", "offline-token", null, origin);
     assert.equal(packets.length, 3);
@@ -44,11 +45,15 @@ test("登录原生HTTP出口实收 state/token/account 路径、正文和独立�
     assert.equal(state.body, "{}");
     assert.equal(state.headers["content-length"], "2");
     assert.equal(state.headers["content-type"], "application/json");
+    for (const name of ["x-forwarded-for", "x-real-ip", "x-client-ip"]) assert.equal(state.headers[name], "203.0.113.42");
     for (const packet of [state, token]) {
       for (const name of ["authorization", "user-id", "enterprise-id", "department-info"]) {
         assert.equal(packet.headers["x-no-" + name], "true");
       }
       assert.equal(packet.headers.authorization, undefined);
+      if (packet === token) {
+        for (const name of ["x-forwarded-for", "x-real-ip", "x-client-ip"]) assert.equal(packet.headers[name], undefined);
+      }
     }
     assert.equal(token.headers["content-type"], undefined);
     assert.equal(account.target, "/v2/plugin/account");
