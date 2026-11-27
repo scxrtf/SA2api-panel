@@ -30,8 +30,11 @@ export interface LoginEndpoints {
 
 export function loginEndpoints(realm: string): LoginEndpoints {
   const base = realm === "global" ? UPSTREAM_BASE_GLOBAL : UPSTREAM_BASE_CN;
+  // 国际站的注册客户端为 workbuddy-ai；沿用 CN 的 workbuddy 会创建
+  // 不带客户端版本的授权会话，并在设备确认页显示未知客户端。
+  const platform = realm === "global" ? "workbuddy-ai" : "workbuddy";
   return {
-    state: base + "/v2/plugin/auth/state?platform=workbuddy",
+    state: base + "/v2/plugin/auth/state?platform=" + platform,
     token: base + "/v2/plugin/auth/token?state=",
     account: base + "/v2/plugin/account",
     origin: base,

@@ -91,11 +91,12 @@ test.beforeEach(() => {
   cfg = { ...DEFAULT_CONFIG };
 });
 
-test("登录端点采用 WorkBuddy platform 与 AccountScoped /account", () => {
+test("登录端点按站点采用注册的 WorkBuddy platform 与 AccountScoped /account", () => {
   for (const realm of ["cn", "global"]) {
     const ep = loginEndpoints(realm);
     const host = realm === "global" ? "https://www.workbuddy.ai" : "https://www.workbuddy.cn";
-    assert.equal(ep.state, host + "/v2/plugin/auth/state?platform=workbuddy");
+    const platform = realm === "global" ? "workbuddy-ai" : "workbuddy";
+    assert.equal(ep.state, host + "/v2/plugin/auth/state?platform=" + platform);
     assert.equal(ep.token, host + "/v2/plugin/auth/token?state=");
     assert.equal(ep.account, host + "/v2/plugin/account");
     assert.equal(ep.origin, host);
@@ -182,15 +183,20 @@ test("过期登录会话在本地结束，不继续发上游请求", async () =>
   assert.equal(calls.length, 0);
 });
 
-test("Global 保留区域映射并采用配置 UA，支持原生绝对毫秒过期时间", async () => {
+test("Global 使用 workbuddy-ai 客户端并采用配置 UA，支持原生绝对毫秒过期时间", async () => {
   putSession("global");
   const expiresAt = Date.now() + 3_600_000;
+  responses.push(envelope({ state: "global-state", authUrl: "https://www.workbuddy.ai/login?platform=workbuddy-ai&state=global-state" }));
+  const begun = await start.POST(startRequest("global"));
+  assert.equal(begun.status, 200);
+  assert.equal((await begun.json()).url, "https://www.workbuddy.ai/login?platform=workbuddy-ai&state=global-state");
+  assert.equal(calls[0].url.searchParams.get("platform"), "workbuddy-ai");
   responses.push(envelope({ accessToken: "offline-global", expiresAt, domain: "www.codebuddy.ai" }),
     envelope({ uid: "global-user", nickname: "Global" }));
   const response = await poll.GET(pollRequest());
   assert.equal(response.status, 200);
   assert.ok(calls.every((call) => call.url.origin === "https://www.workbuddy.ai"));
-  assert.equal(headers(calls[0]).get("user-agent"), "workbuddy-ai/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0");
+  assert.equal(headers(calls[1]).get("user-agent"), "workbuddy-ai/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0");
   assert.equal(writes[0].create.expiresAt, BigInt(Math.floor(expiresAt / 1000)));
   assert.equal(writes[0].create.realm, "global");
 });
