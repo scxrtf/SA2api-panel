@@ -103,20 +103,25 @@ test("Responses proxy retains function items, full replay input, and SSE framing
     res.end('event: response.completed\ndata: {"type":"response.completed"}\n\n');
   });
   const restore = set({
-    WB2A_API_KEY: "gateway-main-fixture", WB2A_RESPONSES_UPSTREAM: endpoint.url, WB2A_RESPONSES_KEY: "native-fixture",
+    WB2A_RESPONSES_UPSTREAM: endpoint.url, WB2A_RESPONSES_KEY: "native-fixture",
     WB2A_RESPONSES_MODELS: "workspace-native", USE_CLOUDBASE_REST: "0",
     DATABASE_URL: "postgresql://nobody:unused@127.0.0.1:1/test?connect_timeout=1",
   });
   try {
-    const request = new Request("http://localhost/api/v1/responses", {
-      method: "POST", headers: { Authorization: "Bearer gateway-main-fixture", "X-Not-Forwarded": "private" },
-      body: JSON.stringify({ model: "workspace-native", stream: true, input: [{ type: "function_call_output", call_id: "call_fixture", output: "OK" }] }),
-    });
-    const response = await forwardResponses(request, "responses");
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get("X-Accel-Buffering"), "no");
-    assert.match(await response.text(), /call_next.*response\.completed/s);
-    endpoint.check();
+    const runtime = globalThis as typeof globalThis & { prisma?: unknown };
+    const originalPrisma = runtime.prisma;
+    runtime.prisma = { apiKey: { findMany: async () => [] } };
+    try {
+      const request = new Request("http://localhost/api/v1/responses", {
+        method: "POST", headers: { "X-Not-Forwarded": "private" },
+        body: JSON.stringify({ model: "workspace-native", stream: true, input: [{ type: "function_call_output", call_id: "call_fixture", output: "OK" }] }),
+      });
+      const response = await forwardResponses(request, "responses");
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("X-Accel-Buffering"), "no");
+      assert.match(await response.text(), /call_next.*response\.completed/s);
+      endpoint.check();
+    } finally { runtime.prisma = originalPrisma; }
   } finally { restore(); await endpoint.close(); }
 });
 

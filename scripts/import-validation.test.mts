@@ -3,7 +3,6 @@ import test, { mock } from "node:test";
 
 let writes = 0;
 mock.module(new URL("../src/lib/panel-auth.ts", import.meta.url).href, { namedExports: {
-  panelAuth: async () => null,
   ok: (data: Record<string, unknown> = {}) => Response.json({ ok: true, ...data }),
   fail: (status: number, error: string) => Response.json({ ok: false, error }, { status }),
 } });

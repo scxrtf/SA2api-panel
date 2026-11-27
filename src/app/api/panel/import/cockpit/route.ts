@@ -1,7 +1,7 @@
 // POST /api/panel/import/cockpit — 从 cockpit tools 导出的 JSON 批量导入账号。
 // 接受 multipart/form-data（file=<json>）或裸 JSON body（数组原文）。
 // 返回 {ok, total, imported, skipped, errors}。
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import * as pool from "@/lib/pool";
@@ -40,8 +40,6 @@ function realmOf(domain: string): string {
 }
 
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
 
   let accounts: unknown[];
   const ct = req.headers.get("content-type") ?? "";

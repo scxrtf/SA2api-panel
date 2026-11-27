@@ -1,6 +1,6 @@
 // POST /api/panel/providers/{name}/probe-models — 用已存供应商的 base_url + key
 // 探测上游模型列表，供「修改模型」编辑器勾选。key 原文只在服务端使用，不回显给前端。
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { providerEndpoint } from "@/lib/provider-endpoint";
 import { prisma } from "@/lib/db";
 
@@ -10,8 +10,6 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ name: string }> };
 
 export async function POST(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { name } = await ctx.params;
   const provider = await prisma.provider.findUnique({ where: { name } });
   if (!provider) return fail(404, "未找到供应商：" + name);

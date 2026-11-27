@@ -1,4 +1,4 @@
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -10,9 +10,7 @@ import {
 } from "@/lib/aichecker-upstream";
 import { panelCacheDel } from "@/lib/panel-cache";
 
-export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
+export async function POST() {
 
   const dir = path.join(process.cwd(), "public", "aichecker", "baselines");
 

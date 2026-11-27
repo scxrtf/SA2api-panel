@@ -10,8 +10,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { identifyKeyIdentity, providerAllowlist } from "@/lib/auth-guard";
-import { getConfig } from "@/lib/config";
 import { prisma } from "@/lib/db";
+import { getConfig } from "@/lib/config";
 import { authShapeOf } from "@/lib/login";
 import {
   fetchModelsFull,
@@ -108,16 +108,16 @@ export async function GET(req: Request): Promise<Response> {
       { status: 401 },
     );
   }
-  const cfg = await getConfig();
-  // 供应商模型目录按 key 授权过滤：主线（主密钥 / 未启用鉴权）不限制；
+  // 供应商模型目录按 key 授权过滤：空密钥环不限制；
   // 子密钥只列出已授权供应商。
   const providerAllow = providerAllowlist(keyIdentity);
   const data: Record<string, unknown>[] = [];
   const seen = new Set<string>();
-  for (const model of nativeResponsesModels(keyIdentity, !!cfg.api_key)) {
+  for (const model of nativeResponsesModels(keyIdentity)) {
     data.push(model);
     seen.add(model.id);
   }
+  const cfg = await getConfig();
 
   // 池通道：CN / global 各取一个可用账号探测（某域无账号则整域跳过）。
   // 只取目录探测需要的 9 个认证字段 + 两条状态位。原先 include 会把

@@ -37,7 +37,9 @@
     ".runtime/workspace-qa/traffic-dev/types/**/*.ts",
     ".runtime/workspace-qa/traffic-dev/dev/types/**/*.ts",
     ".runtime/workspace-qa/traffic-verify/types/**/*.ts",
-    ".runtime/workspace-qa/traffic-verify/dev/types/**/*.ts"
+    ".runtime/workspace-qa/traffic-verify/dev/types/**/*.ts",
+    ".runtime/verify-open-panel/types/**/*.ts",
+    ".runtime/verify-open-panel/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

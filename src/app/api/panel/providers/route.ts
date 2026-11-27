@@ -1,5 +1,5 @@
 // GET/POST /api/panel/providers — 聚合供应商管理（key 只回掩码；新建整体入库）。
-import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
+import { verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { mask } from "@/lib/auth-guard";
 import { prisma } from "@/lib/db";
 import { invalidateProviders } from "@/lib/provider";
@@ -7,9 +7,7 @@ import { invalidateProviders } from "@/lib/provider";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
+export async function GET() {
   const rows = await prisma.provider.findMany({ orderBy: { createdAt: "asc" } });
   return ok({
     providers: rows.map((r) => ({
@@ -23,8 +21,6 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   let body: { name?: string; base_url?: string; key?: string; models?: string; super_password?: unknown };
   try {
     body = (await req.json()) as { name?: string; base_url?: string; key?: string };

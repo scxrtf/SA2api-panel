@@ -39,7 +39,7 @@ async function main() {
   });
   try {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const key = process.env.WB2A_API_KEY || (await db.apiKey.findFirst({ select: { key: true } }))?.key || '';
+    const key = (await db.apiKey.findFirst({ select: { key: true } }))?.key || '';
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key };
     const base = 'http://127.0.0.1:3000';
     const schema = await db.$queryRaw`SELECT conname::text FROM pg_constraint WHERE conname IN ('UsageEvent_uid_fkey', 'RequestLog_uid_fkey')`;

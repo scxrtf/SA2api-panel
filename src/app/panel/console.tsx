@@ -1,10 +1,9 @@
 "use client";
 import React, { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { req, getKey, useAutoRefresh, emitPanelRefresh, PanelActivityProvider, PANEL_AUTH_REQUIRED_EVENT, PanelRequestError } from "./lib";
+import { req, useAutoRefresh, emitPanelRefresh, PanelActivityProvider } from "./lib";
 import { LoadingIndicator, type Overview } from "./components/ui";
 import { Shell } from "./components/shell";
-import { LoginScreen } from "./components/login";
 import { isPanelView, NAV, panelHref, panelView, type View } from "./nav";
 import { AccountsView } from "./views/accounts";
 import { UsageView } from "./views/usage";
@@ -33,7 +32,7 @@ export function PanelConsole({ workspaceEnabled }: { workspaceEnabled: boolean }
   const [ov, setOv] = useState<Overview | null>(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [syncAt, setSyncAt] = useState<number | null>(null);
-  const [authState, setAuthState] = useState<"checking" | "required" | "ready" | "unavailable">("checking");
+  const [authState, setAuthState] = useState<"checking" | "ready" | "unavailable">("checking");
 
   const selectView = useCallback((next: View) => {
     if (next !== view) router.push(panelHref(next), { scroll: false });
@@ -54,30 +53,18 @@ export function PanelConsole({ workspaceEnabled }: { workspaceEnabled: boolean }
   }, []);
 
   const loadOverview = useCallback(async () => {
-    const requestedKey = getKey();
     try {
       const r = await req<Overview>("overview");
-      if (requestedKey !== getKey()) return;
       setOv(r);
       setSyncAt(Date.now());
       setAuthState("ready");
     } catch (e) {
-      if (requestedKey !== getKey()) return;
-      setAuthState((previous) => e instanceof PanelRequestError && e.status === 401
-        ? "required" : previous === "ready" ? "ready" : "unavailable");
+      setAuthState((previous) => previous === "ready" ? "ready" : "unavailable");
       flash("err", e instanceof Error ? e.message : String(e));
     }
   }, [flash]);
 
   useEffect(() => { const t = setTimeout(() => { void loadOverview(); }, 0); return () => clearTimeout(t); }, [loadOverview]);
-  useEffect(() => {
-    const requireAuth = () => {
-      setAuthState("required"); setOv(null); setSyncAt(null);
-      setVisited(new Set(["accounts"]));
-    };
-    window.addEventListener(PANEL_AUTH_REQUIRED_EVENT, requireAuth);
-    return () => window.removeEventListener(PANEL_AUTH_REQUIRED_EVENT, requireAuth);
-  }, []);
   useAutoRefresh(() => { void loadOverview(); }, 120_000, authState === "ready");
 
   // 顶栏刷新：先刷 overview（侧边栏统计），再广播事件让当前视图刷自己的数据。
@@ -90,9 +77,6 @@ export function PanelConsole({ workspaceEnabled }: { workspaceEnabled: boolean }
 
   if (view !== "workspace" && authState === "checking") {
     return <main className="login-wrap" aria-busy="true"><LoadingIndicator label="正在打开面板…" /></main>;
-  }
-  if (view !== "workspace" && authState === "required") {
-    return <LoginScreen onSubmit={loadOverview} msg={msg} />;
   }
   if (view !== "workspace" && authState === "unavailable") {
     return <main className="login-wrap"><div className="card">

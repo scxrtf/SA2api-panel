@@ -1,4 +1,4 @@
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { authShapeOf } from "@/lib/login";
@@ -18,8 +18,6 @@ import { label } from "@/lib/logfmt";
 
 // POST 接受该账号全部尚未接受的任务（分片 20/批节流；mp 码单独 mp 口径）。
 export async function POST(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { uid } = await ctx.params;
   const a = await loadAuth(uid);
   if (!a) return fail(404, "account not found");

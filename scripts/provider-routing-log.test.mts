@@ -27,9 +27,7 @@ const provider = { name: "测试商", models: "", apiKey: "fake-upstream", baseU
 let keyProviders = "测试商";
 let reply: (signal?: AbortSignal | null) => Promise<Response> = async () => Response.json({ choices: [], usage: { prompt_tokens: 8, completion_tokens: 2 } });
 const oldFetch = globalThis.fetch;
-const oldKey = process.env.WB2A_API_KEY;
 process.env.REQUEST_LOG_DIALOG = "1";
-delete process.env.WB2A_API_KEY;
 const logModel: LogModel = {
   create: async ({ data }) => { requests.push(data); return { ...data, id: "test-log-" + requests.length }; },
   findUnique: async () => null,
@@ -246,15 +244,9 @@ try {
   assert.equal(poolReads, 0);
   console.log("PASS UTF-8 chunking and pool TTFB regression");
 
-  // Panel APIs require the main key; the earlier provider calls deliberately
-  // exercise a restricted child key instead.
-  process.env.WB2A_API_KEY = "offline-panel-master";
-  const { getConfig } = await import("../src/lib/config.ts");
-  await getConfig(true);
+  // 面板接口免验证密钥；前面的供应商调用仍使用受限子密钥。
   const panelRequest = (url: string, init: RequestInit = {}) => {
-    const headers = new Headers(init.headers);
-    headers.set("Authorization", "Bearer offline-panel-master");
-    return new Request(url, { ...init, headers });
+    return new Request(url, init);
   };
   const { GET: getLogs } = await import("../src/app/api/panel/request_logs/route.ts");
   const queries: Query[] = [];
@@ -339,13 +331,12 @@ try {
   const { GET: metrics } = await import("../src/app/api/panel/request_metrics/route.ts");
   db.requestLog.count = async (query: Query) => { queries.push(query); return 0; };
   db.requestLog.aggregate = async () => ({ _avg: { durationMs: 0 } });
+  db.apiKey.findMany = async () => [];
   await metrics(panelRequest("https://gateway.invalid/api/panel/request_metrics"));
   assert.deepEqual(queries.at(-1)!.where.OR, [{ status: { gte: 400 } }, { errKind: { not: "" } }]);
   console.log("PASS dashboard error count includes HTTP 200 errors");
 } finally {
   globalThis.fetch = oldFetch;
-  if (oldKey === undefined) delete process.env.WB2A_API_KEY;
-  else process.env.WB2A_API_KEY = oldKey;
   delete process.env.WB2A_SUPER_PASSWORD;
   delete globalWithDb.prisma;
 }

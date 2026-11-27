@@ -1,22 +1,18 @@
 // GET/POST /api/panel/config — 配置读写（saveConfig 校验 + 热生效，Setting 表落盘）。
 // POST 为配置级操作：必须携带超级密码二次确认。
-import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
+import { verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { getConfig, saveConfig, DEFAULT_CONFIG } from "@/lib/config";
 import { reconfigure } from "@/lib/scheduler";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
+export async function GET() {
   const cfg = await getConfig();
   return ok({ config: cfg, defaults: DEFAULT_CONFIG });
 }
 
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   let raw: unknown;
   try {
     raw = await req.json();

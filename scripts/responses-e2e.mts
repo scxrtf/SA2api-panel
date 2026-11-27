@@ -82,7 +82,7 @@ const next = spawn(process.execPath, ["node_modules/next/dist/bin/next", develop
   windowsHide: true, detached: development && process.platform !== "win32", env: {
     ...childEnv(), NODE_ENV: development ? "development" : "production", NODE_PATH: process.env.NODE_PATH, NEXT_TELEMETRY_DISABLED: "1",
     WB2A_NEXT_DIST_DIR: dist, WB2A_DISABLE_SCHEDULER: "1", WB2_WORKSPACE_ENABLED: "0",
-    WB2API_MODEL_JSON_DISABLE: "1", WB2A_API_KEY: key, USE_CLOUDBASE_REST: "1", CLOUDBASE_POSTGREST_URL: fixtureUrl + "/db/rest",
+    WB2API_MODEL_JSON_DISABLE: "1", USE_CLOUDBASE_REST: "1", CLOUDBASE_POSTGREST_URL: fixtureUrl + "/db/rest",
     CLOUDBASE_API_KEY: "fake-postgrest-key", WB2A_RESPONSES_UPSTREAM: "", WB2A_RESPONSES_KEY: "", WB2A_RESPONSES_MODELS: "",
     DATABASE_URL: "postgresql://offline:offline@127.0.0.1:1/gateway?connect_timeout=1", DIRECT_URL: "postgresql://offline:offline@127.0.0.1:1/gateway?connect_timeout=1",
   },
@@ -130,8 +130,7 @@ try {
   const unsigned = await fetch(gateway + "/api/v1/responses/responses", {
     method: "POST", body: "{}", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(10_000),
   });
-  assert.equal(unsigned.status, 401);
-  assert.equal((await unsigned.json()).error.code, "invalid_api_key");
+  assert.equal(unsigned.status, 400);
   const wrongMethod = await send("/v1/responses");
   assert.equal(wrongMethod.status, 405);
   assert.equal(wrongMethod.headers.get("allow"), "POST, OPTIONS");

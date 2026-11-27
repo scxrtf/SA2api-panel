@@ -52,7 +52,6 @@ fixture("dal", { dal: new Proxy({}, {
 fixture("cloudbase-rest", { cbSelect: async () => [], isCloudbaseRestEnabled: () => cloudbase });
 fixture("cloudbase-monitor", { getCloudbasePlatformStats: () => { platformCalls++; return readPlatform(); } });
 fixture("panel-auth", {
-  panelAuth: async (req: Request) => req.headers.has("Authorization") ? null : new Response(null, { status: 401 }),
   ok: (data: Record<string, unknown>) => Response.json({ ok: true, ...data }),
   fail: (status: number, error: string) => Response.json({ ok: false, error }, { status }),
   verifySuperPassword: (password: string) => password === "offline",
@@ -79,7 +78,7 @@ test("direct database stats coalesce cold reads and manual refreshes, after auth
     assert.ok(snapshots.every((snapshot) => snapshot.mode === "direct" && snapshot.platform === undefined));
     assert.equal(directCalls, refresh ? 2 : 1);
   }
-  assert.equal((await GET(new Request(url))).status, 401);
+  assert.equal((await GET(new Request(url))).status, 200);
   assert.equal(directCalls, 2);
   assert.equal(platformCalls, 0);
 });

@@ -40,7 +40,6 @@ mock.module(new URL("../src/lib/config.ts", import.meta.url).href, {
 });
 mock.module(new URL("../src/lib/panel-auth.ts", import.meta.url).href, {
   namedExports: {
-    panelAuth: async () => null,
     ok: (data: Record<string, unknown> = {}) => Response.json({ ok: true, ...data }),
     fail: (status: number, error: string) => Response.json({ ok: false, error }, { status }),
   },

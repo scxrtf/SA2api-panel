@@ -1,4 +1,4 @@
-import { panelAuth, ok, fail, jsonify } from "@/lib/panel-auth";
+import { ok, fail, jsonify } from "@/lib/panel-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // 采样 iterations 次（默认 100），并发上限 10，单次采样上限 120s；
@@ -23,8 +23,6 @@ import {
 //        iterations?:100, concurrency?:5, anti_target?:false,
 //        base_url?/api_key?（显式外站通道，缺省走池/供应商）, check_id?:uuid, uid?:string}
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   let body: {
     model?: string; baseline?: string; iterations?: number; concurrency?: number;
     anti_target?: boolean; base_url?: string; api_key?: string; check_id?: string; uid?: string;
@@ -126,8 +124,6 @@ export async function POST(req: Request) {
 
 // DELETE 取消进行中的鉴别（复用测试会话 AbortController 表）。
 export async function DELETE(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const id = new URL(req.url).searchParams.get("id") ?? "";
   if (!id) return fail(400, "id is required");
   cancelTest(id);

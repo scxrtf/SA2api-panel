@@ -61,18 +61,17 @@ export function nativeAllowed(cfg: NativeConfig, identity: KeyIdentity) {
   return grants === null || grants.has(cfg.provider);
 }
 
-export function nativeResponsesModels(identity: KeyIdentity, authenticated: boolean) {
+export function nativeResponsesModels(identity: KeyIdentity) {
   const cfg = nativeResponsesConfig();
-  if (!authenticated || !cfg?.canonical || !cfg.secret || !nativeAllowed(cfg, identity)) return [];
+  if (!cfg?.canonical || !cfg.secret || !nativeAllowed(cfg, identity)) return [];
   return [...cfg.models].map((id) => ({ id, object: "model", created: 1753600000, owned_by: cfg.provider }));
 }
 
 export function nativeResponsesInput(body: Obj, identity: KeyIdentity) {
-  // These are IDs of objects stored directly in the shared upstream project, not
-  // gateway-scoped response IDs. External project references are for the master key.
-  if (identity.unrestricted) return;
+  // 无网站主密钥。空密钥环可访问上游项目；启用子密钥后仅通配符授权可访问。
+  if (identity.providers === "*") return;
   for (const field of ["conversation", "prompt"]) {
-    if (body[field] != null) throw new ResponsesError(403, "native_resource_not_allowed", "External upstream project references require the gateway main key.", field);
+    if (body[field] != null) throw new ResponsesError(403, "native_resource_not_allowed", "External upstream project references require wildcard provider access.", field);
   }
   if (responseArray(body.input).some((item) => responseObject(item).type === "item_reference")) {
     throw new ResponsesError(403, "native_resource_not_allowed", "Use full input items or a gateway response ID for continuation.", "input");

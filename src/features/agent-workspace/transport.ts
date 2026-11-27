@@ -1,17 +1,12 @@
 "use client";
 
-import { getKey } from "@/app/panel/lib";
-import { panelFetch } from "@/app/panel/local-access";
-
 export class WorkspaceHttpError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 export async function requestWorkspace(path = "", init?: RequestInit) {
   const headers = new Headers(init?.headers);
-  const key = getKey();
-  if (key) headers.set("Authorization", "Bearer " + key);
   if (init?.body) headers.set("Content-Type", "application/json");
-  const response = await panelFetch("/api/workspace" + path, { cache: "no-store", ...init, headers });
+  const response = await fetch("/api/workspace" + path, { cache: "no-store", ...init, headers });
   if (!response.ok) {
     const body: { error?: string } = await response.json().catch(() => ({}));
     throw new WorkspaceHttpError(body.error ?? `工作区请求失败（${response.status}）`, response.status);

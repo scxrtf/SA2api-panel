@@ -32,7 +32,6 @@ const { dal } = await import("../src/lib/dal.ts");
 mock.module(new URL("../src/lib/db.ts", import.meta.url).href, { namedExports: { prisma: dal } });
 mock.module(new URL("../src/lib/panel-auth.ts", import.meta.url).href, {
   namedExports: {
-    panelAuth: async () => null,
     ok: (data: Record<string, unknown>) => Response.json({ ok: true, ...data }),
   },
 });

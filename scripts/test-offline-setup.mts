@@ -32,7 +32,6 @@ process.env.CLOUDBASE_POSTGREST_URL = "http://127.0.0.1:9";
 process.env.CLOUDBASE_API_KEY = "offline-test";
 delete process.env.DATABASE_URL;
 delete process.env.DIRECT_URL;
-delete process.env.WB2A_API_KEY;
 for (const key of Object.keys(process.env)) if (key.startsWith("WB2A_RESPONSES_")) delete process.env[key];
 delete process.env.WB2A_SUPER_PASSWORD;
 delete process.env.WB2A_MACHINE_PASSWORD;

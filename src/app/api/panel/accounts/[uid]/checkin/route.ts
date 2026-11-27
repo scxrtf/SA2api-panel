@@ -1,5 +1,5 @@
 // POST .../checkin — 单号签到 + 余额刷新（企业号跳过签到仅刷额度；已签幂等）。
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import * as pool from "@/lib/pool";
@@ -15,8 +15,6 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ uid: string }> };
 
 export async function POST(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { uid } = await ctx.params;
   const row = await prisma.account.findUnique({ where: { uid } });
   if (!row) return fail(404, "account not found");

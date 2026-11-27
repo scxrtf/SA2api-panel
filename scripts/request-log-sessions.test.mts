@@ -43,22 +43,20 @@ test("CloudBase and Prisma ship the same additive session migration", () => {
 test("session API keeps the existing auth, preserves filter scope and only fetches member-page summaries", async (t) => {
   const oldDb = (globalThis as { prisma?: unknown }).prisma;
   const originalUseRest = process.env.USE_CLOUDBASE_REST;
-  const originalKey = process.env.WB2A_API_KEY;
   const originalFetch = globalThis.fetch;
   t.after(() => {
     (globalThis as { prisma?: unknown }).prisma = oldDb;
     if (originalUseRest === undefined) delete process.env.USE_CLOUDBASE_REST; else process.env.USE_CLOUDBASE_REST = originalUseRest;
-    if (originalKey === undefined) delete process.env.WB2A_API_KEY; else process.env.WB2A_API_KEY = originalKey;
     globalThis.fetch = originalFetch;
   });
   process.env.USE_CLOUDBASE_REST = "0";
-  process.env.WB2A_API_KEY = "session-panel-fixture";
   const queries: unknown[][] = [];
   const memberQueries: { where: unknown; select: Record<string, boolean> }[] = [];
   const writes: Record<string, unknown>[] = [];
   let writeError: unknown = null;
   (globalThis as { prisma?: unknown }).prisma = {
     setting: { findUnique: async () => null },
+    apiKey: { findMany: async () => [] },
     $queryRaw: async (strings: TemplateStringsArray, ...args: unknown[]) => {
       assert.match(strings.join(""), /public\.wb2_request_log_session_page/);
       queries.push(args);
@@ -80,8 +78,9 @@ test("session API keeps the existing auth, preserves filter scope and only fetch
   const { GET } = await import("../src/app/api/panel/request_logs/route");
   const { createRequestLog } = await import("../src/lib/request-log-write");
   const endpoint = "http://localhost/api/panel/request_logs?";
-  const read = (q: string) => GET(new Request(endpoint + q, { headers: { Authorization: "Bearer session-panel-fixture" } }));
-  assert.equal((await GET(new Request(endpoint + "view=sessions"))).status, 401);
+  const read = (q: string) => GET(new Request(endpoint + q));
+  assert.equal((await GET(new Request(endpoint + "view=sessions"))).status, 200);
+  queries.length = 0;
   assert.equal((await read("group=s:invalid")).status, 400);
   assert.equal(queries.length, 0);
 
@@ -134,7 +133,7 @@ test("chat and translated Messages log the same client session across provider a
   const db = globalThis as typeof globalThis & { prisma?: unknown };
   const previousDb = db.prisma;
   const previousFetch = globalThis.fetch;
-  const config = { WB2A_API_KEY: "session-main-key", USE_CLOUDBASE_REST: "0", WB2_WORKSPACE_CAPTURE: "0" };
+  const config = { USE_CLOUDBASE_REST: "0", WB2_WORKSPACE_CAPTURE: "0" };
   const previous = Object.fromEntries(Object.keys(config).map((name) => [name, process.env[name]]));
   t.after(() => {
     db.prisma = previousDb;

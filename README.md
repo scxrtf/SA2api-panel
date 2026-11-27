@@ -24,7 +24,7 @@ Docker 构建会在独立阶段自动编译并带入运行镜像。
 ```bash
 npm ci
 npm run build:official-tls  # 生成 native/official-tls/bin/official-tls[.exe]
-cp .env.example .env        # 填数据库通道、WB2A_API_KEY 与两个面板密码
+cp .env.example .env        # 填数据库通道与两个面板密码
 npx prisma migrate dev      # 建表
 npm run dev                 # http://localhost:3000/panel
 ```
@@ -63,7 +63,7 @@ PostgreSQL 环境应用 `cloudbase/migrations/20261120120000_request_log_session
 
 1. Railway 项目 → **+ New → GitHub Repo** 选本仓库（若嵌套在 Go 项目内，
    Settings → Root Directory 填 `wb2api-next`）。
-2. 服务 **Variables** 设置数据库通道、`WB2A_API_KEY`、`WB2A_SUPER_PASSWORD` 与 `WB2A_MACHINE_PASSWORD`。
+2. 服务 **Variables** 设置数据库通道、`WB2A_SUPER_PASSWORD` 与 `WB2A_MACHINE_PASSWORD`。
 3. 启动时 Prisma 模式执行 `prisma migrate deploy`；CloudBase REST 模式跳过迁移。
 4. **Settings → Networking → Generate Domain** 拿公网域名，访问 `https://域名/panel`。
 
@@ -76,7 +76,7 @@ PostgreSQL 环境应用 `cloudbase/migrations/20261120120000_request_log_session
 | 每 30 分钟 | `POST /api/cron/keepalive` | 仅续期临期 token；可安全高频调用 |
 | 每 6 小时 | `POST /api/cron/retention` | 数据库保留策略：清老日志详情、删过期日志与健康检查 |
 
-请求头：`Authorization: Bearer $WB2A_API_KEY`。主密钥为空时 cron 端点返回 503（拒绝未鉴权触发）。
+定时任务端点与网站面板免验证密钥，无需请求头。
 
 ### 磁盘 / 保留策略
 
@@ -103,7 +103,7 @@ Token 保活默认只处理 24 小时内到期或过期时间未知的账号；�
 
 - **单实例语义**：选号运行态（inFlight/lastUsed/抽签序号）为进程内 Map，与 Go 单机口径等价。
   Railway 单容器部署即可；不要水平扩多副本（多副本会分裂在途计数，同 Go 版约束）。
-- **鉴权**：`/api/v1/*` 接受主密钥 ∪ ApiKey 环任一 Bearer；`/api/panel/*` 与 `/api/cron/*` 仅主密钥。面板和 cron 缺少主密钥配置时返回 503；子密钥没有管理权限。网关仅在主密钥与密钥环都为空且密钥环读取成功时保持显式免鉴权模式，数据库读取失败不会放行。
+- **鉴权**：网站面板与 `/api/cron/*` 免验证密钥；`/api/v1/*` 在密钥环为空时免鉴权，创建子密钥后接受 ApiKey 环任一 Bearer。敏感配置操作保留超级密码确认，数据库读取失败不会放行网关请求。
 - **粘性会话**：会话键 → 账号绑定存 StickySession 表，与 Go 的内存 map 语义一致（DB 化后重启不丢）。
 - **冷却/熔断/降权**：ModelCooldown、AccountState 落库，策略逻辑 1:1 移植 internal/pool。
 
@@ -119,7 +119,6 @@ Token 保活默认只处理 24 小时内到期或过期时间未知的账号；�
 
 ```bash
 curl -X POST https://<你的域名>/api/panel/providers \
-  -H "Authorization: Bearer $WB2A_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "myvendor",
@@ -155,7 +154,7 @@ curl https://<你的域名>/api/v1/chat/completions \
   }'
 ```
 
-- **鉴权**：与池通道相同，`/api/v1/*` 接受主密钥或 ApiKey 环任一 Bearer。
+- **鉴权**：与池通道相同，空密钥环免鉴权；创建子密钥后使用 ApiKey 环任一 Bearer。
 - **密钥环绑定**：面板网关页可给子密钥勾选供应商白名单——绑定后该子密钥只能调用已勾选
   供应商的模型；显式 `*` = 全部；留空/不勾选 = 不授权任何供应商（新建密钥的默认态，
   需在面板显式授权后才能调用聚合供应商；池通道不受影响）。
@@ -170,7 +169,6 @@ curl https://<你的域名>/api/v1/chat/completions \
 
 ```bash
 curl -X POST https://<你的域名>/api/panel/models/test \
-  -H "Authorization: Bearer $WB2A_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model": "myvendor:gpt-6.1-sol"}'
 ```

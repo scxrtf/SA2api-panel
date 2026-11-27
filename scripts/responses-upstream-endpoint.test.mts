@@ -56,7 +56,6 @@ test("native relay and checker use the normalized path and attribute genuine ups
   });
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const fixtureEnv = {
-    WB2A_API_KEY: "panel-fixture",
     WB2A_RESPONSES_UPSTREAM: origin + "/provider/v1/chat/completions",
     WB2A_RESPONSES_KEY: "native-fixture",
     WB2A_RESPONSES_MODELS: "fixture-model",
@@ -78,7 +77,6 @@ test("native relay and checker use the normalized path and attribute genuine ups
   const check = (input: string) => checkerProxy(new Request("http://localhost/api/panel/aichecker/proxy/responses", {
     method: "POST",
     headers: {
-      Authorization: "Bearer panel-fixture",
       "Content-Type": "application/json",
       "X-Target-Base-URL": origin + "/provider/v1/responses/v1/responses",
     },

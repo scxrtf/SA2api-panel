@@ -1,8 +1,5 @@
 // 面板 API 公共辅助：统一响应形态 + BigInt 序列化兜底。
 import { createHash, timingSafeEqual } from "crypto";
-import { getConfig } from "./config";
-import { verifyBearer } from "./auth-guard";
-import { verifyLocalPanelSession } from "./panel-local-session";
 
 export const ok = (data: Record<string, unknown> = {}) =>
   jsonify({ ok: true, ...data }, 200);
@@ -18,15 +15,7 @@ export function jsonify(v: unknown, status = 200): Response {
   );
 }
 
-// 本机开发会话单独验证；其余管理请求仍只接受主密钥。
-export async function panelAuth(req: Request): Promise<Response | null> {
-  if (verifyLocalPanelSession(req)) return null;
-  const cfg = await getConfig();
-  if (!cfg.api_key) return fail(503, "请先配置 WB2A_API_KEY，再访问管理面板");
-  if (!verifyBearer(req, cfg.api_key)) return fail(401, "invalid or missing panel api key");
-  return null;
-}
-
+// 网站管理面板不再使用验证密钥；超级密码操作仍独立校验。
 // 超级密码：调整 key 的供应商授权时必须二次校验；未配置环境变量时一律拒绝。
 // 比较走 SHA-256 摘要 + timingSafeEqual（与 Bearer 鉴权同口径）。
 

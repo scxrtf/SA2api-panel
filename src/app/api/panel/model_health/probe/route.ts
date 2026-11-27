@@ -1,4 +1,4 @@
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { runModelHealthProbe } from "@/lib/modelhealth";
 
 export const runtime = "nodejs";
@@ -7,8 +7,6 @@ export const maxDuration = 300;
 
 // POST 手动执行真实最小聊天探测；传 model 时只探测该模型，不传则探测全部目录模型。
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
 
   let body: { model?: unknown };
   try {

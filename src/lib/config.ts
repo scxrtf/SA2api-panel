@@ -1,8 +1,7 @@
-// 面板配置：持久化在 Setting 表（key="config"），环境变量 WB2A_API_KEY 可覆盖主密钥。
+// 面板配置：持久化在 Setting 表（key="config"）。
 // 等价 Go 的 cmd/server Config：读入合并默认值，面板保存即热生效（5s 内存缓存）。
 
 export interface AppConfig {
-  api_key: string; // 主密钥（空 = 不启用鉴权）
   max_rotate: number; // 单请求最大轮换次数
   refresh_skew_sec: number; // token 提前刷新窗口（秒）
   soft_cooldown_ms: number; // 软限流冷却基数
@@ -72,7 +71,6 @@ export interface AppConfig {
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
-  api_key: "",
   max_rotate: 8,
   refresh_skew_sec: 300,
   soft_cooldown_ms: 60_000,
@@ -169,8 +167,6 @@ export async function getConfig(force = false): Promise<AppConfig> {
     cfg.model_optimization_accounts = {};
   }
   normalizeCapacityConfig(cfg);
-  // 环境变量覆盖主密钥（Railway 部署首选方式；面板里的密钥仍走 Setting）。
-  if (process.env.WB2A_API_KEY) cfg.api_key = process.env.WB2A_API_KEY;
   // 对齐 Go normalize：<=0 回落 5（不是「全部展开」）。
   if (!Number.isFinite(cfg.package_detail_limit) || cfg.package_detail_limit <= 0) {
     cfg.package_detail_limit = 5;

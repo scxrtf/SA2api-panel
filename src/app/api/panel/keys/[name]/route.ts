@@ -1,6 +1,6 @@
 // PATCH/DELETE /api/panel/keys/{name} — 调整供应商授权 / 删除网关密钥。
 // PATCH 属于权限划分操作，必须携带超级密码二次确认。
-import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
+import { verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { invalidateKeyRing } from "@/lib/auth-guard";
 import { nativeResponsesConfig } from "@/lib/responses-native";
@@ -11,8 +11,6 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ name: string }> };
 
 export async function PATCH(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { name } = await ctx.params;
   const existing = await prisma.apiKey.findUnique({ where: { name } });
   if (!existing) return fail(404, "未找到密钥：" + name);
@@ -80,8 +78,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { name } = await ctx.params;
   const existing = await prisma.apiKey.findUnique({ where: { name } });
   if (!existing) return fail(404, "未找到密钥：" + name);

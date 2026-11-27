@@ -1,6 +1,6 @@
 // GET /api/panel/usage — 用量聚合（保持既有面板响应契约）。
 // PostgreSQL 内完成分组、求和与北京时间分桶，只把聚合行传回 Node.js。
-import { panelAuth, ok } from "@/lib/panel-auth";
+import { ok } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { buildUsageSnapshot, type SeriesDim } from "@/lib/usage-aggregation";
 import { queryUsageAggregate } from "@/lib/usage-query";
@@ -12,8 +12,6 @@ export const dynamic = "force-dynamic";
 const SERIES_DIMS = new Set<string>(["key", "model", "account", "provider", "realm"]);
 
 export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const q = new URL(req.url).searchParams;
   const groupRaw = (q.get("group") ?? "").trim();
   const groupDim = (SERIES_DIMS.has(groupRaw) ? groupRaw : "") as SeriesDim | "";

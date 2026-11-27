@@ -19,7 +19,7 @@ import { completeBackgroundResponse, responseDigest } from "../src/lib/responses
 type Obj = Record<string, any>;
 type Seen = { method: string; url: string; headers: IncomingMessage["headers"]; body: Obj };
 type Row = { id: string; backend: string; model: string; snapshot: string; createdAt: Date };
-const KEY = "responses-test-main", SUB = "responses-test-sub", CHAT_ONLY = "responses-chat-only";
+const KEY = "responses-test-sub", SUB = "responses-test-other", CHAT_ONLY = "responses-chat-only";
 const ledger = new Map<string, Row>();
 const seen: Seen[] = [];
 const failures: unknown[] = [];
@@ -122,13 +122,13 @@ const server = createServer(async (req, res) => {
 before(async () => {
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   port = (server.address() as { port: number }).port;
-  process.env.WB2A_API_KEY = KEY;
   process.env.WB2A_SUPER_PASSWORD = "test-secret";
   process.env.WB2_WORKSPACE_ENABLED = "0";
   Object.assign(globalThis, { prisma: {
     setting: { findUnique: async () => null },
     apiKey: { findMany: async () => [
-      { name: "test sub", key: SUB, providers: subGrants },
+      { name: "test sub", key: KEY, providers: subGrants },
+      { name: "other sub", key: SUB, providers: subGrants },
       { name: "chat only", key: CHAT_ONLY, providers: "fixture" },
     ], findUnique: async () => ({ name: "test sub" }), update: async ({ data }: Obj) => { subGrants = data.providers; } },
     account: { findMany: async () => [] },

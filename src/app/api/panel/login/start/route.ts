@@ -1,6 +1,6 @@
 // POST /api/panel/login/start — 发起 WorkBuddy OAuth 设备授权（auth/state 拿授权 URL）。
 // state 会话存 LoginSession 表（15 分钟 TTL），poll 同 realm 完成落库。
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { loginEndpoints, loginDoJSON, alignLoginAuthURL } from "@/lib/login";
 import { getConfig } from "@/lib/config";
@@ -10,8 +10,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   let realm = "cn";
   try {
     const body = (await req.json()) as { realm?: string };

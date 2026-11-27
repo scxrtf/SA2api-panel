@@ -20,11 +20,10 @@ interface ModelRow {
 }
 
 const MODEL_STORE = "wb2a_connect_model";
-const GATEWAY_AUTH = '  -H "Authorization: Bearer $WB2A_API_KEY"';
 const bashQuote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 
 function curlJson(url: string, payload: Record<string, unknown>, headers: string[] = []) {
-  return ["curl " + bashQuote(url), GATEWAY_AUTH, '  -H "Content-Type: application/json"', ...headers,
+  return ["curl " + bashQuote(url), '  -H "Content-Type: application/json"', ...headers,
     "  -d " + bashQuote(JSON.stringify(payload, null, 2))].join(" \\\n");
 }
 
@@ -265,7 +264,7 @@ export function ConnectView() {
     }).catch(() => {});
   }, []);
 
-  const curlModels = ["curl " + bashQuote(modelsUrl), GATEWAY_AUTH].join(" \\\n");
+  const curlModels = "curl " + bashQuote(modelsUrl);
   const curlResponses = curlJson(responsesUrl, { model, input: "你好", store: false });
   const messages = [{ role: "user", content: "你好" }];
   const curlChat = curlJson(chatUrl, { model, messages });
@@ -279,16 +278,14 @@ web_search = "disabled"
 name = "wb2api"
 base_url = ${JSON.stringify(openaiBase)}
 wire_api = "responses"
-env_key = "WB2A_API_KEY"
 requires_openai_auth = false
 supports_websockets = false`;
 
-  const pythonResponses = `import os
-from openai import OpenAI
+  const pythonResponses = `from openai import OpenAI
 
 client = OpenAI(
     base_url=${JSON.stringify(openaiBase)},
-    api_key=os.environ["WB2A_API_KEY"],
+    api_key=None,
 )
 reply = client.responses.create(
     model=${JSON.stringify(model)},
@@ -316,8 +313,8 @@ print(reply.output_text)`;
 
         <div className="mb-3">
           <CtrlHint>
-            cURL 示例使用 Bash。将 <code>WB2A_API_KEY</code> 设为网关密钥，不使用供应商的上游密钥；
-            网关未启用鉴权时，HTTP 请求可省略 <code>Authorization</code>。
+            cURL 示例使用 Bash，网站与网关默认免验证密钥。创建子密钥后，客户端需改用对应的
+            <code>Authorization: Bearer &lt;子密钥&gt;</code>。
           </CtrlHint>
         </div>
 
@@ -472,7 +469,7 @@ print(reply.output_text)`;
         <div className="grid grid-cols-1 gap-3.5 min-[901px]:grid-cols-2">
           <div className="connect-card">
             <h4>Codex（Responses）</h4>
-            <CtrlHint>将示例合并到 <code>~/.codex/config.toml</code>，启动前设置 <code>WB2A_API_KEY</code>。</CtrlHint>
+            <CtrlHint>将示例合并到 <code>~/.codex/config.toml</code>；网站免验证密钥，无需设置主密钥。</CtrlHint>
             <CodeSnippet label="Codex 配置" value={codexConfig} copied={copied} onCopy={copy} />
             <CtrlHint>
               使用 HTTP/SSE，保持 <code>supports_websockets = false</code>。搭配 WorkBuddy 或 Chat 上游时关闭服务端网页搜索。
@@ -581,7 +578,7 @@ ANTHROPIC_MODEL=${model}`}</pre>
             <div>
               <b>invalid or missing api key</b>
               <p>
-                使用网关密钥。HTTP 请求发送 <code>Authorization: Bearer</code>；Codex 检查 <code>WB2A_API_KEY</code> 是否已设置。
+                未创建子密钥时无需鉴权头。创建子密钥后，HTTP 请求发送 <code>Authorization: Bearer &lt;子密钥&gt;</code>。
               </p>
             </div>
           </div>

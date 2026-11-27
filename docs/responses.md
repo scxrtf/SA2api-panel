@@ -1,6 +1,6 @@
 # OpenAI Responses 接入
 
-HTTP Base URL 为 `http://127.0.0.1:3000/api/v1`，也可使用 `/v1`。客户端传已有网关密钥与模型目录中的完整 ID（保留 `cn:`、`global:` 或供应商前缀）。未配置原生上游时，Responses 请求复用现有 Chat 路由、账号池和用量统计；已有 Chat Completions / Anthropic Messages 调用不变。
+HTTP Base URL 为 `http://127.0.0.1:3000/api/v1`，也可使用 `/v1`。网站默认免验证密钥；创建子密钥后客户端传子密钥与模型目录中的完整 ID（保留 `cn:`、`global:` 或供应商前缀）。未配置原生上游时，Responses 请求复用现有 Chat 路由、账号池和用量统计；已有 Chat Completions / Anthropic Messages 调用不变。
 
 ## 启用持久化
 
@@ -17,14 +17,14 @@ HTTP Base URL 为 `http://127.0.0.1:3000/api/v1`，也可使用 `/v1`。客户�
 
 ```powershell
 $base = 'http://127.0.0.1:3000/api/v1'
-$headers = @{ Authorization = "Bearer $env:WB2A_API_KEY" }
+$headers = @{}
 $model = (Invoke-RestMethod "$base/models" -Headers $headers).data[0].id
 $body = @{ model = $model; input = '只回复 OK'; store = $false } | ConvertTo-Json -Compress
 $reply = Invoke-RestMethod "$base/responses" -Method Post -Headers $headers -ContentType 'application/json' -Body $body
 $reply.output | Where-Object type -eq 'message' | ForEach-Object { $_.content.text }
 ```
 
-Codex：在现有 `~/.codex/config.toml` 合并以下设置，运行时给环境变量 `WB2A_API_KEY` 设置**客户端网关密钥**。`model` 选模型目录实际可用的 ID。若连接的是 Chat 兼容通道，将 Codex 的服务端网页搜索设为 `disabled`。配置字段见 [Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。
+Codex：在现有 `~/.codex/config.toml` 合并以下设置。`model` 选模型目录实际可用的 ID。若连接的是 Chat 兼容通道，将 Codex 的服务端网页搜索设为 `disabled`。配置字段见 [Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。
 
 ```toml
 model_provider = "wb2api"
@@ -34,7 +34,6 @@ web_search = "disabled"
 name = "wb2api"
 base_url = "http://127.0.0.1:3000/api/v1"
 wire_api = "responses"
-env_key = "WB2A_API_KEY"
 requires_openai_auth = false
 supports_websockets = false
 ```
@@ -73,9 +72,9 @@ supports_websockets = false
 | `WB2A_RESPONSES_KEY` | 服务端上游密钥，不是下游客户端密钥 |
 | `WB2A_RESPONSES_MODELS` | 逗号分隔的原生模型 ID；与其他通道同名时优先走原生 |
 | `WB2A_RESPONSES_PROVIDER` | 子密钥供应商授权名，默认 `openai-responses` |
-| `WB2A_RESPONSES_STATE_SECRET` | 可选，兼容层加密项密钥。多实例设置同一份；未设置则用网关主密钥，无主密钥时限同一进程重放 |
+| `WB2A_RESPONSES_STATE_SECRET` | 可选，兼容层加密项密钥。多实例设置同一份；未设置时限同一进程重放 |
 
-原生通道需配置网关主密钥。可通过 `PATCH /api/panel/keys/{name}` 把原生授权名加入子密钥的 `providers` 白名单（提交完整白名单及 `super_password`）。直接引用上游项目的 `conversation`、`prompt` 或 `item_reference` 使用主密钥。原生和兼容通道的 `previous_response_id` 以及加密项各自绑定原通道和网关密钥，换通道时改用完整的文本、消息与工具结果重放。
+原生通道免主密钥。可通过 `PATCH /api/panel/keys/{name}` 把原生授权名加入子密钥的 `providers` 白名单（提交完整白名单及 `super_password`）。直接引用上游项目的 `conversation`、`prompt` 或 `item_reference` 使用空密钥环或通配符授权。原生和兼容通道的 `previous_response_id` 以及加密项各自绑定原通道和客户端密钥，换通道时改用完整的文本、消息与工具结果重放。
 
 ## 离线回归
 

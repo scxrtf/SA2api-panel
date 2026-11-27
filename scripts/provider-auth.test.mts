@@ -12,7 +12,6 @@ const record = (operation: string) => (args?: unknown) => {
 
 mock.module(new URL("../src/lib/panel-auth.ts", import.meta.url).href, {
   namedExports: {
-    panelAuth: async () => null,
     verifySuperPassword: (value: unknown) => value === "secret",
     ok: (data: Record<string, unknown> = {}) => Response.json({ ok: true, ...data }),
     fail: (status: number, error: string) => Response.json({ ok: false, error }, { status }),

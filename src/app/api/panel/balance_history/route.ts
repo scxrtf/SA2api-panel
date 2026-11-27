@@ -1,6 +1,6 @@
 // GET /api/panel/balance_history — 余额采样序列，供「余额趋势」视图画折线。
 // days 查询参数控制窗口（默认 30，上限 30 = 原始点保留期；更早的数据已折叠为日粒度）。
-import { panelAuth, ok } from "@/lib/panel-auth";
+import { ok } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { isCloudbaseRestEnabled } from "@/lib/cloudbase-rest";
 import { snapshotBalance } from "@/lib/balance";
@@ -10,8 +10,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const url = new URL(req.url);
   const refresh = url.searchParams.get("refresh") === "1";
   let days = 30;

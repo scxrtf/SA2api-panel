@@ -6,7 +6,7 @@ import { ResponsesError } from "../src/lib/responses-http";
 import { responsesCodec } from "../src/lib/responses-state";
 import { expandAttachments, pdfText } from "../src/lib/responses-attachments";
 
-const codec = responsesCodec("recovery-fixture", "test-secret");
+const codec = responsesCodec("recovery-fixture");
 const prepare = async (input: unknown[]) => (await prepareBridgeInput({ model: "cn:kimi-k3.1-pro", input, store: false }, [], codec)).chat;
 const call = (id: string) => ({ type: "function_call", call_id: id, name: "lookup", arguments: "{}" });
 const image = (id: string) => ({ type: "input_image", image_url: `data:image/png;base64,${id}` });

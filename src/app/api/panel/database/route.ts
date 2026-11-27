@@ -1,5 +1,5 @@
 // 数据库监控：直连模式查询系统目录；CloudBase 模式只读少量采样行与主键。
-import { fail, ok, panelAuth, verifySuperPassword } from "@/lib/panel-auth";
+import { fail, ok, verifySuperPassword } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { dal } from "@/lib/dal";
 import { cbSelect, isCloudbaseRestEnabled } from "@/lib/cloudbase-rest";
@@ -236,8 +236,6 @@ async function readStats(refresh = false): Promise<Record<string, unknown>> {
 }
 
 export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   try {
     const refresh = new URL(req.url).searchParams.get("refresh") === "1";
     return ok(await readStats(refresh));
@@ -247,8 +245,6 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   try {
     const body = await req.json() as { action?: string; super_password?: unknown; olderThanHours?: unknown; days?: unknown; healthDays?: unknown };
     if (!verifySuperPassword(body.super_password)) return fail(403, "超级密码错误");

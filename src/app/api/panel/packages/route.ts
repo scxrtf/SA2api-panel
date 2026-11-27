@@ -3,7 +3,7 @@
 // 取数走 withFreshAuth：token 临近过期先刷、401 刷一次重试，避免「DB 快照过期 →
 // 上游 401 → 面板显示 0/0」的假象。失败行带 ok=false + reason，前端据此展示
 // 「取数失败」而不是 0，并把上游 HTML 401 归一成单行文案。
-import { panelAuth, ok } from "@/lib/panel-auth";
+import { ok } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { cachedPanelData } from "@/lib/panel-cache";
@@ -20,8 +20,6 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const refresh = new URL(req.url).searchParams.get("refresh") === "1";
   const { promise, cached } = cachedPanelData("packages", loadPackages, { refresh });
   const payload = await promise;

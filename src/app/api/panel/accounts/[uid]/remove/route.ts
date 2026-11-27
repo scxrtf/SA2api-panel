@@ -1,6 +1,6 @@
 // POST .../remove — 移除账号（出池 + 删行；凭证不再保留）。
 // 移除为权限级操作：与密钥删除同口径，超级密码二次确认。
-import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
+import { verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { runlogAccount } from "@/lib/runlog";
 import { label } from "@/lib/logfmt";
@@ -11,8 +11,6 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ uid: string }> };
 
 export async function POST(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { uid } = await ctx.params;
   let body: { super_password?: unknown } = {};
   try {

@@ -1,4 +1,4 @@
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { authShapeOf } from "@/lib/login";
@@ -18,8 +18,6 @@ import { label } from "@/lib/logfmt";
 
 // POST 接受任务（报名；幂等）。body: {task_codes: [...]}。
 export async function POST(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { uid } = await ctx.params;
   const a = await loadAuth(uid);
   if (!a) return fail(404, "account not found");

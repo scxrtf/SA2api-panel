@@ -1,4 +1,4 @@
-import { panelAuth, fail } from "@/lib/panel-auth";
+import { fail } from "@/lib/panel-auth";
 import { responsesCollectionPath } from "@/lib/responses-native";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,8 +19,6 @@ export async function POST(
   req: Request,
   ctx: { params: Promise<{ kind: string }> },
 ) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { kind } = await ctx.params;
   const suffix = KIND_PATH[kind];
   if (!suffix) return fail(404, "endpoint not found");

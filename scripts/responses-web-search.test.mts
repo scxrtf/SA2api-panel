@@ -13,7 +13,7 @@ const webSearchPreviewDated = { type: "web_search_preview_2025_03_11" };
 const hostedTypes = [webSearch, webSearchPreview, webSearchPreviewDated];
 const fn = { type: "function", name: "lookup", parameters: { type: "object" } };
 const base = { model: "cn:kimi-k3.1-pro", input: "hello", store: false };
-const codec = responsesCodec("web-search-test", "test-secret-only");
+const codec = responsesCodec("web-search-test");
 const prepare = (overrides: ResponseObject) => prepareBridgeInput({ ...base, ...overrides }, [], codec);
 const key = "gateway-web-search-fixture";
 const submit = (body: ResponseObject) => POST(new Request("http://localhost/api/v1/responses", {
@@ -124,7 +124,7 @@ test("optional hosted-only declarations allow text and replayed search is conver
 
 test("WorkBuddy forwards only callable tools and discloses omitted hosted search in JSON and SSE", async (t) => {
   assert.equal(process.env.WB2API_OFFLINE_TEST, "1", "Use npm test for the offline WorkBuddy transport fixture.");
-  withEnv(t, { WB2A_API_KEY: key, WB2_WORKSPACE_ENABLED: "0" });
+  withEnv(t, { WB2A_RESPONSES_STATE_SECRET: "web-search-test-secret", WB2_WORKSPACE_ENABLED: "0" });
   const runtime = globalThis as typeof globalThis & { prisma?: unknown };
   const original = runtime.prisma;
   const state = { uid: "web-search-bridge-fixture", disabled: false, paused: false, credits: 100n, cooldownUntil: 0n, breakerUntil: 0n, degradeUntil: 0n };
@@ -132,6 +132,7 @@ test("WorkBuddy forwards only callable tools and discloses omitted hosted search
     expiresAt: 0n, domain: "", enterpriseId: "", deviceToken: "", state, modelCooldowns: [], modelCosts: [] };
   runtime.prisma = {
     setting: { findUnique: async () => null },
+    apiKey: { findMany: async () => [] },
     account: { findMany: async () => [account], findUnique: async () => null },
     accountState: { findUnique: async () => state, upsert: async () => state },
     modelCooldown: { deleteMany: async () => ({ count: 0 }) },
@@ -173,7 +174,7 @@ test("WorkBuddy forwards only callable tools and discloses omitted hosted search
 test("native Responses still receives hosted tool choice and search replay intact", async (t) => {
   const env = {
     USE_CLOUDBASE_REST: "0",
-    WB2A_API_KEY: key,
+    WB2A_RESPONSES_STATE_SECRET: key,
     WB2A_RESPONSES_UPSTREAM: "http://127.0.0.1:9199/provider/v1",
     WB2A_RESPONSES_KEY: "upstream-web-search-fixture",
     WB2A_RESPONSES_MODELS: "native-web-search-fixture",
@@ -202,6 +203,9 @@ test("native Responses still receives hosted tool choice and search replay intac
     assert.deepEqual(JSON.parse(String(init?.body)), body);
     return Response.json(nativeReply);
   });
+  const originalPrisma = (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
+  (globalThis as typeof globalThis & { prisma?: unknown }).prisma = { apiKey: { findMany: async () => [] } };
+  t.after(() => { (globalThis as typeof globalThis & { prisma?: unknown }).prisma = originalPrisma; });
   const response = await submit(body);
   const result = await response.json();
   assert.equal(response.status, 200, JSON.stringify(result));

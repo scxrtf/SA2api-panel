@@ -1,4 +1,4 @@
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { cachedPanelData, panelCacheDel } from "@/lib/panel-cache";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,8 +13,6 @@ import {
 // 基准清单 = 内置官方快照 + 用户自建/导入基准。
 // 官方快照随站点部署在 public/aichecker/baselines，不实时打 GitHub（规避限流与部署网络问题）。
 export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const refresh = new URL(req.url).searchParams.get("refresh") === "1";
   const { promise, cached } = cachedPanelData("aichecker/baselines", () => loadBaselines(req.url), {
     refresh, shouldCache: (result) => result.status === 200,
@@ -63,8 +61,6 @@ async function loadBaselines(reqUrl: string) {
 //   1. { label, model?, distribution, samples? } —— 把一次真实鉴别结果存为基准；
 //   2. { import: <上游基准 JSON>, label?, id? } —— 导入外部导出的基准。
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   let body: {
     id?: string; label?: string; model?: string;
     distribution?: unknown; samples?: number; import?: unknown;
@@ -113,8 +109,6 @@ export async function POST(req: Request) {
 
 // DELETE 删除自建基准（官方快照不可删）。
 export async function DELETE(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const id = (new URL(req.url).searchParams.get("name") ?? "").trim();
   if (!id) return fail(400, "缺少 name 参数");
   if (!BASELINE_ID_RE.test(id)) return fail(400, "基准名称不合法");

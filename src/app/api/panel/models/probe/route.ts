@@ -1,4 +1,4 @@
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // 探测可能跨多档×重试，单请求最长 5 分钟；整体时长由 tiers×retries 决定。
@@ -22,8 +22,6 @@ import { providerEndpoint } from "@/lib/provider-endpoint";
 // 去重：已有可信结论（clamped/at_least）且未指定 force 时直接返回库内缓存，不再发上游请求。
 // 阶梯上探 × 判据与脚本一致；同步阻塞至出结论（单模型最坏 tiers×retries 次长输出）。
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   let body: { model?: string; tiers?: number[]; retries?: number; probe_id?: string; uid?: string; force?: boolean };
   try { body = await req.json(); } catch { return fail(400, "parse body failed"); }
   const model = (body.model ?? "").trim();
@@ -165,8 +163,6 @@ export async function POST(req: Request) {
 
 // DELETE 取消进行中的探测（复用测试会话的 AbortController）。
 export async function DELETE(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const id = new URL(req.url).searchParams.get("id") ?? "";
   if (!id) return fail(400, "id is required");
   cancelTest(id);

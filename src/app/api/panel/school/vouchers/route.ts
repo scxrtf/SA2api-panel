@@ -1,4 +1,4 @@
-import { panelAuth, ok } from "@/lib/panel-auth";
+import { ok } from "@/lib/panel-auth";
 import { getConfig } from "@/lib/config";
 import { listActiveAccounts } from "@/lib/taskcenter";
 import { schoolVouchers, type SchoolVoucher } from "@/lib/upstream/tasks";
@@ -7,9 +7,7 @@ export const dynamic = "force-dynamic";
 
 // GET 我的券码：逐 CN 账号查开学季 /vouchers（并发拉取，失败只标 error）。
 // global 账号无开学季，不发上游调用（对齐 schoolVouchers）。
-export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
+export async function GET() {
   const cfg = await getConfig();
   const rows = await listActiveAccounts();
   type Row = { uid: string; nickname: string; vouchers: SchoolVoucher[]; error?: string };

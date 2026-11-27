@@ -1,7 +1,7 @@
 // PATCH/DELETE /api/panel/providers/{name} — 修改 / 删除聚合供应商。
 // 权限级操作：必须携带超级密码；同事务内从所有网关密钥的 providers 白名单里
 // 剔除该供应商，避免密钥残留指向已不存在供应商的幽灵授权（重新保存时 400）。
-import { panelAuth, verifySuperPassword, ok, fail } from "@/lib/panel-auth";
+import { verifySuperPassword, ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { isCloudbaseRestEnabled } from "@/lib/cloudbase-rest";
 import { invalidateKeyRing } from "@/lib/auth-guard";
@@ -15,8 +15,6 @@ type Ctx = { params: Promise<{ name: string }> };
 // PATCH 修改供应商的可编辑字段（models 白名单 / base_url / key）。
 // key 留空 = 不更换；name 为主键不可改（改名等于新建+删旧）。
 export async function PATCH(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { name } = await ctx.params;
   let body: { models?: string; base_url?: string; key?: string; super_password?: unknown };
   try {
@@ -51,8 +49,6 @@ function stripProvider(stored: string, target: string): string {
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { name } = await ctx.params;
 
   // 超级密码来源：JSON body.super_password 或 ?super_password=（DELETE 部分客户端不便带 body）。

@@ -1,5 +1,5 @@
 // GET /api/panel/overview — 池计数 + 账号状态 + 面板元信息（Go overview 同口径）。
-import { panelAuth, ok } from "@/lib/panel-auth";
+import { ok } from "@/lib/panel-auth";
 import * as pool from "@/lib/pool";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
@@ -33,15 +33,13 @@ async function metaCounts(): Promise<{ sticky: number; provider: number; keys: n
   return { sticky, provider, keys };
 }
 
-export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
+export async function GET() {
   const cfg = await getConfig();
   const [snapshot, meta] = await Promise.all([pool.overviewSnapshot(cfg), metaCounts()]);
   return ok({
     version: "next-0.1",
     uptime_sec: Math.floor((Date.now() - started) / 1000),
-    auth_required: cfg.api_key !== "",
+    auth_required: false,
     redis_mode: "noop",
     sticky_sessions: meta.sticky,
     ...snapshot.count,

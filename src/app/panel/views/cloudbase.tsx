@@ -24,6 +24,9 @@ interface Stats {
     resourcePoints?: {
       used: number | null; total: number | null; remaining: number | null; percent: number | null;
       startDate: string | null; endDate: string | null;
+      planUsed: number | null; planTotal: number | null;
+      packageUsed: number | null; packageTotal: number | null;
+      packages: { resourceId: string; packageId: string; total: number; remaining: number; expireTime: string | null }[];
       source: "tcb DescribeCreditsUsage"; error: string | null;
     };
     qpsSeries?: { at: string; value: number }[];
@@ -321,7 +324,7 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
             <div className="cb-kpi-side">
               {isCb ? <>
                 <span className="v">{points?.used != null ? <>{fmtNum(points.used)}<span className="cb-unit">{points.total != null ? `/ ${points.total >= 10_000 ? `${fmtNum(points.total / 10_000)}万` : fmtNum(points.total)}点` : "点"}</span></> : "—"}</span>
-                <span className="s"><span>数据库使用大小 {db && db.sizeGb > 0 ? `${db.sizeGb.toFixed(3)} GB` : "—"}</span><span title={points?.error ?? undefined}>行体积采样估算</span></span>
+                <span className="s"><span>剩余 {fmtNum(points?.remaining)} 点 · {points?.packages.length ?? 0} 个资源包</span><span title={points?.error ?? undefined}>套餐 {fmtNum(points?.planTotal)} + 资源包 {fmtNum(points?.packageTotal)} 点</span></span>
               </> : <>
                 <span className="v">{db && db.sizeGb > 0 ? <>{db.sizeGb.toFixed(3)}<span className="cb-unit">GB</span></> : "—"}</span>
                 <span className="s"><span>上限 {db?.limitGb ?? "…"} GB</span><span>pg_database_size 实测</span></span>
@@ -357,6 +360,15 @@ export function CloudbaseView({ flash }: { flash: Flash }) {
       <div className="cb-qps-summary"><div><span>最新</span><b>{platform?.qps == null ? "—" : fmtNum(platform.qps)}<em> QPS</em></b></div><div><span>小时峰值</span><b>{qpsPeak == null ? "—" : fmtNum(qpsPeak)}<em> QPS</em></b></div><div><span>采样均值</span><b>{qpsAverage == null ? "—" : fmtNum(qpsAverage)}<em> QPS</em></b></div><div><span>配额</span><b>{platform?.qpsQuota == null ? "—" : fmtNum(platform.qpsQuota)}<em> QPS</em></b></div></div>
       <QpsLineChart points={qpsPoints} quota={platform?.qpsQuota ?? null} />
       <div className="dim cb-qps-note">{platform?.available ? `最新采样 ${qpsAt} · 指标为每个 5 分钟窗口内的峰值` : platform?.error || "配置 CAM 密钥后采集"}</div>
+    </Box>}
+    {isCb && points && <Box title="资源点额度" hint={`账期 ${points.startDate ?? "—"} 至 ${points.endDate ?? "—"}`} pad>
+      <div className="cb-ret-grid">
+        <div className="cb-ret"><span className="k">套餐内用量</span><span className="v">{fmtNum(points.planUsed)}</span><span className="s">总额度 {fmtNum(points.planTotal)} 点 · {platform?.packageName ?? "当前套餐"}</span></div>
+        <div className="cb-ret"><span className="k">资源包用量</span><span className="v">{fmtNum(points.packageUsed)}</span><span className="s">总额度 {fmtNum(points.packageTotal)} 点 · 待抵扣 {fmtNum(points.packages.reduce((sum, item) => sum + item.remaining, 0))} 点</span></div>
+      </div>
+      {points.packages.length > 0 && <div style={{ overflowX: "auto", marginTop: 16 }}><table className="tbl"><thead><tr><th>资源包</th><th>额度</th><th>剩余 / 待抵扣</th><th>到期时间</th></tr></thead><tbody>
+        {points.packages.map((item) => <tr key={item.resourceId}><td className="mono">{item.resourceId}<div className="dim">{item.packageId}</div></td><td>{fmtNum(item.total)} 点</td><td>{fmtNum(item.remaining)} 点</td><td>{item.expireTime ?? "—"}</td></tr>)}
+      </tbody></table></div>}
     </Box>}
     <Box title="请求日志存储" hint={`整行保留 ${stats?.retention.days ?? 7} 天 · 诊断详情 ${stats?.retention.detailHours ?? 24} 小时`}
       extra={<div style={{ display: "flex", gap: 8 }}>

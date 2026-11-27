@@ -1,20 +1,6 @@
 // 面板前端公共工具：统一请求封装。
 "use client";
 
-import { panelFetch } from "./local-access";
-
-const KEY = "wb2a_panel_key";
-
-export function getKey(): string {
-  try { return localStorage.getItem(KEY) ?? ""; } catch { return ""; }
-}
-export function setKey(k: string) {
-  try { localStorage.setItem(KEY, k); } catch { /* 忽略 */ }
-  invalidateCache();
-}
-
-export const PANEL_AUTH_REQUIRED_EVENT = "wb2a:panel-auth-required";
-
 export class PanelRequestError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -35,11 +21,9 @@ export async function req<T = Record<string, unknown>>(
   path: string,
   opts: { method?: string; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<T & ApiResp<T>> {
-  const key = getKey();
   const headers = new Headers();
-  if (key) headers.set("Authorization", "Bearer " + key);
   if (opts.body !== undefined) headers.set("Content-Type", "application/json");
-  const r = await panelFetch("/api/panel/" + path, {
+  const r = await fetch("/api/panel/" + path, {
     method: opts.method ?? "GET",
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
@@ -53,10 +37,6 @@ export async function req<T = Record<string, unknown>>(
       ? value as ApiResp<T> : { ok: false, error: "HTTP " + r.status };
   } catch { j = { ok: false, error: "HTTP " + r.status }; }
   if (!r.ok || !j.ok) {
-    if (r.status === 401 && !opts.signal?.aborted && key === getKey() && typeof window !== "undefined") {
-      invalidateCache();
-      window.dispatchEvent(new Event(PANEL_AUTH_REQUIRED_EVENT));
-    }
     throw new PanelRequestError(j.error ?? "HTTP " + r.status, r.status);
   }
   return j as T & ApiResp<T>;

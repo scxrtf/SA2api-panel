@@ -1,5 +1,5 @@
 // POST .../balance — 单号余额刷新（更新余额快照，不触碰冷却状态）。
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import * as pool from "@/lib/pool";
@@ -14,8 +14,6 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ uid: string }> };
 
 export async function POST(req: Request, ctx: Ctx) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const { uid } = await ctx.params;
   const row = await prisma.account.findUnique({ where: { uid } });
   if (!row) return fail(404, "account not found");

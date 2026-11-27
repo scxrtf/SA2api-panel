@@ -1,6 +1,5 @@
 import { extractToken, identifyKeyIdentity, providerAllowed, type KeyIdentity } from "@/lib/auth-guard";
 import { handleChat, resolveModel } from "@/lib/chat";
-import { getConfig } from "@/lib/config";
 import { observeGateway } from "@/lib/workspace/gateway-observer";
 import {
   invalidResponseRequest, isResponseId, missingResponse, readResponseJson, responseArray, responseHeaders, responseObject,
@@ -43,7 +42,7 @@ function listInputItems(items: Obj[], query: URLSearchParams) {
     has_more: cursor + 1 + data.length < sorted.length }, { headers: responseHeaders() });
 }
 
-async function routeStored(req: Request, operation: ResponsesOperation, id: string, owner: string, identity: KeyIdentity, mainKey: string) {
+async function routeStored(req: Request, operation: ResponsesOperation, id: string, owner: string, identity: KeyIdentity) {
   if (!isResponseId(id)) invalidResponseRequest("Invalid response ID.", "response_id");
   const stored = await fetchStoredResponse(owner, id);
   if (!stored) missingResponse(id);
@@ -51,7 +50,7 @@ async function routeStored(req: Request, operation: ResponsesOperation, id: stri
   if (operation === "retrieve") requireNativeQueryStream(query);
   if (stored.backend !== bridgeBackend) {
     const cfg = nativeResponsesConfig();
-    if (!mainKey || !cfg || cfg.backend !== stored.backend || !cfg.models.has(stored.model) || !nativeAllowed(cfg, identity)) missingResponse(id);
+    if (!cfg || cfg.backend !== stored.backend || !cfg.models.has(stored.model) || !nativeAllowed(cfg, identity)) missingResponse(id);
     const response = await relayNativeResponses(req, cfg, operation, owner, stored.model, undefined, id);
     if (operation === "delete" && (response.ok || response.status === 404)) await forgetResponse(owner, id);
     return response;
@@ -145,13 +144,12 @@ function validateCommon(body: Obj) {
 }
 
 async function dispatch(req: Request, operation: ResponsesOperation, id?: string) {
-  const app = await getConfig();
   const identity = await identifyKeyIdentity(req);
   if (!identity) throw new ResponsesError(401, "invalid_api_key", "Invalid or missing API key.");
   const token = extractToken(req);
   // Scope by the credential rather than the display name, which can be reused or changed.
   const owner = responseDigest("gateway-key", token);
-  if (id !== undefined) return routeStored(req, operation, id, owner, identity, app.api_key);
+  if (id !== undefined) return routeStored(req, operation, id, owner, identity);
   if (operation !== "responses" && operation !== "compact" && operation !== "input_tokens") {
     throw new ResponsesError(405, "invalid_request", "This method requires a response ID.");
   }
@@ -167,8 +165,6 @@ async function dispatch(req: Request, operation: ResponsesOperation, id?: string
   if (typeof model !== "string" || !model.trim()) invalidResponseRequest("A model is required.", "model");
   const upstreamModel = nativeModel(cfg, model);
   if (cfg && upstreamModel) {
-    if (!app.api_key) throw new ResponsesError(503, "responses_auth_not_configured", "Configure gateway authentication before enabling native Responses.");
-    if (!token) throw new ResponsesError(401, "invalid_api_key", "Invalid or missing API key.");
     if (!nativeAllowed(cfg, identity)) throw new ResponsesError(403, "provider_not_allowed", "This key does not have permission to use the Responses provider.");
     if (previous && (previous.backend !== cfg.backend || !cfg.models.has(previous.model))) missingResponse(previousId, true);
     nativeResponsesInput(body, identity);
@@ -183,7 +179,7 @@ async function dispatch(req: Request, operation: ResponsesOperation, id?: string
     input_tokens: estimateResponseTokens(body.input, responseText(body.instructions), body.tools) }, { headers: responseHeaders() });
 
   const local = { ...body, model };
-  const codec = responsesCodec(owner, app.api_key);
+  const codec = responsesCodec(owner);
   const last = previous && readBridgeSnapshot(previous.snapshot);
   const history = last ? [...last.input, ...responseArray(last.response.output).map(responseObject).filter((item) =>
     item.status !== "incomplete" || (item.type !== "function_call" && item.type !== "custom_tool_call"))] : [];

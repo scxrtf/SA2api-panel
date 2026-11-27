@@ -77,8 +77,8 @@ const blobPrefix = "wb2a1_";
 
 // Self-contained chat-bridge state; store:false never needs a database write.
 // The owner and item purpose are authenticated so blobs cannot cross keys or item types.
-export function responsesCodec(owner: string, mainKey: string) {
-  const secret = process.env.WB2A_RESPONSES_STATE_SECRET?.trim() || mainKey ||
+export function responsesCodec(owner: string) {
+  const secret = process.env.WB2A_RESPONSES_STATE_SECRET?.trim() ||
     (runtime.wb2aResponsesCipherKey ??= randomBytes(32));
   const key = createHmac("sha256", secret).update("wb2a-responses-state-v1\0" + owner).digest();
   return {

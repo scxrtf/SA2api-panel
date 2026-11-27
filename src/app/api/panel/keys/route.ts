@@ -1,6 +1,6 @@
 // GET/POST /api/panel/keys — 网关密钥环管理（列表只回掩码；POST 新建返回原文一次）。
 import { randomBytes } from "crypto";
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { invalidateKeyRing, mask, parseProviderAccess } from "@/lib/auth-guard";
 import { prisma } from "@/lib/db";
 import { getOrCreateMachineId, machineKeyAuthorized } from "@/lib/machine-key";
@@ -9,9 +9,7 @@ import { isJSONObject } from "@/lib/request-validation";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
+export async function GET() {
   const rows = await prisma.apiKey.findMany({
     orderBy: { createdAt: "asc" },
     select: { name: true, key: true, providers: true, createdAt: true },
@@ -27,8 +25,6 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const machine = await getOrCreateMachineId();
   if (!(await machineKeyAuthorized(machine.id))) {
     return fail(403, "当前机器尚未授权：请先添加一个账号，或输入密码完成机器授权");

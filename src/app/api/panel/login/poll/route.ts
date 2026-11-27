@@ -1,5 +1,5 @@
 // GET /api/panel/login/poll — 轮询登录态；完成后凭证落库 + revive + 顺带签到/余额刷新。
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import * as pool from "@/lib/pool";
@@ -15,8 +15,6 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const state = new URL(req.url).searchParams.get("state") ?? "";
   if (!state) return fail(400, "missing state");
   const sess = await prisma.loginSession.findUnique({ where: { state } });

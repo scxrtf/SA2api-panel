@@ -1,4 +1,4 @@
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -16,8 +16,6 @@ import { providerEndpoint } from "@/lib/provider-endpoint";
 // POST 执行一次连通性测试（同步阻塞至完成/超时/取消，最长 45s；对齐 modelTest）。
 // body: {model:"cn:glm-5.2"|"artex:xxx"|"glm-5.2", test_id?:uuid, uid?:string}
 export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   let body: { model?: string; test_id?: string; uid?: string };
   try { body = await req.json(); } catch { return fail(400, "parse body failed"); }
   const model = (body.model ?? "").trim();

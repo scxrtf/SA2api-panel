@@ -17,7 +17,7 @@ mock.module(new URL("../src/lib/modelhealth.ts", import.meta.url).href, {
   namedExports: { listModelHealth: async () => { healthReads++; return {}; } },
 });
 mock.module(new URL("../src/lib/panel-auth.ts", import.meta.url).href, {
-  namedExports: { panelAuth: async () => null, ok: (data: Record<string, unknown>) => Response.json(data) },
+  namedExports: { ok: (data: Record<string, unknown>) => Response.json(data) },
 });
 
 const { GET } = await import("../src/app/api/panel/model_probes/route.ts");

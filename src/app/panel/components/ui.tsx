@@ -23,7 +23,7 @@ export interface StatusRow {
   };
 }
 export interface Overview {
-  version: string; uptime_sec: number; auth_required: boolean;
+  version: string; uptime_sec: number;
   total: number; healthy: number; cooling: number; disabled: number; paused: number;
   sticky_sessions: number; accounts: StatusRow[];
   // 模型锁池（Go ModelLockRow）：服务端聚合的 (域,模型) 限流清单，无锁为 null。

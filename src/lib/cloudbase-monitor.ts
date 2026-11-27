@@ -1,5 +1,5 @@
 // CloudBase 环境级监控：官方 TCB API + CAM TC3-HMAC-SHA256。
-// 只返回本环境确实提供的指标；资源点使用控制台同口径的套餐内抵扣量。
+// 只返回本环境确实提供的指标；资源点同时统计套餐与所有有效资源包。
 import { createHash, createHmac } from "node:crypto";
 
 type CurveResponse = {
@@ -28,7 +28,33 @@ type AccountCircleResponse = {
 type CreditsUsageResponse = {
   Error?: { Code?: string; Message?: string };
   DeductValue?: number;
+  PackageDeductValue?: number;
+  ReportValue?: number;
 };
+
+type ResourcePackagesResponse = {
+  EnvPostpayPackageInfoList?: {
+    PostpayPackageId?: string;
+    ResourceId?: string;
+    ResourceType?: string;
+    Status?: number;
+    Quota?: number;
+    LeftValue?: number;
+    ExpireTime?: string;
+  }[];
+};
+
+type EnvPlansResponse = {
+  PlanList?: { PackageId?: string; ResourceLimit?: string }[];
+};
+
+export interface CloudbaseResourcePackage {
+  resourceId: string;
+  packageId: string;
+  total: number;
+  remaining: number;
+  expireTime: string | null;
+}
 
 export interface CloudbaseResourcePoints {
   used: number | null;
@@ -38,6 +64,11 @@ export interface CloudbaseResourcePoints {
   startDate: string | null;
   endDate: string | null;
   source: "tcb DescribeCreditsUsage";
+  planUsed: number | null;
+  planTotal: number | null;
+  packageUsed: number | null;
+  packageTotal: number | null;
+  packages: CloudbaseResourcePackage[];
   error: string | null;
 }
 
@@ -128,6 +159,25 @@ function localTime(date: Date): string {
   return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
 }
 
+function finiteNonNegative(value: number | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function planCredits(response: EnvPlansResponse, packageId: string | undefined): number | null {
+  const plan = response.PlanList?.find((item) => item.PackageId === packageId);
+  if (!plan?.ResourceLimit) return null;
+  try {
+    const raw: unknown = JSON.parse(plan.ResourceLimit);
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+    const credits = (raw as Record<string, unknown>).Credits;
+    if (typeof credits !== "object" || credits === null || Array.isArray(credits)) return null;
+    const maxSize = (credits as Record<string, unknown>).MaxSize;
+    return finiteNonNegative(typeof maxSize === "number" ? maxSize : Number(maxSize));
+  } catch {
+    return null;
+  }
+}
+
 export async function getCloudbasePlatformStats(): Promise<CloudbasePlatformStats | null> {
   if (!process.env.CLOUDBASE_SECRET_ID || !process.env.CLOUDBASE_SECRET_KEY) return null;
   const envId = process.env.CLOUDBASE_ENV_ID ?? "";
@@ -147,7 +197,8 @@ export async function getCloudbasePlatformStats(): Promise<CloudbasePlatformStat
     postgresTenantType: null,
     resourcePoints: {
       used: null, total: null, remaining: null, percent: null,
-      startDate: null, endDate: null, source: "tcb DescribeCreditsUsage", error: null,
+      startDate: null, endDate: null, source: "tcb DescribeCreditsUsage",
+      planUsed: null, planTotal: null, packageUsed: null, packageTotal: null, packages: [], error: null,
     },
     error: null,
   };
@@ -186,15 +237,37 @@ export async function getCloudbasePlatformStats(): Promise<CloudbasePlatformStat
     result.resourcePoints.startDate = startDate ?? null;
     result.resourcePoints.endDate = endDate ?? null;
     if (!startDate || !endDate) throw new Error("DescribeEnvAccountCircle: 当前账期日期缺失");
-    const usage = await tcbApi<CreditsUsageResponse>("DescribeCreditsUsage", { EnvId: envId, StartDate: startDate, EndDate: endDate });
-    if (typeof usage.DeductValue !== "number" || !Number.isFinite(usage.DeductValue)) {
-      throw new Error("DescribeCreditsUsage: DeductValue 缺失或不是有限数");
-    }
+    const [usage, resources] = await Promise.all([
+      tcbApi<CreditsUsageResponse>("DescribeCreditsUsage", { EnvId: envId, StartDate: startDate, EndDate: endDate }),
+      tcbApi<ResourcePackagesResponse>("DescribeEnvPostpayPackage", { EnvId: envId }),
+    ]);
+    const planUsed = finiteNonNegative(usage.DeductValue);
+    if (planUsed === null) throw new Error("DescribeCreditsUsage: DeductValue 缺失或不是有限数");
     const packageId = env.EnvInfo?.EnvBaseInfo?.PackageId ?? env.EnvInfo?.BillingInfo?.PackageId ?? env.EnvInfo?.EnvBaseInfo?.PackageName;
-    const total = packageId ? PACKAGE_CREDITS[packageId] ?? null : null;
-    const used = usage.DeductValue;
+    // 从实时套餐接口取配额；旧映射仅保留给接口升级期间的兼容回退。
+    const plans = await tcbApi<EnvPlansResponse>("DescribeEnvPlans", packageId ? { PackageId: packageId } : {});
+    const planTotal = planCredits(plans, packageId) ?? (packageId ? PACKAGE_CREDITS[packageId] ?? null : null);
+    const packages = (resources.EnvPostpayPackageInfoList ?? []).flatMap((item) => {
+      if (item.ResourceType !== "CREDITS" || item.Status === 3 || item.Status === 4
+        || !item.PostpayPackageId?.startsWith("pkg_tcb_credits_") || !item.ResourceId) return [];
+      const total = finiteNonNegative(item.Quota);
+      const remaining = finiteNonNegative(item.LeftValue);
+      if (total === null || remaining === null) return [];
+      return [{ resourceId: item.ResourceId, packageId: item.PostpayPackageId,
+        total, remaining, expireTime: item.ExpireTime ?? null }];
+    });
+    const packageTotal = packages.reduce((sum, item) => sum + item.total, 0);
+    const packageUsed = finiteNonNegative(usage.PackageDeductValue)
+      ?? packages.reduce((sum, item) => sum + item.total - item.remaining, 0);
+    const total = planTotal === null ? null : planTotal + packageTotal;
+    const used = planUsed + packageUsed;
     result.resourcePoints.used = used;
     result.resourcePoints.total = total;
+    result.resourcePoints.planUsed = planUsed;
+    result.resourcePoints.planTotal = planTotal;
+    result.resourcePoints.packageUsed = packageUsed;
+    result.resourcePoints.packageTotal = packageTotal;
+    result.resourcePoints.packages = packages;
     if (total !== null) {
       result.resourcePoints.remaining = Math.max(0, total - used);
       result.resourcePoints.percent = used / total * 100;

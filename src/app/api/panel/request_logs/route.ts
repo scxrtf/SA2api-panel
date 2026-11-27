@@ -1,6 +1,6 @@
 // GET /api/panel/request_logs — RequestLog 分页/过滤（limit 默认 50 上限 500）。
 import { cbRpc, isCloudbaseRestEnabled } from "@/lib/cloudbase-rest";
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import type { RequestLogSession } from "@/lib/request-log-sessions";
 
@@ -39,8 +39,6 @@ const listSelect = {
 } as const;
 
 export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const q = new URL(req.url).searchParams;
   let limit = parseInt(q.get("limit") ?? "", 10);
   if (!Number.isFinite(limit) || limit <= 0) limit = 50;

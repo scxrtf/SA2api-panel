@@ -1,4 +1,4 @@
-import { panelAuth, ok } from "@/lib/panel-auth";
+import { ok } from "@/lib/panel-auth";
 import { runTravelNow } from "@/lib/cron";
 import { runlog } from "@/lib/runlog";
 export const runtime = "nodejs";
@@ -6,9 +6,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 // POST 手动触发全量旅行巡检（同步等待完成，返回动作计数；对齐 travelAll + RunTravelNow）。
-export async function POST(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
+export async function POST() {
   runlog("panel: 手动全量旅行巡检已触发");
   const r = await runTravelNow();
   return ok({ ...r });

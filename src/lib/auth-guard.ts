@@ -1,9 +1,6 @@
-// 网关与面板共用的 Bearer 鉴权原语（移植 internal/httpauth）。
-// SHA-256 摘要 + 常量时间比较。主密钥为空 = 未启用鉴权，全环境放行
-// （config.ts 注释语义；公网部署请在环境变量配置 WB2A_API_KEY）。
+// 网关子密钥鉴权（移植 internal/httpauth）。SHA-256 摘要 + 常量时间比较。
 import { createHash, timingSafeEqual } from "crypto";
 import { prisma } from "./db";
-import { getConfig } from "./config";
 
 function digest(s: string): Buffer {
   return createHash("sha256").update(s, "utf8").digest();
@@ -63,15 +60,8 @@ export function extractToken(req: Request): string {
   return "";
 }
 
-// verifyBearer 校验主密钥。空 key = 未启用鉴权，恒放行。
-export function verifyBearer(req: Request, key: string): boolean {
-  if (!key) return true;
-  return constTimeEq(extractToken(req), key);
-}
-
-// KeyIdentity 请求凭证的归属与供应商授权面。unrestricted 仅用于主密钥 / 未启用
-// 鉴权的部署；子密钥一律按 providers 白名单判定，未授权任何供应商 = 全拒绝
-// （DB 异常同样 fail closed）。
+// KeyIdentity 请求凭证的归属与供应商授权面。空密钥环时不限制；
+// 子密钥按 providers 白名单判定，未授权任何供应商 = 全拒绝（DB 异常同样 fail closed）。
 export interface KeyIdentity {
   name: string;
   providers: string;
@@ -99,15 +89,10 @@ export function providerAllowed(providersRaw: string, provider: string): boolean
   return list.includes("*") || list.includes(provider);
 }
 
-// identifyKeyIdentity 识别请求凭证：主密钥 / 未启用鉴权 → unrestricted；
-// 命中 ApiKey 环 → 返回该行的 name + providers；无法识别或 DB 异常 → null。
+// identifyKeyIdentity：空密钥环 → unrestricted；命中 ApiKey 环 → name + providers；
+// 无法识别或 DB 异常 → null。网站面板不使用此鉴权。
 export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | null> {
   const tok = extractToken(req);
-  const cfg = await getConfig();
-  // 主密钥不依赖子密钥表可用性，也避免每个主密钥请求多查一次数据库。
-  if (cfg.api_key && tok && constTimeEq(tok, cfg.api_key)) {
-    return { name: "", providers: "*", unrestricted: true };
-  }
   let rows: KeyRingRow[] = [];
   let dbOk = true;
   try {
@@ -115,8 +100,8 @@ export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | n
   } catch {
     dbOk = false;
   }
-  // 未启用鉴权（主密钥为空且 key 环为空）：全部放行。
-  if (dbOk && !cfg.api_key && rows.length === 0) {
+  // 空密钥环 = 免密钥模式；未带凭证时可识别为空环用户。
+  if (dbOk && rows.length === 0) {
     return { name: "", providers: "*", unrestricted: true };
   }
   if (!tok) return null;
@@ -129,7 +114,7 @@ export async function identifyKeyIdentity(req: Request): Promise<KeyIdentity | n
 }
 
 // providerAllowlist 把身份折算成供应商白名单：
-//   null       = 不限制（主密钥 / 未启用鉴权 / 子密钥显式 "*"）
+//   null       = 不限制（空密钥环 / 子密钥显式 "*"）
 //   空集合     = 禁止所有供应商（子密钥未授权任何供应商 / 身份缺失，fail closed）
 export function providerAllowlist(id: KeyIdentity | null): Set<string> | null {
   if (!id) return new Set();
@@ -147,7 +132,7 @@ export async function identifyKeyName(req: Request): Promise<string> {
   return id?.name ?? "";
 }
 
-// verifyAny 校验凭证是否命中 主密钥 ∪ ApiKey 环 中的任意一把。
+// verifyAny 校验凭证是否命中 ApiKey 环；密钥环为空时恒 true。
 // 全部为空 = 未启用鉴权，恒 true（与 Go VerifyAny 同语义）。
 export async function verifyAny(req: Request): Promise<boolean> {
   return (await identifyKeyIdentity(req)) !== null;

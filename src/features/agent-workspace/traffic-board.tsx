@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsIndicator, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fmtDateTime, setKey, usePanelRefresh } from "@/app/panel/lib";
+import { fmtDateTime, usePanelRefresh } from "@/app/panel/lib";
 import { applyEvent, blankSnapshot, sessionColor, statusName, type Activity, type GatewaySource, type GraphNode, type Session, type Snapshot, type WorkspaceEvent } from "@/lib/workspace/contracts";
 import { anchorId, useWorkspaceLights } from "./light";
 import { readWorkspaceStream, requestWorkspace, WorkspaceHttpError } from "./transport";
@@ -63,8 +63,6 @@ export function TrafficBoard({ enabled, active }: { enabled: boolean; active: bo
   const [connectState, setConnectState] = useState<"loading" | "live" | "reconnecting" | "error">("loading");
   const [attempt, retry] = useState(0);
   const [message, setMessage] = useState("");
-  const [requiresKey, setRequiresKey] = useState(false);
-  const [password, setPassword] = useState("");
   const [requested, setRequested] = useState<string>();
   const [selected, setSelected] = useState<string>();
   const [selectedNode, setSelectedNode] = useState<string>();
@@ -78,7 +76,7 @@ export function TrafficBoard({ enabled, active }: { enabled: boolean; active: bo
   const graphScroller = useRef<HTMLDivElement>(null);
   const lastSession = useRef<string | undefined>(undefined);
   const follow = useRef(true), followGraph = useRef(true);
-  const available = enabled && !requiresKey && connectState !== "error";
+  const available = enabled && connectState !== "error";
   useWorkspaceLights(overlay, flights, !active, active && available);
   usePanelRefresh(() => retry((n) => n + 1));
 
@@ -113,12 +111,10 @@ export function TrafficBoard({ enabled, active }: { enabled: boolean; active: bo
         if (currentId !== lastSession.current) setSelectedNode(undefined);
         lastSession.current = currentId || undefined;
         put(initial);
-        setRequiresKey(false);
         setMessage("");
         setFlights([]);
       } catch (error) {
         if (cancel.signal.aborted) return;
-        setRequiresKey(error instanceof WorkspaceHttpError && error.status === 401);
         setMessage(fail(error));
         setConnectState("error");
         return;
@@ -158,7 +154,6 @@ export function TrafficBoard({ enabled, active }: { enabled: boolean; active: bo
           if (cancel.signal.aborted) return;
           if (error instanceof WorkspaceHttpError && error.status === 409) { retry((i) => i + 1); return; }
           if (error instanceof WorkspaceHttpError && [401, 404].includes(error.status)) {
-            setRequiresKey(error.status === 401);
             setMessage(fail(error));
             setConnectState("error");
             return;
@@ -236,7 +231,7 @@ export function TrafficBoard({ enabled, active }: { enabled: boolean; active: bo
         {available && <span className="aw-muted aw-header-count">{snapshot.sessions.length} 条会话</span>}
       </div>
       <div className="aw-header-actions">
-        {enabled && !requiresKey && <Badge variant="outline"><Radio size={12} className={connectState === "live" ? "aw-online" : undefined} />
+        {enabled && <Badge variant="outline"><Radio size={12} className={connectState === "live" ? "aw-online" : undefined} />
           {connectState === "live" ? "实时观测" : connectState === "reconnecting" ? "正在重连" : connectState === "loading" ? "读取中" : "未连接"}
         </Badge>}
       </div>
@@ -244,15 +239,9 @@ export function TrafficBoard({ enabled, active }: { enabled: boolean; active: bo
   );
   const gate = !available && (
     <section className="aw-empty aw-gate">
-      <h2>{!enabled ? "会话观测未启用" : requiresKey ? "验证面板权限" : "连接失败"}</h2>
+      <h2>{!enabled ? "会话观测未启用" : "连接失败"}</h2>
       <p>{!enabled ? "在服务端设置 WB2_WORKSPACE_ENABLED=1。" : message}</p>
-      {requiresKey ? <form className="aw-actions" onSubmit={(event) => {
-        event.preventDefault();
-        if (password.trim()) { setKey(password.trim()); setPassword(""); retry((n) => n + 1); }
-      }}>
-        <Input aria-label="面板主密钥" type="password" value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} />
-        <Button type="submit" disabled={!password.trim()}>进入面板</Button>
-      </form> : enabled ? <Button variant="outline" onClick={() => retry((n) => n + 1)}>重新连接</Button> : null}
+      {enabled ? <Button variant="outline" onClick={() => retry((n) => n + 1)}>重新连接</Button> : null}
     </section>
   );
 

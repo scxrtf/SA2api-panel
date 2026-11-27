@@ -1,5 +1,5 @@
 // GET /api/panel/request_logs/[id] — 按需读取诊断详情与对话正文（受裁剪上限约束）。
-import { fail, ok, panelAuth, verifySuperPassword } from "@/lib/panel-auth";
+import { fail, ok, verifySuperPassword } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -92,8 +92,6 @@ export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const search = new URL(req.url).searchParams;
   const includeDialog = search.get("dialog") === "1";
   // 普通诊断详情直接可读；仅对话正文需要超级密码。

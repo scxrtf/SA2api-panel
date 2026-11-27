@@ -1,12 +1,12 @@
-import { panelAuth } from "@/lib/panel-auth";
 import { enabled, WorkspaceError } from "./settings";
 
 export const json = (value: unknown, status = 200) => Response.json(value, {
   status, headers: { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" },
 });
 export async function workspaceGuard(req: Request) {
+  void req;
   if (!enabled()) return json({ error: "工作区尚未在服务端启用。" }, 404);
-  return panelAuth(req);
+  return null;
 }
 export function workspaceError(error: unknown) {
   if (error instanceof WorkspaceError) return json({ error: error.message }, error.status);

@@ -2,7 +2,6 @@
 # 变量（需在 Railway 服务 Variables 里手动设置）：
 #   DATABASE_URL  — Prisma Postgres 直连串（db.prisma.io:5432，sslmode=require）
 #   DIRECT_URL    — 同 DATABASE_URL（迁移与查询共用一条直连）
-#   WB2A_API_KEY  — 面板主密钥（公网必须设置；面板 / /api/v1/* / cron 都靠它鉴权）
 
 [build]
 # 用仓库自带 Dockerfile，避免 Nixpacks 在缓存的 node_modules 上执行

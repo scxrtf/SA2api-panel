@@ -1,5 +1,5 @@
 // GET /api/panel/models — 池账号实时模型目录 + 供应商目录（某域失败独立容错）。
-import { panelAuth, ok, fail } from "@/lib/panel-auth";
+import { ok, fail } from "@/lib/panel-auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import {
@@ -58,8 +58,6 @@ function panelModelEntry(realm: string, mi: ModelInfoFull): Record<string, unkno
 }
 
 export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const refresh = new URL(req.url).searchParams.get("refresh") === "1";
   const { promise, cached } = cachedPanelData("models", loadModels, {
     refresh, shouldCache: (result) => result.status === 200,

@@ -1,4 +1,4 @@
-import { panelAuth, fail, jsonify } from "@/lib/panel-auth";
+import { fail, jsonify } from "@/lib/panel-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -8,8 +8,6 @@ import { loadBaseline } from "@/lib/aichecker-baseline-loader";
 // 返回单个基准：本地快照 → 自建/导入基准 → 上游按需回源。
 // 直接读文件，不走站点自身 HTTP，避免 Railway 回环 fetch 失败。
 export async function GET(req: Request) {
-  const auth = await panelAuth(req);
-  if (auth) return auth;
   const name = (new URL(req.url).searchParams.get("name") ?? "").trim();
   if (!name) return fail(400, "缺少 name 参数");
   if (!BASELINE_ID_RE.test(name)) return fail(400, "基准名称不合法");
